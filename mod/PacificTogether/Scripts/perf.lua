@@ -58,6 +58,62 @@ function M.toggle()
     return on and "Performance mode on" or "Performance mode off"
 end
 
+-- Performance check (F9 item 6; owner request 2026-11-01: a friend's RTX 3050 laptop ran 30 FPS on low): 5 s of frames as set,
+-- 5 s at half the render resolution, then the resolution back. Much faster at half: the GPU limits (DLSS, mirrors, fog help);
+-- about the same: the CPU limits (resolution does not help). The result and the settings that matter go on screen and to the log.
+local check
+local function realNow()
+    local s, p = {}, {}
+    UEHelpers.GetGameplayStatics():GetAccurateRealTime(s, p)
+    return s.Seconds + p.PartialSeconds
+end
+local function report(fps1, fps2, sp)
+    local ksl, gus = UEHelpers.GetKismetSystemLibrary(), FindFirstOf("DrivingGameUserSettings")
+    local s = {}
+    pcall(function()
+        local r = gus:GetScreenResolution()
+        s[#s + 1] = string.format("%dx%d at %.0f%%", r.X, r.Y, sp)
+        s[#s + 1] = "DLSS " .. tostring(gus.DLSSMode)
+        s[#s + 1] = "cap " .. tostring(gus.MaxFPS) .. (gus:IsVSyncEnabled() and " vsync" or "")
+        s[#s + 1] = "quality " .. tostring(gus:GetOverallScalabilityLevel())
+        s[#s + 1] = string.format("mirrors %.2f/%d", gus.MirrorResolutionScale, gus.MirrorDrawDistance)
+    end)
+    local gpu = fps2 > fps1 * 1.25
+    local verdict = gpu and "GPU-limited: DLSS or a lower render scale will help" or "CPU-limited: resolution will not help"
+    local text = string.format("Performance check: %.0f FPS, %.0f at half resolution. %s. %s", fps1, fps2, verdict, table.concat(s, ", "))
+    log("PT|perf check %s", text)
+    return text
+end
+function M.check(done)
+    if check then return "Performance check already running" end
+    check = { phase = 1, frames = 0, t0 = realNow(), done = done }
+    log("PT|perf check started")
+    return "Performance check: 10 s, keep playing as usual"
+end
+LoopInGameThreadWithDelay(1, function()
+    local c = check
+    if not c then return end
+    c.frames = c.frames + 1
+    local t = realNow() - c.t0
+    if t < 5 then return end
+    local ok, err = pcall(function()
+        if c.phase == 1 then
+            c.fps1 = c.frames / t
+            c.sp = UEHelpers.GetKismetSystemLibrary():GetConsoleVariableFloatValue("r.ScreenPercentage")
+            if not c.sp or c.sp <= 0 then c.sp = 100 end
+            run("r.ScreenPercentage 50")
+            c.phase, c.frames, c.t0 = 2, 0, realNow()
+            return
+        end
+        check = nil
+        run("r.ScreenPercentage " .. string.format("%.0f", c.sp))
+        local text = report(c.fps1, c.frames / t, c.sp)
+        if c.done then c.done(text) end
+    end)
+    if not ok then check = nil; log("PT|error perf check %s", tostring(err)) end
+end)
+pcall(RegisterConsoleCommandHandler, "ptperfcheck", function() M.check(); return true end)
+
 -- a map load resets nothing of these, but the first start needs a controller: try until it took, then after every map load
 -- (the game re-applies its own settings when a level loads its world settings)
 local pending = enabled()

@@ -5,6 +5,11 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+### Added
+
+- Performance check (F9 menu, item 6): 10 s of FPS as set and at half resolution tell whether the GPU or the CPU holds the
+  game back, with the settings that matter (resolution, DLSS, FPS cap, mirrors), on screen and in the log.
+
 ## [0.8.7] - 2026-11-01
 
 Fixes from the owner's live two-client test of 0.8.6 (each checked by hand on a test pair; zone travel, the Ida trader and
