@@ -15,6 +15,10 @@ local ids = require("ids")
 local log = common.log
 local ov = require("overlay")
 local alive = ids.alive
+-- a garage pump's nozzle is a world item on a cable: each game keeps its own (the guest's was purged and the host's copied onto
+-- its pump, three nozzles and none to take, playtest 2026-10-31)
+local function tethered(a) return a:GetClass():GetFName():ToString():find("GasPumpHandle", 1, true) ~= nil end
+
 
 -- tests only (a mutation that makes this module send and apply nothing); players never set PT_MUTATE
 local DEAF = os.getenv("PT_MUTATE") == "nointent"
@@ -166,6 +170,31 @@ local function applyBroken(a)
     log("PT|loot plasma generator broken here too")
 end
 
+-- The container the open inventory menu shows (the loot tick looks every 500 ms). The partner's change to it was filled a few
+-- items a frame while the menu hovered the slots being freed: the guest crashed in ContainerOnHoveredSlot (both in the trunk,
+-- playtest 2026-10-31). Now the partner's change waits until this player closes the menu; this player's own changes still go
+-- out. Closing the menu from Lua left the game unable to open container menus again, and a refill plus "Reconstruct Inventory"
+-- lost a guest's take (lootcar, playpath 2026-11-01).
+-- shortcut: both players changing the same container at once can duplicate or revert an item (no crash); merge per slot if seen
+local menuBox = nil
+local function watchMenu()
+    -- the inventory page's other container while the game shows the mouse (a menu is up). The page keeps TransferContainer after
+    -- the menu closes, and the menu widget stays in the viewport hidden; reading the menu widget itself (IsInViewport,
+    -- Category_Inventory) every 500 ms kept the guest's container menu from opening now and then (lootcar, playpath 2026-11-01)
+    local box = nil
+    local pc = UEHelpers.GetPlayerController()
+    if alive(pc) and pc.bShowMouseCursor then
+        for _, w in ipairs(FindAllOf("UMG_PlayerMenu_Inventory_C") or {}) do
+            local t = w.TransferContainer
+            if t:IsValid() then box = t:GetAddress(); break end
+        end
+    end
+    local was = menuBox
+    menuBox = box
+    return was ~= box and was or nil -- the container whose menu just closed
+end
+local function menuShows(c) return os.getenv("PT_MUTATE") ~= "nomenuwait" and menuBox ~= nil and menuBox == c:GetAddress() end
+
 local filling = {} -- containers being filled a few steps a frame: { e, steps, i, finish, before, t0 }
 RegisterLoadMapPreHook(function() filling = {} end) -- their containers go with the old world
 local function applyState(e, s)
@@ -185,13 +214,20 @@ local function applyState(e, s)
     end
     local c = e.get()
     if not alive(c) then e.pending = s; return end
-    e.pending = nil
+    local waiting = e.pending
+    e.pending, e.box = nil, c:GetAddress()
+    if menuShows(c) then
+        if not waiting then log("PT|loot partner changed the open container %s: applied when the menu closes", e.id) end
+        e.pending = s
+        return
+    end
     local flags, body = s:match("^(.);(.*)$")
     -- the item operations go into a list that the line loop below works off a few ms a frame (ids.lua: a 4165-item storage held a
     -- guest's frame 2.3 s); the container is busy meanwhile, so the change scan does not send it half done
     local steps = {}
-    if body:sub(1, 1) == "@" then ids.applyLayout(c, body, os.getenv("PT_MUTATE") ~= "noslice" and steps or nil)
-    else ids.apply(c, ids.decode(body), os.getenv("PT_MUTATE") ~= "noslice" and steps or nil) end
+    local sliced = os.getenv("PT_MUTATE") ~= "noslice"
+    if body:sub(1, 1) == "@" then ids.applyLayout(c, body, sliced and steps or nil)
+    else ids.apply(c, ids.decode(body), sliced and steps or nil) end
     local function finish()
         if not alive(c) then return end
         if e.kind == "L" and flags ~= "-" then applyFlags(e.actor, tonumber(flags)) end
@@ -200,6 +236,38 @@ local function applyState(e, s)
     if #steps == 0 then finish() return end
     e.busy = true
     filling[#filling + 1] = { e = e, steps = steps, i = 1, finish = finish, before = e.n, t0 = os.clock() }
+end
+
+-- car parts with their own storage (racks, crates on the car): "Car.<slot>" -> the installed part's container. Only the trunks were
+-- shared, so what the guest stored on a rack was its own and was gone when the next zone rebuilt its car from the host's
+-- (prybars and scrappers lost, playtest 2026-10-31)
+local function carBoxes()
+    local r = {}
+    local m = inventoryManager()
+    if not m then return r end
+    pcall(function()
+        local box = {}
+        m:GetCarEquippedContainer(box)
+        local c = box.Inventory_CarEquipped
+        if not alive(c) then return end
+        local car = FindFirstOf("BP_PlayerCarNew_C")
+        local known = {} -- the trunks are shared under their own names already
+        for _, n in ipairs(INV) do local x = m[n]; if alive(x) then known[x:GetAddress()] = true end end
+        -- the slots as car.lua reads them (Slots / Items): GetSlot(i) on this container crashed the host (2026-11-01)
+        c.Slots:ForEach(function(_, e)
+            local sl = e:get()
+            local it
+            sl.Items:ForEach(function(_, x) it = x:get() end)
+            if alive(it) then
+                local o = {}
+                ids.bfl():GetInstanceContainer(it, car, o)
+                if alive(o.Container) and not known[o.Container:GetAddress()] then
+                    r["Car." .. (sl.SlotName:ToString():gsub("^Car%.Equip%.", ""))] = o.Container
+                end
+            end
+        end)
+    end)
+    return r
 end
 
 local function register(id, kind, actor, invName)
@@ -212,6 +280,12 @@ local function register(id, kind, actor, invName)
             local m = inventoryManager()
             if not m then return nil end
             pcall(function() m.Inventories_Garage:ForEach(function(k, v) if k:get().TagName:ToString() == invName then e.cache = v:get() end end) end)
+            return alive(e.cache) and e.cache or nil
+        end
+    elseif kind == "I" and invName:find("^Car%.") then
+        e.get = function()
+            if alive(e.cache) then return e.cache end
+            e.cache = carBoxes()[invName]
             return alive(e.cache) and e.cache or nil
         end
     elseif kind == "I" then e.get = function() local m = inventoryManager(); return m and m[invName] or nil end
@@ -267,7 +341,7 @@ local function scanHost()
     local function skipped(a, k) return skip[k] ~= nil and skip[k] == a:GetClass():GetAddress() end
     for _, a in ipairs(FindAllOf("BP_Lootable_Base_C") or {}) do
         local k = a:GetAddress()
-        if not byName[k] and room() and alive(a) and alive(a.InventoryContainer) then
+        if not byName[k] and room() and alive(a) and not transient(a, k) and alive(a.InventoryContainer) then
             local e = register("L" .. nextId, "L", a)
             nextId, byName[k] = nextId + 1, e.id
             e.last, e.n = stateOf(e), e.get():GetNumItems()
@@ -276,7 +350,8 @@ local function scanHost()
     end
     for _, a in ipairs(FindAllOf("BP_WorldItem_C") or {}) do
         local k = a:GetAddress()
-        if not byName[k] and room() and alive(a) and alive(a.Instance) and not a:GetAttachParentActor():IsValid() then
+        -- no skipped() shortcut for items and lootables: they spawn all game long and one could reuse a freed template's address
+        if not byName[k] and room() and alive(a) and not transient(a, k) and alive(a.Instance) and not a:GetAttachParentActor():IsValid() and not tethered(a) then
             local e = register("W" .. nextId, "W", a)
             nextId, byName[k] = nextId + 1, e.id
             say(line(e))
@@ -304,7 +379,9 @@ local function scanHost()
     -- shortcut: the guest's copy rolls its own mesh variant (BiomeSwapMesh) and starts at full health
     for _, a in ipairs(FindAllOf("BP_Spawn_ResourceBase_C") or {}) do
         local k = a:GetAddress()
-        if not byName[k] and room() and alive(a) then
+        -- not the class templates in /Engine/Transient: the guest made real copies of them at 0,0,0 (the PC in the middle of the
+        -- garage, playtest 2026-10-31)
+        if not byName[k] and room() and alive(a) and not skipped(a, k) and not transient(a, k) then
             local e = register("R" .. nextId, "R", a)
             nextId, byName[k] = nextId + 1, e.id
             say(line(e))
@@ -326,6 +403,7 @@ local function scanHost()
             end)
         end)
     end
+    if os.getenv("PT_MUTATE") ~= "nocarbox" and tickN % 8 == 2 then for k in pairs(carBoxes()) do names[#names + 1] = k end end
     for _, p in ipairs(names) do
         local id = "I:" .. p
         if not ents[id] then
@@ -497,7 +575,7 @@ local function purge()
         if alive(a) and not claimed[a:GetFullName()] then a:K2_DestroyActor(); n = n + 1 end
     end
     for _, a in ipairs(FindAllOf("BP_WorldItem_C") or {}) do
-        if alive(a) and not claimed[a:GetFullName()] and not a:GetAttachParentActor():IsValid() then a:K2_DestroyActor(); n = n + 1 end
+        if alive(a) and not claimed[a:GetFullName()] and not a:GetAttachParentActor():IsValid() and not tethered(a) then a:K2_DestroyActor(); n = n + 1 end
     end
     for _, c in ipairs({ "LootableTemplatePart", "LootableTemplate", "BP_Spawn_ResourceBase_C" }) do
         for _, a in ipairs(FindAllOf(c) or {}) do
@@ -549,12 +627,13 @@ local function scanGuest()
         end
     end
     for _, a in ipairs(FindAllOf("BP_WorldItem_C") or {}) do
-        local n = alive(a) and alive(a.Instance) and not claimed[a:GetFullName()] and not a:GetAttachParentActor():IsValid() and a:GetFullName()
+        local n = alive(a) and alive(a.Instance) and not claimed[a:GetFullName()] and not a:GetAttachParentActor():IsValid() and not tethered(a) and a:GetFullName()
         if n and not reported[n] then
             local l = a:K2_GetActorLocation()
             if p and (l.X - p.X) ^ 2 + (l.Y - p.Y) ^ 2 + (l.Z - p.Z) ^ 2 < DROP ^ 2 then
                 reported[n] = true
                 say(string.format("N|%s|%.0f|%.0f|%.0f|%.0f", ids.path(a.Instance.Archetype), l.X, l.Y, l.Z, a:K2_GetActorRotation().Yaw))
+                log("PT|loot guest drop %s told the host", ids.path(a.Instance.Archetype):match("[^/]+$"))
                 -- the host's copy comes back as an "A": keeping this one too left two tools on the guest's ground (a dupe)
                 if os.getenv("PT_MUTATE") ~= "nodropfix" then a:K2_DestroyActor() end
             else
@@ -567,14 +646,17 @@ end
 -- host: a world item that moved since we told the guest (a drop falling, rolling) sends its new spot; the guest does not simulate it
 local function scanMoves()
     if NOFALL then return end
+    -- a resting item is read every ~5 s, a new or moving one every tick (all of them each tick held host frames, playtest 2026-10-31)
+    local now = os.clock()
     for id, e in pairs(ents) do
-        if e.kind == "W" and alive(e.actor) then
+        if e.kind == "W" and (now < (e.hotUntil or 0) or now >= (e.moveAt or 0)) and alive(e.actor) then
+            e.moveAt = now + 4 + math.random() * 2
             local l = e.actor:K2_GetActorLocation()
             local p = e.pos
             if not p then
-                e.pos = { l.X, l.Y, l.Z }
+                e.pos, e.hotUntil = { l.X, l.Y, l.Z }, now + 10
             elseif (l.X - p[1]) ^ 2 + (l.Y - p[2]) ^ 2 + (l.Z - p[3]) ^ 2 > 9 then
-                e.pos = { l.X, l.Y, l.Z }
+                e.pos, e.hotUntil = { l.X, l.Y, l.Z }, now + 5
                 local r = e.actor:K2_GetActorRotation()
                 say(string.format("M|%s|%.1f|%.1f|%.1f|%.0f|%.0f|%.0f", id, l.X, l.Y, l.Z, r.Yaw, r.Pitch, r.Roll))
             end
@@ -606,8 +688,8 @@ end
 local function scanChanges()
     local spots = tickN % 4 == 1 and playerSpots()
     local far = 10 -- the other parts, round robin: each one at least every ~10 s, a few per tick
+    local now = os.clock()
     for id, e in pairs(ents) do
-        local c = e.get()
         if e.kind == "R" then
             if listening and alive(e.actor) then
                 local b = brokenOf(e.actor)
@@ -629,10 +711,15 @@ local function scanChanges()
                     say("S|" .. id .. "|" .. partState(e.actor))
                 end
             end
-        elseif alive(c) and not e.busy then
-            local r = flagsOf(e)
-            if c:GetNumItems() ~= e.n or r ~= e.rolled or dirty[c:GetAddress()] then
-                dirty[c:GetAddress()] = nil
+        elseif not e.busy and ((e.box and dirty[e.box]) or now >= (e.nextAt or 0)) then
+            -- an untouched container is read every ~5 s; its slot events (dirty) bring it in at once (all of them each tick
+            -- held host frames 30-40 ms, playtest 2026-10-31)
+            e.nextAt = now + 4 + math.random() * 2
+            local c = e.get()
+            if alive(c) then e.box = c:GetAddress() end
+            local r = alive(c) and flagsOf(e) or nil
+            if alive(c) and (c:GetNumItems() ~= e.n or r ~= e.rolled or dirty[e.box]) then
+                dirty[e.box] = nil
                 e.n, e.rolled = c:GetNumItems(), r
                 local s = stateOf(e)
                 if s and s ~= e.last then
@@ -710,7 +797,8 @@ local function handle(l, guest)
             ents[id].actor:K2_SetActorLocationAndRotation({ X = tonumber(f[3]), Y = tonumber(f[4]), Z = tonumber(f[5]) }, { Pitch = tonumber(f[7]) or 0, Yaw = tonumber(f[6]), Roll = tonumber(f[8]) or 0 }, false, {}, true)
         end)
     elseif op == "N" and not guest then
-        spawnItem(f[2], tonumber(f[3]), tonumber(f[4]), tonumber(f[5]), tonumber(f[6]))
+        local w = spawnItem(f[2], tonumber(f[3]), tonumber(f[4]), tonumber(f[5]), tonumber(f[6]))
+        log("PT|loot guest's drop %s spawned=%s", f[2]:match("[^/]+$"), tostring(w ~= nil))
     elseif op == "T" and not guest and ents[id] then
         local e = ents[id]
         ents[id], byName[e.addr] = nil, nil
@@ -765,6 +853,12 @@ end)
 
 local function tick()
     tickN = tickN + 1
+    if listening or common.netMode() == "client" then -- sessions only (Q7)
+        local ok, closed = pcall(watchMenu)
+        if ok and closed then
+            for _, e in pairs(ents) do if e.pending and e.box == closed then applyState(e, e.pending) end end
+        end
+    end
     local mode = common.netMode()
     if mode == "listen" then
         local here = false

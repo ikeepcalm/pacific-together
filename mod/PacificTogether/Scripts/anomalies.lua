@@ -91,6 +91,9 @@ local function pre(self, payload)
     if key == lastPayload and now - lastAt < 0.5 then return end
     lastPayload, lastAt = key, now
     if dmg == 0 then return end
+    -- a bump of the host's body in the guest's world (seating jolts, its copy of the car): the host's game already deals its own
+    -- physical hits, and a forwarded 60 came out of nowhere for the host (playtest 2026-10-31)
+    if guest and p:GetClass():GetFName():ToString():find("Physical_Impact", 1, true) then return end
     local sample, cap = lastHp, math.abs(dmg) * 1.5 + 1
     if sample then
         ExecuteInGameThreadWithDelay(40, function() try("put back", function()

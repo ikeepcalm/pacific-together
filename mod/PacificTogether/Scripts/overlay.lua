@@ -22,7 +22,7 @@ end
 local LINES, LIFE, SETTLE = 5, 6, 6 -- visible lines, seconds a line lives, seconds into a session before loot-style chatter is allowed
 local Z = 10000
 local COLOR = { -- linear RGB: off-white text, a teal accent for the status, muted warn and good
-    label = { R = 0.78, G = 0.78, B = 0.74 }, status = { R = 0.25, G = 0.8, B = 0.72 },
+    label = { R = 0.78, G = 0.78, B = 0.74 }, status = { R = 0.25, G = 0.8, B = 0.72 }, card = { R = 0.86, G = 0.84, B = 0.7 },
     info = { R = 0.78, G = 0.78, B = 0.74 }, warn = { R = 0.9, G = 0.45, B = 0.3 }, good = { R = 0.3, G = 0.75, B = 0.5 },
 }
 
@@ -40,13 +40,31 @@ local feed = {} -- { text, kind, key, n, t0 }
 local sessionSince, names, seen = nil, {}, {} -- session age; remote player names now / ever (host side)
 local wasConnected, hostName, greeted = false, nil, false
 
-local function text(tree, name, size, kind)
+-- the game's own HUD fonts (owner request 2026-10-31: the mod's text looked foreign; MediaBridgeRadio's cards use them)
+local FONTS = { title = "/Game/UI/Fonts/Font_Headset_Title.Font_Headset_Title", body = "/Game/UI/Fonts/Font_Headset_Default.Font_Headset_Default",
+    small = "/Game/UI/Fonts/Font_Headset_Details.Font_Headset_Details" }
+local fontObjs = {}
+local function fontOf(which)
+    local p = FONTS[which or "body"]
+    local o = fontObjs[p]
+    if valid(o) then return o end
+    o = StaticFindObject(p)
+    if not valid(o) then pcall(LoadAsset, p); o = StaticFindObject(p) end
+    fontObjs[p] = valid(o) and o or nil
+    return fontObjs[p]
+end
+M.fontOf = fontOf
+
+local function text(tree, name, size, kind, which, spacing, justify)
     local t = StaticConstructObject(StaticFindObject("/Script/UMG.TextBlock"), tree, FName(name))
-    t:SetJustification(2) -- right
+    t:SetJustification(justify or 2) -- right
     t:SetShadowOffset({ X = 1.5, Y = 1.5 })
     t:SetShadowColorAndOpacity({ R = 0, G = 0, B = 0, A = 1 })
     local f = t.Font
     f.Size = size
+    local fo = fontOf(which)
+    if fo then f.FontObject = fo end
+    if spacing then f.LetterSpacing = spacing end
     t:SetFont(f)
     t:SetColorAndOpacity({ SpecifiedColor = { R = COLOR[kind].R, G = COLOR[kind].G, B = COLOR[kind].B, A = 1 }, ColorUseRule = 0 })
     return t
@@ -72,7 +90,28 @@ local function build()
     n.label = text(tree, "PTVersion", 18, "label"); add(n.label)
     n.status = text(tree, "PTStatus", 16, "status"); add(n.status)
     n.arc = text(tree, "PTArc", 16, "status"); n.arc:SetVisibility(1); add(n.arc) -- "ARC 3.0 / 7.0": the device sits behind the seats in co-op (D12)
-    n.panel = text(tree, "PTPanel", 16, "label"); n.panel:SetVisibility(1); add(n.panel) -- rescue.lua's menu
+    -- rescue.lua's menu: a card on the left like the game's own (cream frame, dark panel, spaced caps kicker, big title)
+    local B = StaticFindObject("/Script/UMG.Border")
+    local frame = StaticConstructObject(B, tree, FName("PTCardFrame"))
+    local inner = StaticConstructObject(B, tree, FName("PTCardInner"))
+    frame:SetBrushColor({ R = COLOR.card.R, G = COLOR.card.G, B = COLOR.card.B, A = 0.8 })
+    frame:SetPadding({ Left = 2, Top = 2, Right = 2, Bottom = 2 })
+    inner:SetBrushColor({ R = 0.012, G = 0.012, B = 0.01, A = 0.88 })
+    inner:SetPadding({ Left = 26, Top = 18, Right = 30, Bottom = 22 })
+    local col = StaticConstructObject(StaticFindObject("/Script/UMG.VerticalBox"), tree, FName("PTCardBox"))
+    frame:SetContent(inner); inner:SetContent(col)
+    n.kicker = text(tree, "PTCardKicker", 13, "card", "small", 600, 0); col:AddChildToVerticalBox(n.kicker)
+    n.kicker:SetText(FText("PACIFIC TOGETHER " .. common.MOD_VERSION))
+    n.title = text(tree, "PTCardTitle", 44, "card", "title", 60, 0)
+    col:AddChildToVerticalBox(n.title):SetPadding({ Left = 0, Top = 6, Right = 0, Bottom = 8 })
+    n.panel = text(tree, "PTPanel", 18, "card", "body", nil, 0); col:AddChildToVerticalBox(n.panel)
+    local cs = canvas:AddChildToCanvas(frame)
+    cs:SetAnchors({ Minimum = { X = 0, Y = 0.3 }, Maximum = { X = 0, Y = 0.3 } })
+    cs:SetAlignment({ X = 0, Y = 0 })
+    cs:SetPosition({ X = 42, Y = 0 })
+    cs:SetAutoSize(true)
+    frame:SetVisibility(1)
+    n.card = frame
     for i = 1, LINES do
         n.lines[i] = text(tree, "PTFeed" .. i, 16, "info")
         n.lines[i]:SetVisibility(1)
@@ -106,8 +145,13 @@ function M.panel(t) panelText = t end
 local function render()
     local now = os.clock()
     local pnv = panelText and 3 or 1
-    if ui.cache.pnv ~= pnv then ui.cache.pnv = pnv; ui.panel:SetVisibility(pnv) end
-    if panelText then set(ui.panel, "panel", panelText) end
+    if ui.cache.pnv ~= pnv then ui.cache.pnv = pnv; ui.card:SetVisibility(pnv) end
+    if panelText then
+        -- first line the title (caps, the game's card style), the rest the body
+        local head, body = panelText:match("^([^\n]*)\n?(.*)$")
+        set(ui.title, "title", head:upper())
+        set(ui.panel, "panel", body)
+    end
     local pv = (pausedAt and now - pausedAt < 3 and not transitionOn) and 3 or 1
     if ui.cache.pv ~= pv then
         ui.cache.pv = pv

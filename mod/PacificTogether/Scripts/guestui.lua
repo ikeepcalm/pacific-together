@@ -42,6 +42,8 @@ local function text(tree, name, size)
     t:SetShadowColorAndOpacity({ R = 0, G = 0, B = 0, A = 1 })
     local f = t.Font
     f.Size = size
+    local fo = require("overlay").fontOf and require("overlay").fontOf("body") -- the game's HUD font
+    if fo then f.FontObject = fo end
     t:SetFont(f)
     t:SetColorAndOpacity({ SpecifiedColor = { R = 0.9, G = 0.9, B = 0.86, A = 1 }, ColorUseRule = 0 })
     t:SetVisibility(1)
@@ -145,7 +147,7 @@ local function update()
     local car = package.loaded["car"]
     local aim = isSeated and car and car.aimed and car.aimed()
     show(ui.hint, "hint", not isSeated and "" or aim == "ign" and "E  Ignition    X  Exit car"
-        or aim == "gear" and "E  Shifter P/D    X  Exit car" or "X  Exit car")
+        or aim == "gear" and "E  Shifter P/D    X  Exit car" or aim == "radio" and "E  Radio on/off    X  Exit car" or "X  Exit car")
     if wasSeated ~= nil and wasSeated ~= isSeated and mapName ~= MENU then fade(pc) end
     wasSeated = isSeated
 end

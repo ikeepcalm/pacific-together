@@ -83,6 +83,42 @@ local function findTrack(mm, key)
     end)
     return found
 end
+-- The game makes a custom file's MusicTrack only when it is about to play it (the guest's list grew one by one, playtest 2026-10-31,
+-- and the host skipped every custom track as "lacking"). So the guest looks for the file itself in its music folder (the folder of
+-- any custom track it has) and makes the track object the game would.
+local dirOf -- the music folder as the game writes it in ExternalUrl, with its trailing separator
+local function musicDir()
+    if dirOf then return dirOf end
+    for _, o in ipairs(FindAllOf("MusicTrack") or {}) do
+        local ok, url = pcall(function() return valid(o) and o.ExternalUrl:ToString() or "" end)
+        local d = ok and url:match("^(.*[/\\])[^/\\]+$")
+        if d then dirOf = d; return d end
+    end
+    -- none loaded yet: the game's own custom radio folder
+    local la = os.getenv("LOCALAPPDATA")
+    return la and (la:gsub("\\", "/") .. "/PenDriverPro/Custom/Radio/") or nil
+end
+local made = {} -- key -> MusicTrack made here
+local function makeTrack(mm, key)
+    if made[key] and valid(made[key]) then return made[key] end
+    local d = musicDir()
+    if not d then return nil end
+    local name = key:sub(3) -- "L:<file>": lower case, Windows does not mind
+    local f = io.open((d:gsub("^file:/*", "")) .. name, "rb")
+    if not f then return nil end
+    f:close()
+    local ok, t = pcall(function()
+        local o = StaticConstructObject(StaticFindObject("/Script/PenDriverPro.MusicTrack"), mm)
+        o.ExternalUrl = d .. name
+        o.Title = FText((name:gsub("%.%w+$", "")))
+        return o
+    end)
+    if not ok or not valid(t) or keyOf(t) ~= key then log("PT|radio could not make %s: %s", key, tostring(t)); return nil end
+    made[key] = t
+    log("PT|radio made track %s", key)
+    return t
+end
+
 local function haveList() -- custom files this copy knows (library scan results and anything in the playlists)
     local set = {}
     for _, o in ipairs(FindAllOf("MusicTrack") or {}) do
@@ -95,7 +131,7 @@ end
 -- play a chosen track now: see the header. `done` waits for the game to start it, then restores the list.
 local playing -- { key, at, mm }
 local function playTrack(mm, key)
-    local t = findTrack(mm, key)
+    local t = findTrack(mm, key) or (isCustom(key) and makeTrack(mm, key))
     if not t then return false end
     local pl = mm.RadioPlaylist
     local n = pl:GetArrayNum()
@@ -167,12 +203,14 @@ local haveSent, haveAt = "", 0
 -- a custom track the guest lacks: the host skips it (rate limited) until a shared one plays
 local function lacking(k)
     if not isCustom(k) then return false end
-    if denied[k] then return true end
+    -- only a file the guest said it cannot play, for a minute (it may have been still loading), and never one it has: its
+    -- have-list holds just the tracks its game has loaded so far (see makeTrack)
+    if not denied[k] or now() - denied[k] > 60 then return false end
     for _, pc in ipairs(net.guests()) do
         local set = guestHave[pc:GetFullName()]
-        if set and not set[k] then return true end
+        if set and set[k] then return false end
     end
-    return false
+    return true
 end
 
 local function sendState(s, mm, restartKey, all)
@@ -213,7 +251,7 @@ net.on("g.radio.i", function(pc, data)
             log("PT|radio skip %d@%s applied", d, which)
         end
     end
-    if t.miss then denied[t.miss] = true; log("PT|radio guest lacks %s", t.miss) end
+    if t.miss then denied[t.miss] = now(); log("PT|radio guest lacks %s", t.miss) end
     if t.resync then resyncAt = now() + 0.5 end
 end)
 net.on("g.radio.have", function(pc, data)
@@ -238,9 +276,8 @@ net.on("g.radio.s", function(_, data)
         hostKey = t.trk
         local mine = curKey(mm)
         if mine ~= t.trk or t.r == "1" then
-            if findTrack(mm, t.trk) then playTrack(mm, t.trk)
-            elseif not missed[t.trk] then
-                missed[t.trk] = true
+            if not playTrack(mm, t.trk) and now() - (missed[t.trk] or -math.huge) > 50 then -- the host forgets a miss after 60 s
+                missed[t.trk] = now()
                 net.toHost("g.radio.i", pack({ miss = t.trk }))
                 log("PT|radio cannot play %s, told the host", t.trk)
             end

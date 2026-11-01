@@ -10,3 +10,4 @@ mod/PacificTogetherNative/dlls/
 native/build-fast/
 mod/PacificTogether/join.txt
 /dist/
+mod/PacificTogether/performance.txt

@@ -96,11 +96,22 @@ local remote = { state = "", at = 0 } -- last report from the other player
 local mirrors = {}                    -- character full name -> { actor, parts, light, state, swingAt }
 local handledUse = nil
 
+-- never our own body: the guest's Scrapper was built on the host's own character (while driving ownChar had no character) and sat
+-- over the host's hotbar for good (playtest 2026-10-31). On the host the other body is the one a guest's controller drives.
 local function otherChars()
-    local list, me = {}, ownChar()
+    local list, mine = {}, {}
+    local pc = UEHelpers.GetPlayerController()
+    local cm = FindFirstOf("BP_MainCharacterManager_C")
+    for _, o in ipairs({ ownChar(), valid(pc) and pc.Pawn or nil, valid(cm) and cm.CharacterActor or nil }) do
+        if valid(o) then mine[o:GetAddress()] = true end
+    end
+    local host = not safety.guest()
     local wn = UEHelpers.GetWorld():GetFullName()
     for _, c in ipairs(FindAllOf(CHAR) or {}) do
-        if valid(c) and c:GetWorld():GetFullName() == wn and not (valid(me) and c:GetFullName() == me:GetFullName()) then list[#list + 1] = c end
+        if valid(c) and not mine[c:GetAddress()] and c:GetWorld():GetFullName() == wn then
+            local ctl = c.Controller
+            if not host or (valid(ctl) and not ctl:IsLocalController()) then list[#list + 1] = c end
+        end
     end
     return list
 end

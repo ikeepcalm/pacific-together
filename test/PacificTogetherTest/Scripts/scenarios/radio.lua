@@ -123,7 +123,9 @@ return function(T)
         add({ check = "host_skips_custom_the_guest_lacks", timeout = 60, cond = function()
             return count("radio host skips L:pta.wav") > marks.skip and key() ~= "L:pta.wav"
         end })
-        add({ check = "host_never_announced_missing_custom", timeout = 1, cond = function() return count("trk=L:pta.wav") == marks.sent end })
+        -- the guest finds out from its own music folder (radio.lua makeTrack): the host may announce the file once, then the guest's
+        -- miss stops it for a minute (the check runs after the 60 s wait above: at most two)
+        add({ check = "host_announced_missing_custom_once_a_minute", timeout = 1, cond = function() return count("trk=L:pta.wav") <= marks.sent + 2 end })
         add({ run = function() marks.ptb = count("trk=L:ptb.wav"); marks.at = os.clock(); send("t.b") end })
         add({ run = function() force("ptB") end })
         add({ check = "host_announces_shared_custom", timeout = 60, cond = function()

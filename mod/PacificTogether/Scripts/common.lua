@@ -1,7 +1,7 @@
 local UEHelpers = require("UEHelpers")
 
 local M = {
-    MOD_VERSION = "0.8.5",
+    MOD_VERSION = "0.8.6",
     PROTOCOL_VERSION = 5, -- 5: msg.cpp chunks are confirmed ("PT1A|"); a 4 peer never confirms and a 5 sender would stall
 }
 

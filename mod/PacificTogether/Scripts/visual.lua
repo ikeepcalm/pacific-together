@@ -147,7 +147,12 @@ end
 
 -- what the host lists: run-time spawned (not placed in the map file) dressing. Wreck parts, loot, hazards, items and car parts have their
 -- own modules, so they are not here. A static mesh that moves (debris, a wreck's loose part) is skipped.
-local ALLOW = { "BP_Destruct_", "BP_Door_", "BP_Prop_", "BP_Poster_", "BP_Decal_", "BP_TpoleTool_", "BP_RoadObstruct_", "BP_BuildingFrame_", "BP_Spawn_Anchor_" }
+local ALLOW = { "BP_Destruct_", "BP_Door_", "BP_Prop_", "BP_Poster_", "BP_Decal_", "BP_TpoleTool_", "BP_RoadObstruct_", "BP_BuildingFrame_", "BP_Spawn_Anchor_",
+    -- Ida's trailer: the guest had none (playtest 2026-10-31). shortcut: the copy rolls its own stock and the guest trades from its
+    -- own backpack; share the stock if players ask for it
+    -- shortcut: the Zone's fuel barrels (BP_Spawn_GasBarrel) are missing on the guest too; mirrored copies blocked the guest's way
+    -- to a container in playpath (2026-11-01), so they wait for a proper fix
+    "BP_ZoneTrader" }
 local function allowed(cn)
     for _, p in ipairs(ALLOW) do
         if cn:sub(1, #p) == p then return not cn:find("Part_", 1, true) end

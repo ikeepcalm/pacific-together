@@ -45,6 +45,8 @@ local function toLocal(car, p) return kml():InverseTransformLocation(car:GetTran
 local function toWorld(car, p) return kml():TransformLocation(car:GetTransform(), p) end
 local first = common.first
 local function localPC()
+    local c = UEHelpers.GetPlayerController() -- cached (common.lua): this ran FindAllOf per frame, 1.2 s a minute (playtest 2026-10-31)
+    if inWorld(c) and c:IsLocalController() then return c end
     for _, pc in ipairs(FindAllOf("PlayerController") or {}) do
         if inWorld(pc) and pc:IsLocalController() then return pc end
     end
@@ -516,6 +518,10 @@ net.on("g.car.ctl", function(pc, what)
         local to = cm.CarIgnitionState == 0 and 2 or 0
         pcall(function() car:ManualSetIgnition_NoAnim(to) end)
         log("PT|car ctl ign -> %d now %d", to, cm.CarIgnitionState)
+    elseif what == "radio" then
+        local r = carRadio(car)
+        pcall(function() r.BP_RadioComponent:TogglePlayback() end)
+        log("PT|car ctl radio toggled")
     elseif what == "gear" then
         local to = cm.MyCarGearBox == 1 and 0 or 1
         pcall(function() car:ManualActivate_Gearbox(to, true) end)
@@ -1075,12 +1081,27 @@ end
 -- the seated guest's ignition key and shifter: the game highlights them only for the driver ("Must be inside car!" in
 -- BP_HighlightManager's Should Allow Highlight; a post-hook cannot change its out param), so the guest aims with its camera
 -- and presses E; the host applies it (g.car.ctl)
-local AIM_DEG, AIM_REACH = 8, 200
+-- 8 deg / 2 m was too tight: the guest never got the key from the passenger seat (no "car ctl" in a 1.5 h log, playtest 2026-10-31)
+local AIM_DEG, AIM_REACH = 14, 260
+-- the car radio (its power button is the driver's highlight too): the radio part attached to the car, looked up every 2 s
+local radioPart, radioAt = nil, -99
+local function carRadio(car)
+    if os.clock() - radioAt > 2 then
+        radioAt, radioPart = os.clock(), nil
+        for _, r in ipairs(FindAllOf("BP_CarPart_Internal_Radio_C") or {}) do
+            if valid(r) and same(r:GetAttachParentActor(), car) then radioPart = r; break end
+        end
+    end
+    return valid(radioPart) and radioPart or nil
+end
 local function aimAt(pc, car)
     local cam = pc.PlayerCameraManager
     local from, fwd = cam:GetCameraLocation(), kml():GetForwardVector(cam:GetCameraRotation())
     local best, bestCos = nil, math.cos(math.rad(AIM_DEG))
-    for what, comp in pairs({ ign = car.UICollision_Key, gear = car.Socket_GearBox }) do
+    local targets = { ign = car.UICollision_Key, gear = car.Socket_GearBox }
+    local r = carRadio(car)
+    if r then targets.radio = r.RootComponent end
+    for what, comp in pairs(targets) do
         local p = comp:K2_GetComponentLocation()
         local d = { X = p.X - from.X, Y = p.Y - from.Y, Z = p.Z - from.Z }
         local len = math.sqrt(d.X * d.X + d.Y * d.Y + d.Z * d.Z)

@@ -1,10 +1,10 @@
-Pacific Together 0.8.5 - co-op for Pacific Drive
+Pacific Together 0.8.6 - co-op for Pacific Drive
 ================================================
 
 Play Pacific Drive with a friend: one drives, one rides shotgun, both scavenge.
 Early access: fully playable, still being polished. If something breaks mid-run, press F9 for the rescue menu.
 
-Both players need this same mod version (0.8.5, protocol 5) and Pacific Drive on Steam, v1.15.0 (build 21896301), on Windows.
+Both players need this same mod version (0.8.6, protocol 5) and Pacific Drive on Steam, v1.15.0 (build 21896301), on Windows.
 
 Features
 - One car, two players: the host drives, the guest rides in the passenger seat and can start the engine or shift gears.
@@ -33,7 +33,9 @@ Command line instead of the launcher: install.cmd (Host/Steam), install.cmd -Joi
 
 Controls
 - E on the passenger door: get in (guest). X: get out.
-- E on the key or the shifter from the passenger seat: engine on/off, P/D.
+- E on the key, the shifter or the radio from the passenger seat: engine on/off, P/D, radio on/off.
+- H while looking at your friend up close: patch them up (40% health, once every 3 minutes each).
+- F10: performance mode on/off (lower render scale, view distance, foliage and shadows for more FPS; remembered).
 - Middle mouse (or G): ping a spot for your friend.
 - F9: rescue menu (teleport to your friend, resync, unstick controls, complete a stuck story task).
 - End or F8: unstick the guest's controls. Host Esc pauses both games.

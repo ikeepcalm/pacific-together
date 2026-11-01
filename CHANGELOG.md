@@ -5,6 +5,49 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-11-01
+
+Fixes from the second two-hour friend session (friend hosting). Not yet tested by hand; see "Not checked" below.
+
+### Added
+
+- Patch up your friend: look at them up close and press H to give them 40% of their health back, once every 3 minutes
+  each. A stopgap while the remaining causes of the host's health drain are tracked down.
+- Performance mode (F10): lower render scale, shorter view and shadow distance, thinner foliage, no volumetric fog,
+  reflections, ambient occlusion or motion blur. It can run faster than the unmodded game, at a visual cost. It is
+  remembered for the next start; turning it off applies your own graphics settings again.
+- The guest can turn the car radio on and off from the passenger seat (E while looking at it), and the key and shifter
+  are easier to aim at.
+- Ida's trader now appears for the guest too (each player's copy has its own stock).
+
+### Changed
+
+- The mod's text uses the game's own HUD fonts, and the F9 rescue menu is a framed card on the left like the game's.
+
+### Fixed
+
+- FPS dropped further the longer you played: the guest smoothed every hazard of the Zone each frame (6 ms a frame after
+  two hours), and the host re-read every container and item twice a second (30-40 ms hitches). Now only nearby hazards
+  are smoothed, and containers are read when they change.
+- Custom music was skipped: the guest's game only knows a custom file once it is about to play it, so the host thought
+  the guest lacked nearly all of them. The guest now looks in its own music folder.
+- The guest crashed when both players had the trunk open and the other one moved items: the other player's changes to a
+  container you have open now wait until you close it (your own changes still go through). If you both move items in
+  the same container at the same moment, one of you may see an item come back.
+- An unbreakable PC (and radio) appeared in the middle of the garage for the guest: copies of the game's hidden templates.
+- The garage fuel nozzle vanished for the guest (and the pump got three nozzles): each player now keeps their own nozzle.
+- A trail of Hot Dust behind a host carrying an ARC anchor: the guest's copy of the anchor's radiation now moves with it
+  instead of leaving a new field every few metres.
+- The host took a 60-point hit out of nowhere: bumps of the host's body in the guest's game are no longer passed on.
+- The guest's held Scrapper could stick on the host's screen over the hotbar.
+- Items in the car's storage racks and crates are now shared, so they no longer vanish when the next Zone loads.
+
+### Not checked
+
+- Custom music with real files, the trunk crash, the Scrapper on the host's screen and the car rack items were not
+  reproduced in tests; they follow the logs. Still open: the guest's Settings crash, crafting disappearing for the guest,
+  the charging station not showing "Connected" for the guest, fuel barrels missing for the guest, the guest stuck in the driver's seat after the Sierra mission.
+
 ## [0.8.5] - 2026-10-31
 
 ### Added

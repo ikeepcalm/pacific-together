@@ -190,12 +190,14 @@ local page, tasks, armed = nil, {}, nil -- nil | "main" | "tasks"; the host's op
 
 local function show(note)
     if page == nil then ov.panel(nil) return end
-    local L = { "Co-op rescue  (F9 closes)" }
+    local L = { page == "main" and "Rescue" or "Story tasks" } -- the card's title (overlay.lua)
     if page == "main" then
-        L[#L + 1] = "1  Teleport to partner"
-        L[#L + 1] = "2  Resync with host"
-        L[#L + 1] = "3  Reset controls"
-        L[#L + 1] = "4  Story tasks (fix a stuck objective)"
+        L[#L + 1] = "[1]  Teleport to partner"
+        L[#L + 1] = "[2]  Resync with host"
+        L[#L + 1] = "[3]  Reset controls"
+        L[#L + 1] = "[4]  Story tasks: fix a stuck objective"
+        L[#L + 1] = " "
+        L[#L + 1] = "[F9]  Close"
     else
         if #tasks == 0 then L[#L + 1] = "No open story tasks (waiting for the host...)" end
         for i, r in ipairs(tasks) do

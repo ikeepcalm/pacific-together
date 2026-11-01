@@ -401,12 +401,19 @@ end)
 local smooth, hz, scanned = {}, {}, 0
 RegisterLoadMapPostHook(function() smooth, hz, scanned = {}, {}, 0 end) -- keyed by address: freed ones come back as other objects
 local function dist(a, b) return math.sqrt((a.X - b.X) ^ 2 + (a.Y - b.Y) ^ 2 + (a.Z - b.Z) ^ 2) end
+local NEAR = 8000 -- uu: farther hazards jump to their updates unsmoothed (nobody sees it)
 LoopInGameThreadWithDelay(16, function()
     if not M.enabled or os.getenv("PT_MUTATE") == "nosmooth" or not safety.guest() then return end
     local now = os.clock()
     if now - scanned > 1 then
         scanned, hz = now, {}
-        each("BP_Base_Hazard_C", function(o) if o.Role == 1 and not (WI:IsValid() and o:IsA(WI)) then hz[#hz + 1] = o end end)
+        -- only hazards near the guest: every hazard of a big zone each frame cost ~6 ms a frame after 2 h (playtest 2026-10-31)
+        local pc = UEHelpers.GetPlayerController()
+        local me = pc and pc:IsValid() and pc.Pawn
+        local here = me and me:IsValid() and me:K2_GetActorLocation()
+        each("BP_Base_Hazard_C", function(o)
+            if o.Role == 1 and not (WI:IsValid() and o:IsA(WI)) and (not here or dist(o:K2_GetActorLocation(), here) < NEAR) then hz[#hz + 1] = o end
+        end)
     end
     for _, o in ipairs(hz) do
         pcall(function()

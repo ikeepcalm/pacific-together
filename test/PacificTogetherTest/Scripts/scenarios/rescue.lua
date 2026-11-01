@@ -44,7 +44,12 @@ return function(T)
         add({ run = function() T.console("ptrescue menu") end })
         add({ check = "host_menu_shown", timeout = 5, cond = function()
             for _, t in ipairs(FindAllOf("TextBlock") or {}) do
-                if t:IsValid() and t:GetFName():ToString() == "PTPanel" then return t:GetVisibility() == 3 and t:GetText():ToString():find("Co-op rescue", 1, true) ~= nil end
+                -- the menu's card (overlay.lua): its title, shown while the frame around it is visible
+                if t:IsValid() and t:GetFName():ToString() == "PTCardTitle" then
+                    local frame = FindFirstOf("Border")
+                    for _, b in ipairs(FindAllOf("Border") or {}) do if b:IsValid() and b:GetFName():ToString() == "PTCardFrame" then frame = b end end
+                    return frame:GetVisibility() == 3 and t:GetText():ToString() == "RESCUE"
+                end
             end
         end })
         add({ run = function() T.console("ptrescue menu") end })

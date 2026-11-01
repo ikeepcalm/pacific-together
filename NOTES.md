@@ -947,3 +947,54 @@ Observations
 
 Results: survivor 31/31 (new other_variant check), carsit 26/26 (new host_sees_guest_legs_folded, knee-hip dz -3), carexit 29/29,
 session 40/40. Not run: the full suite, lag/loss, mutations for the new checks.
+
+## 2026-11-01 night: fixes from the friend-hosted 0.8.5 session (pt9)
+
+Logs: `local/playtest-20261031/` (193135 = host, 18:34-19:29 only; 203059 = guest, 19:08-20:30). Plan and per-item status:
+`local/resume/RESUME-pt9-night.md`.
+
+Observations
+- Guest `PT|perf world.lua:405` (16 ms hazard smoothing loop) 0.2 s/min at 19:38 -> 10.3 s/min at 20:24; `loot.lua` 500 ms tick
+  held host frames 31-39 ms (1124 `PT|slow` lines in the host's first hour); `car.lua` localPC ran FindAllOf PlayerController per frame.
+- Host log `radio host skips L:<file> (the guest lacks it)`; guest `radio guest has N custom file(s)` grew 1..9 one by one: the
+  game makes a custom MusicTrack only when it plays it. Setting `MusicTrack.ExternalUrl` from Lua works (eval).
+- Garage probe: host lists `/Engine/Transient` templates of BP_Spawn_Resource_ElectronicDevice_{Computer,Radio} at 0,0,0; the guest
+  spawned real copies there (the "unbreakable PC"). Guest pump had 3 BP_WorldItem_Resource_GasPumpHandle attached, host 2.
+- Guest log: 30 `radiation guest volume at` per minute at 19:59 and 20:16 (host carrying an anchor): a new volume per 4 s update.
+- Host log: one guest-forwarded `MSG_Damage_Physical_Impact 60.000`.
+- Trunk crash (crash F1919, guest 0.8.5): in `UMG_PlayerMenu_Inventory ContainerOnHoveredSlot`; ids.applyLayout RemoveAllItems frees
+  the slots the open menu hovers.
+- Zone fixture: host 19 runtime BP_Spawn_GasBarrel, guest 0 (only the map-placed one); BP_ZoneTrader is a zone-generated actor too.
+- `GetSlot(i)` on the car equipped container crashed the host (AV 0xa, three scenario runs); `Slots`/`Items` iteration is safe.
+
+Fixes (0.8.6) and results
+- Closing the guest's menu from Lua (`Try Close Menu`) left the game unable to open any container menu again (lootcar 20/24,
+  bisected to it). An unsliced refill plus the menu's `Reconstruct Inventory` passed lootcar 24/24 but lost the guest's take in
+  playpath (p2_host_container_lost_item). Final: the partner's state for the container the open menu shows waits in e.pending
+  and is applied when the menu closes (watchMenu: UMG_PlayerMenu_Main_C IsInViewport + Category_Inventory.TransferContainer;
+  the inventory page keeps TransferContainer after closing, so reading it alone deferred the trunk forever, lootsync 32/34).
+- loot.lua (open-container fill, throttled scans, template filter, pump nozzles local, car part containers `I:Car.<slot>`),
+  world.lua (smooth hazards within 80 m), car.lua (cached controller, aim 14 deg / 260 uu, radio target), radio.lua (guest makes
+  tracks from its music folder, misses expire after 60 s), radiation.lua (move own copies, destroy own leftovers, 1.5 s),
+  anomalies.lua (no Physical_Impact forwarding from the guest), hands.lua (never mirror on own body), visual.lua (trader, barrels),
+  heal.lua (H), perf.lua (F10), overlay.lua/rescue.lua/guestui.lua (game fonts, F9 card).
+- lootsync 34/34, lootsync2 33/33, garagesync 35/35, guestctl 34/34, storagelayout 21/21, hands 64/64, radiation 22/22.
+  radio: committed 0.8.5 fails the same 3 checks headless (host_skips_custom_the_guest_lacks, guest_same_track_after_own_skip,
+  guest_follows_host_skip); one check changed to the new rate (`host_announced_missing_custom_once_a_minute`).
+
+- Gas barrels mirrored to the guest (visual.lua ALLOW) arrived over the zone mirror's minute; playpath failed 2 of 4 runs with
+  `move_to ... stuck` and "NOT interactable here" while copies were still being spawned. Taken out again; barrels stay host-only.
+
+- Full suite on the candidate (`suite-20261101-002512`): 51/60. Failing the same way on committed 0.8.5 tonight (stash runs):
+  playerhealth (host sees stale guest %), visual (guest_door_follows_host), pausehost (guest walks 9 uu vs 10), zoneexit
+  (guest_reentered), playpath (1 of 2), anomalies3 (bunny, since 10-25). runloop and anomalies2 passed on rerun. lootcar was a real
+  regression (menu close) and passes 24/24 now; guestcraft failed 2 of 4 (guest's dropped tool never came back; new
+  `loot guest drop` / `guest's drop` log lines added) and passed the last run.
+
+- Final code: rescue 22/22 (card title check), radio 31/34 (0.8.5 also 31/34 tonight; this run guest_plays_shared_custom
+  failed instead of host_skips_custom: the host announced ptB before the test made the guest's tracks, the guest's miss then
+  held it), lootcar 24/24, guestcraft 26/26, playpath 0.8.5 37/39 and 39/39.
+
+Not checked: real custom files, the trunk crash, Scrapper on the host HUD, car rack contents (fixture car has none), trader copy,
+heal and F10 in game. Open: guest Settings crash (only the old 0.0.8 stack), crafting button gone, charging "Connected", guest in
+driver seat after Sierra.
