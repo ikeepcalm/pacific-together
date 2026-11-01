@@ -21,6 +21,8 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 - A Scrapper appeared on the host's screen for good once the guest scrapped something on the car.
 - The garage battery charger: either player's pull now shows and charges on both sides.
 - Radiation areas glowed brightly on the guest's ground while the host saw almost nothing: the guest's copies now match.
+- FPS: in a zone the mod's steady work fell from about 2.1 s to 0.9 s a minute on the host and from 1.1 s to 0.55 s on the
+  guest (distant wreck parts and resources are checked a few at a time, the host's prop sweep rests 5 s between passes).
 
 ## [0.8.6] - 2026-11-01
 

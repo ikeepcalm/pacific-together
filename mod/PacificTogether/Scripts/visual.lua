@@ -21,9 +21,20 @@ M.zone = os.getenv("PT_VISUAL_ZONE") ~= "0" -- the zone props mirror: on (2026-1
 local RF_WasLoaded = 0x00080000 -- placed in the map file: the guest has it already
 
 local function live(o) return o ~= nil and o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) end
+-- where the time goes, one line a minute (FPS hunt 2026-11-01: ~1.1 s a minute on the host in a zone)
+local spent, spentAt = {}, os.clock()
 local function try(what, fn, ...)
+    local t = os.clock()
     local ok, err = pcall(fn, ...)
     if not ok then log("PT|error visual %s %s", what, tostring(err)) end
+    spent[what] = (spent[what] or 0) + os.clock() - t
+    if t - spentAt > 60 then
+        local l = {}
+        for k, v in pairs(spent) do l[#l + 1] = string.format("%s=%.0f", k, v * 1000) end
+        table.sort(l)
+        log("PT|visual time ms/min %s", table.concat(l, " "))
+        spent, spentAt = {}, t
+    end
 end
 local function fpath(o) return (o:GetFullName():gsub("^%S+ ", "")) end
 local function world() return UEHelpers.GetWorld() end
@@ -246,11 +257,16 @@ local function lineOf(o, k, addr)
     return line
 end
 -- one sweep over the actors, spread over ticks (a few ms each); returns the lines once a sweep is complete
-local sweep
+local sweep, sweeps, restAt = nil, 0, 0
 local function scanStep(budget)
     -- a sweep paused for a while (guest busy) or running long holds stale actors: start over (the verdicts in kinds stay)
     if sweep and (os.clock() - sweep.at > 5 or os.clock() - sweep.born > 60) then sweep = nil end
-    if not sweep then sweep = { list = FindAllOf("Actor") or {}, i = 1, cur = {}, born = os.clock() } end
+    if not sweep then
+        -- 5 s between sweeps: back to back they were ~1 s of every minute on the host (2298 actors, 5.1 s a sweep; FPS hunt
+        -- 2026-11-01). Doors pressed by a player go at once through their hooks; the sweep catches the rest.
+        if os.clock() < restAt then return nil end
+        sweep = { list = FindAllOf("Actor") or {}, i = 1, cur = {}, born = os.clock() }
+    end
     sweep.at = os.clock()
     local t0 = os.clock()
     while sweep.i <= #sweep.list and os.clock() - t0 < budget do
@@ -263,8 +279,10 @@ local function scanStep(budget)
         end
     end
     if sweep.i <= #sweep.list then return nil end
+    sweeps = sweeps + 1
+    if sweeps % 20 == 1 then log("PT|visual sweep %d actors in %.1f s", #sweep.list, os.clock() - sweep.born) end
     local cur = sweep.cur
-    sweep = nil
+    sweep, restAt = nil, os.clock() + 5
     return cur
 end
 

@@ -626,7 +626,8 @@ local function scanGuest()
             end
         end
     end
-    for _, a in ipairs(FindAllOf("BP_WorldItem_C") or {}) do
+    -- once a second: each pass reads every loose item's name (~0.3 s of each minute at 2 a second; FPS hunt 2026-11-01)
+    for _, a in ipairs(tickN % 2 == 0 and FindAllOf("BP_WorldItem_C") or {}) do
         local n = alive(a) and alive(a.Instance) and not claimed[a:GetFullName()] and not a:GetAttachParentActor():IsValid() and not tethered(a) and a:GetFullName()
         if n and not reported[n] then
             local l = a:K2_GetActorLocation()
@@ -687,22 +688,28 @@ end
 -- both: contents changed here since we last looked (the game moved items in or out)
 local function scanChanges()
     local spots = tickN % 4 == 1 and playerSpots()
-    local far = 10 -- the other parts, round robin: each one at least every ~10 s, a few per tick
+    -- the other parts, round robin: each one at least every ~30 s, 3 per tick (10 per tick, every 10 s, was ~0.5 s of each
+    -- minute on both sides in a zone; FPS hunt 2026-11-01)
+    local far, farR = 3, 6
     local now = os.clock()
     for id, e in pairs(ents) do
         if e.kind == "R" then
-            if listening and alive(e.actor) then
+            -- a resource breaks under a player's tool: near ones every tick (the near list every 2 s), the rest round robin
+            if spots and listening then e.near = alive(e.actor) and inReach(e.actor, spots) end
+            local due = e.near or (farR > 0 and now - (e.at or 0) > 10)
+            if due and not e.near then farR = farR - 1; e.at = now end
+            if due and listening and alive(e.actor) then
                 local b = brokenOf(e.actor)
                 if b ~= (e.br or false) then e.br = b; say("S|" .. id .. "|" .. (b and "br" or "-")) end
             end
         elseif e.kind == "P" then
             -- a part's full key (fuel, wear, contents) is costly (~0.4 ms) and changes slowly: every 2 s near a player
             -- (all 206 parts of a zone took 60-250 ms per check, 2026-10-22)
-            local ok = alive(e.actor) and alive(e.actor.ItemInstance)
-            local close = ok and spots and inReach(e.actor, spots)
-            local due = close or (ok and far > 0 and os.clock() - (e.at or 0) > 10)
+            local close = spots and alive(e.actor) and inReach(e.actor, spots)
+            local due = close or (far > 0 and now - (e.at or 0) > 30)
             if due and not close then far = far - 1 end
-            if due then
+            if due then e.at = now end
+            if due and alive(e.actor) and alive(e.actor.ItemInstance) then
                 e.at = os.clock()
                 -- siphoned fuel, worn durability: the part's item state
                 local s = partKey(e.actor)
@@ -851,10 +858,25 @@ LoopInGameThreadWithDelay(16, function()
     if head > #inbox then inbox, head = {}, 1 end
 end)
 
+-- where the tick's time goes, one line a minute (FPS hunt 2026-11-01: ~1 s a minute on both sides in a zone)
+local spent, spentAt = {}, os.clock()
+local function timed(name, fn, ...)
+    local t = os.clock()
+    local a, b = fn(...)
+    spent[name] = (spent[name] or 0) + os.clock() - t
+    return a, b
+end
 local function tick()
     tickN = tickN + 1
+    if os.clock() - spentAt > 60 then
+        local l = {}
+        for k, v in pairs(spent) do l[#l + 1] = string.format("%s=%.0f", k, v * 1000) end
+        table.sort(l)
+        log("PT|loot time ms/min %s", table.concat(l, " "))
+        spent, spentAt = {}, os.clock()
+    end
     if listening or common.netMode() == "client" then -- sessions only (Q7)
-        local ok, closed = pcall(watchMenu)
+        local ok, closed = pcall(timed, "menu", watchMenu)
         if ok and closed then
             for _, e in pairs(ents) do if e.pending and e.box == closed then applyState(e, e.pending) end end
         end
@@ -868,18 +890,18 @@ local function tick()
         if not listening then return end
         -- discovery every 2 s: it took ~340 ms of each 500 ms tick in a zone (local playtest 2026-10-22); until the guest's
         -- first full list it runs every tick
-        if tickN % 4 == 2 or not hostScanned then hostScanned = scanHost() end
-        sendSome()
-        scanMoves()
+        if tickN % 4 == 2 or not hostScanned then hostScanned = timed("scanHost", scanHost) end
+        timed("send", sendSome)
+        timed("moves", scanMoves)
     elseif mode == "client" then
         listening = false
         if not ids.alive(UEHelpers.GetPlayerController()) then return end
-        scanGuest()
+        timed("scanGuest", scanGuest)
     else
         return
     end
-    scanChanges()
-    if not DEAF then flush() else out = {} end
+    timed("changes", scanChanges)
+    if not DEAF then timed("flush", flush) else out = {} end
 end
 
 RegisterLoadMapPostHook(function()
