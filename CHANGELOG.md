@@ -5,6 +5,12 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+### Fixed
+
+- Custom music: both players now hear the same custom song (checked by hand on a test pair, 2026-11-01). The guest plays the
+  host's file from its own music folder and checks twice a second that it still does; before, songs kept changing, two
+  played at once, or the guest drifted to its own. Songs with accented names play too. A song only the host has is skipped.
+
 ## [0.8.6] - 2026-11-01
 
 Fixes from the second two-hour friend session (friend hosting). Not yet tested by hand; see "Not checked" below.

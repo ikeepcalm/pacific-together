@@ -84,41 +84,49 @@ local function findTrack(mm, key)
     return found
 end
 -- The game makes a custom file's MusicTrack only when it is about to play it (the guest's list grew one by one, playtest 2026-10-31,
--- and the host skipped every custom track as "lacking"). So the guest looks for the file itself in its music folder (the folder of
--- any custom track it has) and makes the track object the game would.
-local dirOf -- the music folder as the game writes it in ExternalUrl, with its trailing separator
+-- and the host skipped every custom track as "lacking"), and in custom-music mode its SkipTrack picks from its own library, not
+-- from the playlist (a track object made in Lua was never started, in either radio mode; live test 2026-11-01). So for a custom
+-- file the guest lets its game play any custom file of its own as a carrier, points that track at the host's file and opens the file
+-- in the game's media player (ExternalMediaPlayer, what the radio plays custom files through): see guestFollow.
+local dirOf -- the music folder as the game writes it in ExternalUrl ("file://C:/.../Custom/Radio/")
 local function musicDir()
     if dirOf then return dirOf end
     for _, o in ipairs(FindAllOf("MusicTrack") or {}) do
-        local ok, url = pcall(function() return valid(o) and o.ExternalUrl:ToString() or "" end)
+        -- the game's own library tracks only: a lent built-in carries the fallback folder below
+        local ok, url = pcall(function()
+            return valid(o) and o:GetOuter():GetClass():GetFName():ToString() == "DirectoryMusicLibrarySource" and o.ExternalUrl:ToString() or ""
+        end)
         local d = ok and url:match("^(.*[/\\])[^/\\]+$")
         if d then dirOf = d; return d end
     end
-    -- none loaded yet: the game's own custom radio folder
+    -- none loaded yet: the game's own custom radio folder of an installed game
     local la = os.getenv("LOCALAPPDATA")
-    return la and (la:gsub("\\", "/") .. "/PenDriverPro/Custom/Radio/") or nil
+    return la and ("file://" .. la:gsub("\\", "/") .. "/PenDriverPro/Custom/Radio/") or nil
 end
-local made = {} -- key -> MusicTrack made here
-local function makeTrack(mm, key)
-    if made[key] and valid(made[key]) then return made[key] end
-    local d = musicDir()
-    if not d then return nil end
-    local name = key:sub(3) -- "L:<file>": lower case, Windows does not mind
-    local f = io.open((d:gsub("^file:/*", "")) .. name, "rb")
-    if not f then return nil end
-    f:close()
-    local ok, t = pcall(function()
-        local o = StaticConstructObject(StaticFindObject("/Script/PenDriverPro.MusicTrack"), mm)
-        o.ExternalUrl = d .. name
-        o.Title = FText((name:gsub("%.%w+$", "")))
-        return o
-    end)
-    if not ok or not valid(t) or keyOf(t) ~= key then log("PT|radio could not make %s: %s", key, tostring(t)); return nil end
-    made[key] = t
-    log("PT|radio made track %s", key)
-    return t
+-- No custom track of the game's own to carry the host's file (right after joining the game has made none, and a skip lands on a
+-- built-in most of the time; live test 2026-11-01): one of the game's built-in tracks is lent instead. Pointed at a file, it plays
+-- that file through the media player and not its Wwise music (live test 2026-11-01, owner heard only the file). It gets its own
+-- music back as soon as the game moves on from it (guestFollow).
+local carrier
+local function toCustom(mm, url)
+    local cur = mm:CurrentRadioTrack()
+    local pl = mm.DefaultRadioPlaylist
+    local t = pl[1]
+    if valid(cur) and t:GetAddress() == cur:GetAddress() then t = pl[2] end
+    carrier = t
+    t.ExternalUrl = url
+    mm.RadioPlaylist = mm.DefaultRadioPlaylist
+    local p = mm.RadioPlaylist
+    for i = 1, p:GetArrayNum() - 1 do p[i] = t end
+    mm:SkipTrack(1)
+    log("PT|radio guest on a built-in track: %s lent to the host's file", t:GetFName():ToString())
 end
-
+-- the player's url of a file with accents does not read back byte for byte (live test 2026-11-01: "Coração" reopened every
+-- 0.7 s, restarting the song): compared without case and without the non-ASCII bytes
+local function sameUrl(a, b)
+    local function norm(x) return (x:lower():gsub("[\128-\255]", "")) end
+    return norm(a) == norm(b)
+end
 local function haveList() -- custom files this copy knows (library scan results and anything in the playlists)
     local set = {}
     for _, o in ipairs(FindAllOf("MusicTrack") or {}) do
@@ -131,7 +139,7 @@ end
 -- play a chosen track now: see the header. `done` waits for the game to start it, then restores the list.
 local playing -- { key, at, mm }
 local function playTrack(mm, key)
-    local t = findTrack(mm, key) or (isCustom(key) and makeTrack(mm, key))
+    local t = findTrack(mm, key)
     if not t then return false end
     local pl = mm.RadioPlaylist
     local n = pl:GetArrayNum()
@@ -142,6 +150,7 @@ local function playTrack(mm, key)
     log("PT|radio play %s", key)
     return true
 end
+local failed = {} -- guest: custom key -> when the game did not start it (made track): not tried again until the host moves on
 local function finishPlay()
     local p = playing
     if not p then return end
@@ -158,6 +167,13 @@ local function finishPlay()
         pl[n] = p.t -- the current track is last
     end)
     log("PT|radio played %s now=%s", p.key, tostring(k))
+    -- a made track the game would not start: its SkipTrack picked another file and the 5 s resync tried again, so the guest's
+    -- song changed every 5 s (live test 2026-11-01). Tell the host it cannot play here; the host skips it.
+    if k ~= p.key and isCustom(p.key) and mode() == "client" then
+        failed[p.key] = now()
+        net.toHost("g.radio.i", pack({ miss = p.key }))
+        log("PT|radio could not start %s, told the host", p.key)
+    end
 end
 
 -- radios (gs garage stereo, cr car radio, vol volume) -------------------------------------------------------------------
@@ -194,6 +210,71 @@ local last = {}        -- gs/cr/vol as last sent or received
 local lastTrk          -- host: the track last sent
 local hostKey          -- guest: the host's latest track
 local missed = {}      -- guest: keys already reported missing
+local function reportMiss(key)
+    if now() - (missed[key] or -math.huge) < 50 then return end -- the host forgets a miss after 60 s
+    missed[key] = now()
+    net.toHost("g.radio.i", pack({ miss = key }))
+    log("PT|radio cannot play %s here, told the host", key)
+end
+
+-- Guest: every half second, bring the radio to the host's track and fix only what differs (live tests 2026-11-01: reacting to
+-- messages lost the host's song whenever the guest's game moved on or reopened its own file by itself).
+local followAt, actAt, holdUntil, openAt, openKey, restartNext = 0, 0, 0, 0, nil, false
+local function guestFollow(mm)
+    local want = hostKey
+    if not want or playing or now() < holdUntil or now() - followAt < 0.5 then return end
+    followAt = now()
+    if carrier and now() - actAt > 3 then
+        local cur = mm:CurrentRadioTrack()
+        if not (valid(cur) and cur:GetAddress() == carrier:GetAddress()) then
+            pcall(function() carrier.ExternalUrl = "" end)
+            carrier = nil
+        end
+    end
+    if not isCustom(want) then
+        if curKey(mm) ~= want and now() - actAt > 3 then
+            actAt = now()
+            if not playTrack(mm, want) then reportMiss(want) end
+        end
+        restartNext = false
+        return
+    end
+    if now() - (failed[want] or -math.huge) < 50 then return end -- cannot play it here: the host skips it
+    local d = musicDir()
+    if not d then return end
+    local name = want:sub(3) -- "L:<file>": lower case, Windows does not mind
+    local url = d .. name
+    -- Lua's io.open takes the ANSI code page: a name with accents never opens, so those are left to the IsPlaying check below
+    if not name:find("[\128-\255]") then
+        local f = io.open((d:gsub("^file:/*", "")) .. name, "rb")
+        if not f then failed[want] = now(); reportMiss(want); return end
+        f:close()
+    end
+    local cur = mm:CurrentRadioTrack()
+    if not valid(cur) or cur.ExternalUrl:ToString() == "" then
+        -- a built-in track plays through Wwise and the media player stays silent under it: first onto a custom carrier
+        if now() - actAt > 2 then actAt = now(); toCustom(mm, url) end
+        return
+    end
+    -- a lent built-in still starts its own Wwise music next to the file (live test 2026-11-01, "1964" under the host's song):
+    -- stopped, also after the game starts it again (radio off and on)
+    if carrier and cur:GetAddress() == carrier:GetAddress() then
+        local tp = mm.MusicTrackPlayer
+        if valid(tp.AudioEvent) and valid(tp.PlaybackSource) then tp.AudioEvent:ExecuteAction(0, tp.PlaybackSource:GetOwner(), 0, 300, 4) end
+    end
+    -- the carrier is the host's file from now on, so whatever the game reopens later (radio off and on, garage and car) is right too
+    -- shortcut: the guest's library entry for the carrier file points at the host's file until the game makes it again
+    if not sameUrl(cur.ExternalUrl:ToString(), url) then cur.ExternalUrl = url end
+    local mp = mm.ExternalMediaPlayer
+    if restartNext or not sameUrl(mp:GetUrl():ToString(), url) then
+        mp:OpenUrl(url)
+        openAt, openKey, restartNext = now(), want, false
+        log("PT|radio opened %s", want)
+    elseif openKey == want and now() - openAt > 4 and now() - openAt < 15 and not mp:IsPlaying() then
+        failed[want], openKey = now(), nil -- the file did not start (an accented name the game cannot open)
+        reportMiss(want)
+    end
+end
 local guestHave = {}   -- host: guest controller name -> set of custom keys
 local denied = {}      -- host: custom keys a guest said it cannot play
 local skipAt, skipN = 0, 0
@@ -273,15 +354,13 @@ net.on("g.radio.s", function(_, data)
     local s2 = radioState()
     for _, k in ipairs({ "gs", "cr", "vol" }) do if t[k] then last[k] = s2[k] end end
     if t.trk then
+        if t.trk ~= hostKey or t.r == "1" then followAt, holdUntil = 0, 0 end -- a new track: at once, not after a guest skip's wait
         hostKey = t.trk
-        local mine = curKey(mm)
-        if mine ~= t.trk or t.r == "1" then
-            if not playTrack(mm, t.trk) and now() - (missed[t.trk] or -math.huge) > 50 then -- the host forgets a miss after 60 s
-                missed[t.trk] = now()
-                net.toHost("g.radio.i", pack({ miss = t.trk }))
-                log("PT|radio cannot play %s, told the host", t.trk)
-            end
+        if t.r == "1" then
+            -- restart: both sides start the track now
+            if isCustom(t.trk) then restartNext = true elseif not playing then actAt = now(); playTrack(mm, t.trk) end
         end
+        guestFollow(mm)
     end
 end)
 
@@ -295,6 +374,7 @@ local function hookSkip()
             local owner = self:get():GetOwner()
             local which = valid(owner) and owner:GetClass():GetFName():ToString():find("Stereo") and "gs" or "cr"
             net.toHost("g.radio.i", pack({ skip = d .. "@" .. which }))
+            holdUntil = now() + 2 -- the host's next track is on its way: no pulling back to the old one meanwhile
             log("PT|radio skip %d@%s sent", d, which)
         end)
         if not okc then log("PT|error radio skip hook %s", tostring(e)) end
@@ -312,6 +392,11 @@ local function tick()
     local s, mm, cm = radioState()
     if not s then return end
     if isGuest() then
+        -- no radio dialogues of the guest's own: the host's are not shared, and the guest's game went on with its own music after
+        -- one (live test 2026-11-01)
+        pcall(function() mm.NextNaturalInterstitialCounter, mm.NextManualInterstitialCounter = 999, 999 end)
+        local okf, ef = pcall(guestFollow, mm)
+        if not okf then log("PT|error radio follow %s", tostring(ef)) end
         local d = {}
         for k, v in pairs(s) do
             if last[k] == nil then last[k] = v elseif last[k] ~= v then d[k] = v; last[k] = v end
@@ -352,7 +437,11 @@ local function tick()
     if arrived or (resyncAt and now() > resyncAt) then
         resyncAt = nil
         -- restart the track on both sides now (the guest's own copy joined mid-track); not before the guest has told what it has
-        local restarted = audible and k and not lacking(k) and playTrack(mm, k)
+        local restarted = audible and k and not lacking(k)
+        if restarted and isCustom(k) then
+            -- the game's skip ignores the list for custom files (it played another one, live test 2026-11-01): reopen the file instead
+            pcall(function() local mp = mm.ExternalMediaPlayer; mp:OpenUrl(mp:GetUrl():ToString()) end)
+        elseif restarted then restarted = playTrack(mm, k) end
         sendState(s, mm, restarted and k or nil, true)
         hbAt = now()
         return
