@@ -18,6 +18,7 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
   and the control the guest looks at now gets the game's outline. The ARC screen in front of the shifter no longer takes the E
   meant for the shifter; looking straight at the ARC still opens it.
 - E in the garage no longer fills the log with cutscene-skip errors.
+- A Scrapper appeared on the host's screen for good once the guest scrapped something on the car.
 
 ## [0.8.6] - 2026-11-01
 

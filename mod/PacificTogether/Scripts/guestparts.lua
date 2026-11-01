@@ -36,6 +36,8 @@ local function source()
     local xf = { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = { X = 0, Y = 0, Z = -50000 }, Scale3D = { X = 1, Y = 1, Z = 1 } }
     local a = gs:BeginDeferredActorSpawnFromClass(UEHelpers.GetWorld(), cls, xf, 1, nil)
     dummy = gs:FinishSpawningActor(a, xf)
+    -- a first-person tool: it went to the host's view and stayed on the host's screen (hand test 2026-11-01)
+    pcall(function() dummy:SetActorHiddenInGame(true); dummy:SetActorTickEnabled(false) end)
     return dummy
 end
 
