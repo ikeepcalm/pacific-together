@@ -41,6 +41,9 @@ local function spawn(cls, w, n)
     a.Radius, a["Falloff Size"], a["Max Local Radiation"], a.Shape = n[5], n[6], n[7], n[8]
     a.BoxShapeSize, a.BoxShapeFalloff = { X = n[9], Y = n[10], Z = n[11] }, { X = n[12], Y = n[13], Z = n[14] }
     a:UpdateInfluenceZone(a.Influence_LocalRadiation)
+    -- the ground decal was sized at spawn with the class default (2000): a bright glowing patch the host never saw (hand test
+    -- 2026-11-01, host decal 5724 wide and faint)
+    pcall(function() a:UpdateDecal(false) end)
     return true
 end
 

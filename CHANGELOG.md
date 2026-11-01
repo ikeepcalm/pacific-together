@@ -20,6 +20,7 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 - E in the garage no longer fills the log with cutscene-skip errors.
 - A Scrapper appeared on the host's screen for good once the guest scrapped something on the car.
 - The garage battery charger: either player's pull now shows and charges on both sides.
+- Radiation areas glowed brightly on the guest's ground while the host saw almost nothing: the guest's copies now match.
 
 ## [0.8.6] - 2026-11-01
 
