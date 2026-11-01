@@ -35,7 +35,7 @@ Controls
 - E on the passenger door: get in (guest). X: get out.
 - E on the key, the shifter or the radio from the passenger seat: engine on/off, P/D, radio on/off.
 - H while looking at your friend up close: patch them up (40% health, once every 3 minutes each).
-- F9 menu, item 5: performance mode on/off (lower render scale, view distance, foliage and shadows for more FPS; remembered).
+- F9 menu, item 5: performance mode on/off (for a CPU-limited PC: the car mirror and rain cameras redraw 10 times a second instead of every frame, shorter view and shadow distance, thinner foliage, no volumetric fog; the resolution stays; remembered).
 - F9 menu, item 6: performance check (10 s): FPS as set and at half resolution, so you know whether the GPU or the CPU limits; the result is on screen and in the log.
 - Middle mouse (or G): ping a spot for your friend.
 - F9: rescue menu (teleport to your friend, resync, unstick controls, complete a stuck story task).
