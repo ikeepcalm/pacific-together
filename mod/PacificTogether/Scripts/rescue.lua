@@ -196,6 +196,7 @@ local function show(note)
         L[#L + 1] = "[2]  Resync with host"
         L[#L + 1] = "[3]  Reset controls"
         L[#L + 1] = "[4]  Story tasks: fix a stuck objective"
+        L[#L + 1] = "[5]  Performance mode: " .. (require("perf").enabled() and "on" or "off")
         L[#L + 1] = " "
         L[#L + 1] = "[F9]  Close"
     else
@@ -243,7 +244,7 @@ local function doTask(i)
     return "Completed: " .. name
 end
 
-local ACTIONS = { teleport, resync, unstick }
+local ACTIONS = { teleport, resync, unstick, nil, function() return require("perf").toggle() end }
 local function press(n)
     if page == "main" then
         if ACTIONS[n] then show(ACTIONS[n]())

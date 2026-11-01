@@ -35,7 +35,7 @@ Controls
 - E on the passenger door: get in (guest). X: get out.
 - E on the key, the shifter or the radio from the passenger seat: engine on/off, P/D, radio on/off.
 - H while looking at your friend up close: patch them up (40% health, once every 3 minutes each).
-- F10: performance mode on/off (lower render scale, view distance, foliage and shadows for more FPS; remembered).
+- F9 menu, item 5: performance mode on/off (lower render scale, view distance, foliage and shadows for more FPS; remembered).
 - Middle mouse (or G): ping a spot for your friend.
 - F9: rescue menu (teleport to your friend, resync, unstick controls, complete a stuck story task).
 - End or F8: unstick the guest's controls. Host Esc pauses both games.

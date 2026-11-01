@@ -196,7 +196,8 @@ end
 -- (the partner's loading, their own backpack and items, a resync); the rest (entered the car, picked up, repaired, anomaly hits,
 -- objectives the game's own HUD shows) goes to the log. Session lines (joined, left, connection) are pushed directly and stay.
 -- Mutation loudfeed: everything shows.
-local KEEP = { "to load", "did not load", "death crate", "Backpack", "were lost", "resynced", "Controls reset", "Host is " }
+local KEEP = { "to load", "did not load", "death crate", "Backpack", "were lost", "resynced", "Controls reset", "Host is ", "patched",
+    "heal", "full health" }
 local LOUD = os.getenv("PT_MUTATE") == "loudfeed"
 function M.post(fmt, kind, key, n)
     if not safety.active() then return end

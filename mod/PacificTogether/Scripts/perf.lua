@@ -1,4 +1,4 @@
--- Performance mode (owner request 2026-10-31: a weak PC fell to 12 FPS). F10 switches it on or off for this player only; it is
+-- Performance mode (owner request 2026-10-31: a weak PC fell to 12 FPS). F9 menu item 5 (rescue.lua) switches it on or off for this player only; it is
 -- remembered in performance.txt next to the Scripts folder and applied again at the next start. It trades looks for frames with the
 -- engine's own console variables: lower render scale, shorter view and shadow distance, thinner foliage, no volumetric fog, screen
 -- space reflections, ambient occlusion, motion blur or depth of field. Works in single player too: it changes rendering only.
@@ -47,15 +47,16 @@ local function apply(on)
     return true
 end
 
-common.onKey("F10", function()
+-- F10 opened the UE4SS console instead (hand test 2026-11-01): the F9 menu calls this
+M.enabled = enabled
+function M.toggle()
     local on = not enabled()
     local f = io.open(FILE, "w")
     if f then f:write(on and "on" or "off"); f:close() end
     apply(on)
     log("PT|perf mode %s", on and "on" or "off")
-    local ov = package.loaded["overlay"]
-    if ov then ov.post(on and "Performance mode on (F10)" or "Performance mode off (F10)", "info", "perfmode") end
-end)
+    return on and "Performance mode on" or "Performance mode off"
+end
 
 -- a map load resets nothing of these, but the first start needs a controller: try until it took, then after every map load
 -- (the game re-applies its own settings when a level loads its world settings)

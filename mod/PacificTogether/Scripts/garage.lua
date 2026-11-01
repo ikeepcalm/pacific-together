@@ -197,6 +197,7 @@ end
 net.on("g.garage.sw", function(_, data) want = data end)
 net.on("g.garage.up", function(_, data) wantUp = data end)
 
+local screenOn
 local function guestTick()
     for _, s in ipairs(SW) do
         if s[3] then
@@ -204,6 +205,14 @@ local function guestTick()
         end
     end
     if wantUp then try("upgrades", applyUpgrades, wantUp) end
+    -- the status monitor's start-up runs on the host's return-to-garage moment only: the guest's stayed black (hand test 2026-11-01)
+    -- shortcut: always on for the guest; mirror the host's state if the host's can be legitimately off
+    -- (once per map: its start-up flickers through 0)
+    if not screenOn then
+        for _, d in ipairs(FindAllOf("BP_Garage_StatusDisplay_C") or {}) do
+            if live(d) and d.StartupTimeline_Brightness_57C1FD07453CC1F37491EC8375046A4D == 0 then d:SetDisplayEnabled(true); screenOn = true end
+        end
+    end
     local g = gi()
     if not (g and want) then return end
     for i, s in ipairs(SW) do
@@ -213,7 +222,7 @@ local function guestTick()
     end
 end
 
-RegisterLoadMapPostHook(function() done, tries = {}, {} end)
+RegisterLoadMapPostHook(function() done, tries, screenOn = {}, {}, nil end)
 
 -- The guest presses the back-door button: its own press toggles its own switch, the host's copy of the button gets the same press
 -- (the host's switch is the truth and comes back in g.garage.sw). Registered once the button's class is loaded (garage map).

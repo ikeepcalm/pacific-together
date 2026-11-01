@@ -1,7 +1,8 @@
 -- Partner heal (owner's choice after playtest 2026-10-31: the host kept losing health to damage not fixed yet). Look at the other
 -- player within 3 m and press H: they get 40% of their maximum health back, for free. Each player can do it once per 3 minutes.
 -- The giver checks distance, aim and its own cooldown; the receiver heals itself (each process owns its own PlayerHealth,
--- health.lua). Messages: g.heal.give (no data). Inert in single player (Q7).
+-- health.lua). Messages: g.heal.give (no data); g.heal.full (no data), the receiver's answer when it was already at full health:
+-- the giver gets its cooldown back (hand test 2026-11-01 spent it on a full host). Inert in single player (Q7).
 local UEHelpers = require("UEHelpers")
 local common = require("common")
 local safety = require("safety")
@@ -51,9 +52,18 @@ net.on("g.heal.give", function()
     local h = valid(m) and m.PlayerHealth
     if not valid(h) then return end
     local add = math.min(h.Maximum * M.SHARE, h.Maximum - h.Current)
-    if add > 0 then h:Adjust(m, add) end
+    if add <= 0 then
+        if common.netMode() == "client" then net.toHost("g.heal.full", "") else net.toGuests("g.heal.full", "") end
+        return
+    end
+    h:Adjust(m, add)
     ov.post(ov.other() .. " patched you up", "good", "heal")
     log("PT|heal got +%.0f now %.0f/%.0f", add, h.Current, h.Maximum)
+end)
+
+net.on("g.heal.full", function()
+    readyAt = 0
+    ov.post(ov.other() .. " is already at full health", "info", "heal")
 end)
 
 return M
