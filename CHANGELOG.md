@@ -5,6 +5,11 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-11-01
+
+Fixes from the owner's live two-client test of 0.8.6 (each checked by hand on a test pair; zone travel, the Ida trader and
+fuel barrels not yet).
+
 ### Fixed
 
 - Custom music: both players now hear the same custom song (checked by hand on a test pair, 2026-11-01). The guest plays the
@@ -23,6 +28,11 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 - Radiation areas glowed brightly on the guest's ground while the host saw almost nothing: the guest's copies now match.
 - FPS: in a zone the mod's steady work fell from about 2.1 s to 0.9 s a minute on the host and from 1.1 s to 0.55 s on the
   guest (distant wreck parts and resources are checked a few at a time, the host's prop sweep rests 5 s between passes).
+
+### Checked by hand (0.8.6 fixes)
+
+- No crash with both players in the trunk; no Hot Dust trail behind a carried ARC anchor; the guest's Settings, crafting and
+  fuel nozzle work; partner heal and performance mode work.
 
 ## [0.8.6] - 2026-11-01
 
