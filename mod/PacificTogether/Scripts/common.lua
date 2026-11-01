@@ -83,15 +83,22 @@ LoopInGameThreadWithDelay(30, function()
     if #keys == 0 then return end
     local pc = UEHelpers.GetPlayerController()
     if not (pc and pc:IsValid()) then return end
+    -- read each key once, edge per key: a second handler of the same key never saw the edge (car.lua's E after cutscene.lua's,
+    -- hand test 2026-11-01: the seated guest's E did nothing)
+    local now = {}
     for _, k in ipairs(keys) do
-        local ok, down = pcall(function() return pc:IsInputKeyDown({ KeyName = FName(k[1]) }) end)
-        down = ok and down == true
-        if down and not keyDown[k[1]] then
+        if now[k[1]] == nil then
+            local ok, down = pcall(function() return pc:IsInputKeyDown({ KeyName = FName(k[1]) }) end)
+            now[k[1]] = ok and down == true
+        end
+    end
+    for _, k in ipairs(keys) do
+        if now[k[1]] and not keyDown[k[1]] then
             local okf, e = pcall(k[2])
             if not okf then M.log("PT|error key %s %s", k[1], tostring(e)) end
         end
-        keyDown[k[1]] = down
     end
+    for name, down in pairs(now) do keyDown[name] = down end
 end)
 
 function M.first(class)

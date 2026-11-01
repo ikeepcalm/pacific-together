@@ -14,6 +14,10 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 - Partner heal (H): the message now shows on screen, and healing a partner at full health tells you so instead of using up
   the cooldown.
 - The garage status monitor stayed black for the guest.
+- The seated guest's key, shifter and car radio did nothing: E reached only the first of two features listening for it. Fixed,
+  and the control the guest looks at now gets the game's outline. The ARC screen in front of the shifter no longer takes the E
+  meant for the shifter; looking straight at the ARC still opens it.
+- E in the garage no longer fills the log with cutscene-skip errors.
 
 ## [0.8.6] - 2026-11-01
 

@@ -508,6 +508,20 @@ net.on("g.car.enter", function(pc)
     if noGlide() or dist(char:K2_GetActorLocation(), car:K2_GetActorLocation()) > 600 then sit() else glideIn(char, car, PASSENGER, sit) end
 end)
 
+-- the car radio (its power button is the driver's highlight too) and the shifter: the parts attached to the car, looked up every 2 s
+local parts, partsAt = {}, -99
+local function carPart(car, class)
+    if os.clock() - partsAt > 2 then parts, partsAt = {}, os.clock() end
+    if parts[class] == nil then
+        parts[class] = false
+        for _, r in ipairs(FindAllOf(class) or {}) do
+            if valid(r) and same(r:GetAttachParentActor(), car) then parts[class] = r; break end
+        end
+    end
+    return parts[class] and valid(parts[class]) and parts[class] or nil
+end
+local function carRadio(car) return carPart(car, "BP_CarPart_Internal_Radio_C") end
+
 -- the seated guest turned the key or moved the shifter (P <-> D; P holds the parking brake): the host's own setters, then
 -- the H line shows it on both sides. No key animation or failed-start chance (ManualSetIgnition_NoAnim: 0 off, 2 running).
 net.on("g.car.ctl", function(pc, what)
@@ -1083,31 +1097,61 @@ end
 -- and presses E; the host applies it (g.car.ctl)
 -- 8 deg / 2 m was too tight: the guest never got the key from the passenger seat (no "car ctl" in a 1.5 h log, playtest 2026-10-31)
 local AIM_DEG, AIM_REACH = 14, 260
--- the car radio (its power button is the driver's highlight too): the radio part attached to the car, looked up every 2 s
-local radioPart, radioAt = nil, -99
-local function carRadio(car)
-    if os.clock() - radioAt > 2 then
-        radioAt, radioPart = os.clock(), nil
-        for _, r in ipairs(FindAllOf("BP_CarPart_Internal_Radio_C") or {}) do
-            if valid(r) and same(r:GetAttachParentActor(), car) then radioPart = r; break end
-        end
+-- the aimed control gets the game's own outline (owner request 2026-11-01): BP_HighlightManager's SetHighlightEffect sets custom
+-- depth with stencil mask 2, value 1 on the highlight's visuals
+local lit, litWhat = {}, nil
+local function outline(comps, on)
+    for _, c in ipairs(comps) do
+        pcall(function()
+            c:SetRenderCustomDepth(on); c:SetCustomDepthStencilWriteMask(on and 2 or 0); c:SetCustomDepthStencilValue(on and 1 or 0)
+        end)
     end
-    return valid(radioPart) and radioPart or nil
+end
+local function light(what, car)
+    if what == litWhat then return end
+    outline(lit, false)
+    lit, litWhat = {}, what
+    if not what then return end
+    local m
+    if what == "ign" then m = car.SM_Wagon_01_KeyPhysics
+    else
+        local part = what == "gear" and carPart(car, "BP_Carpart_Shifter_Base_C") or carRadio(car)
+        m = part and part.MainMesh
+    end
+    if m and valid(m) then lit = { m }; outline(lit, true) end
+end
+local screenOff, screenWas -- the ARC screen whose collision is off, and its own setting
+local function blockScreen(sc)
+    local addr = function(o) local ok, a = pcall(function() return o:GetAddress() end); return ok and a or nil end
+    if (sc and addr(sc)) == (screenOff and addr(screenOff)) then return end
+    if screenOff then pcall(function() screenOff.ScreenCollision:SetCollisionEnabled(screenWas) end) end
+    screenOff = nil
+    if sc then
+        pcall(function() screenWas = sc.ScreenCollision:GetCollisionEnabled(); sc.ScreenCollision:SetCollisionEnabled(0); screenOff = sc end)
+    end
 end
 local function aimAt(pc, car)
     local cam = pc.PlayerCameraManager
     local from, fwd = cam:GetCameraLocation(), kml():GetForwardVector(cam:GetCameraRotation())
     local best, bestCos = nil, math.cos(math.rad(AIM_DEG))
+    local function cosTo(p)
+        local d = { X = p.X - from.X, Y = p.Y - from.Y, Z = p.Z - from.Z }
+        local len = math.sqrt(d.X * d.X + d.Y * d.Y + d.Z * d.Z)
+        return len > 1 and (d.X * fwd.X + d.Y * fwd.Y + d.Z * fwd.Z) / len or -1, len
+    end
     local targets = { ign = car.UICollision_Key, gear = car.Socket_GearBox }
     local r = carRadio(car)
     if r then targets.radio = r.RootComponent end
     for what, comp in pairs(targets) do
-        local p = comp:K2_GetComponentLocation()
-        local d = { X = p.X - from.X, Y = p.Y - from.Y, Z = p.Z - from.Z }
-        local len = math.sqrt(d.X * d.X + d.Y * d.Y + d.Z * d.Z)
-        local c = len > 1 and (d.X * fwd.X + d.Y * fwd.Y + d.Z * fwd.Z) / len or -1
+        local c, len = cosTo(comp:K2_GetComponentLocation())
         if len < AIM_REACH and c > bestCos then best, bestCos = what, c end
     end
+    -- the ARC screen sits in front of the shifter and took the E (its ScreenCollision is what the game's interact trace hits; turning
+    -- the game's highlighter off did not help; hand test 2026-11-01): whichever is nearer the view centre wins, and while one of ours
+    -- does, the screen's collision is off
+    local sc = carPart(car, "BP_Carpart_Internal_GobblerScreen_C")
+    if best and sc and cosTo(sc:K2_GetActorLocation()) > bestCos then best = nil end
+    blockScreen(best and sc or nil)
     return best
 end
 
@@ -1199,7 +1243,10 @@ local function guestTick()
         end
     end
     aimed = riding and valid(me) and aimAt(pc, car) or nil
-    if ctlWanted and aimed then log("PT|car ctl %s sent=%s", aimed, tostring(net.toHost("g.car.ctl", aimed))) end
+    if not riding then blockScreen(nil) end
+    light(aimed, car)
+    if ctlWanted and aimed then log("PT|car ctl %s sent=%s", aimed, tostring(net.toHost("g.car.ctl", aimed)))
+    elseif ctlWanted and riding then log("PT|car ctl E aimed at nothing") end
     ctlWanted = false
     if helloFor ~= car:GetFullName() then
         helloFor = car:GetFullName()

@@ -14,10 +14,13 @@ local INTERACT = "InpActEvt_Interact_K2Node_InputActionEvent_0"
 
 -- the intro's level scripts that can skip now; a stale copy in /Engine/Transient keeps CanSkip true for good (seen on a host,
 -- 2026-10-28): pressing it does nothing, and the live one in the PersistentLevel stayed unskipped
+-- garage level scripts have a CanSkip too but no Interact event: every E logged an error (hand test 2026-11-01); skipped after one try
+local bad = {}
 local function levels()
     local r = {}
     for _, l in ipairs(FindAllOf("LevelScriptActor") or {}) do
-        local ok, can = pcall(function() return l:IsValid() and l.CanSkip and not l:GetFullName():find("/Engine/Transient", 1, true) end)
+        local ok, can = pcall(function() return l:IsValid() and l.CanSkip and not l:GetFullName():find("/Engine/Transient", 1, true)
+            and not bad[l:GetFullName()] end)
         if ok and can == true then r[#r + 1] = l end
     end
     return r
@@ -29,6 +32,7 @@ local function skipHere(why)
     for _, l in ipairs(levels()) do
         local ok, err = pcall(function() l[INTERACT](l, { KeyName = FName("E") }) end)
         log("PT|cutscene opening skipped (%s) ok=%s %s", why, tostring(ok), ok and "" or tostring(err))
+        if not ok then pcall(function() bad[l:GetFullName()] = true end) end
         any = any or ok
     end
     return any
