@@ -19,6 +19,7 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
   meant for the shifter; looking straight at the ARC still opens it.
 - E in the garage no longer fills the log with cutscene-skip errors.
 - A Scrapper appeared on the host's screen for good once the guest scrapped something on the car.
+- The garage battery charger: either player's pull now shows and charges on both sides.
 
 ## [0.8.6] - 2026-11-01
 

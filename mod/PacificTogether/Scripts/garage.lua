@@ -242,9 +242,31 @@ net.on("g.garage.btn", function()
     end
 end)
 
+-- The battery charger's lever (either player): the same press runs on the other side too, lever, sparks and charge alike (hand test
+-- 2026-11-01: the other player saw nothing, and a guest's pull charged nothing on the host). Its event does not read its arguments.
+local CHARGE = "BndEvt__Highlight_K2Node_ComponentBoundEvent_0_OnHighlightInteract__DelegateSignature"
+local chargeHooked, replaying = false, false
+local function hookCharger()
+    if chargeHooked or not live(FindFirstOf("BP_Garage_BatteryCharger_C")) then return end
+    chargeHooked = pcall(RegisterHook, "/Game/Gameplay/CarGarage/Stations/BatteryCharger/BP_Garage_BatteryCharger.BP_Garage_BatteryCharger_C:" .. CHARGE, function()
+        if replaying or not (M.enabled and safety.active()) then return end
+        if safety.guest() then net.toHost("g.garage.charge", "") else net.toGuests("g.garage.charge", "") end
+        log("PT|garage charger pulled, sent")
+    end)
+end
+net.on("g.garage.charge", function()
+    local c = FindFirstOf("BP_Garage_BatteryCharger_C")
+    if not (M.enabled and safety.active() and live(c)) then return end
+    replaying = true
+    try("charger", function() c[CHARGE](c, c.Highlight, nil) end)
+    replaying = false
+    log("PT|garage charger pulled by the other player")
+end)
+
 LoopInGameThreadWithDelay(500, function()
     if not M.enabled or not netted() then last, want = nil, nil return end
     try("hook", hookButton)
+    try("hook", hookCharger)
     if safety.guest() then try("guest", guestTick) elseif safety.active() then try("host", hostTick) end
 end)
 
