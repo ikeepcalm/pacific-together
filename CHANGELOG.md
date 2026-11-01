@@ -5,6 +5,11 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-11-01
+
+Fixes from the owner's live two-client test of 0.8.6 (each checked by hand on a test pair; zone travel, the Ida trader and
+fuel barrels not yet).
+
 ### Added
 
 - Performance check (F9 menu, item 6): 10 s of FPS as set and at half resolution tell whether the GPU or the CPU holds the
@@ -15,11 +20,6 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 - Performance mode is aimed at a CPU-limited PC: the car mirror and the two rain cameras redraw the scene 10 times a second
   instead of every frame, and the render resolution is no longer lowered (it does not help such a PC and looked worse). The gain
   could not be measured on the developer's PC (too fast); the performance check on the slow PC will tell.
-
-## [0.8.7] - 2026-11-01
-
-Fixes from the owner's live two-client test of 0.8.6 (each checked by hand on a test pair; zone travel, the Ida trader and
-fuel barrels not yet).
 
 ### Fixed
 
