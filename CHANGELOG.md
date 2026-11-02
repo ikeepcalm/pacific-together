@@ -7,6 +7,14 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 Development network protocol **5**: both players need the same development build.
 
+### Changed
+
+- The release is one exe: the launcher carries the whole package and unpacks it by itself. **Install & play** starts the
+  game through Steam when Steam is installed.
+- **Copy logs** (was Collect logs) packs everything into one Desktop zip: the game log now and of earlier runs, the mod's own
+  log of each of the last 10 runs (kept however the game was started; the game's log only ever held the last run), engine
+  logs and crashes of the last week, saves, game settings, performance check results and a system summary.
+
 ### Fixed
 
 - From the 2026-11-01 friend session (owner as guest; see NOTES "2026-11-02"):

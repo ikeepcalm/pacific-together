@@ -38,11 +38,12 @@ tools\package\package.ps1
 ```
 
 The script requires a clean `mod/` tree and the pinned UE4SS zip (override with `-UE4SSZip`). It produces
-`dist/PacificTogether-<version>-dev-<commit>.zip` and `dist/SHA256SUMS.txt`.
+`dist/PacificTogether-<version>-dev-<commit>.exe` and `dist/SHA256SUMS.txt`: one file, the launcher with the package below
+embedded as `payload.zip` and unpacked on first start to `%LOCALAPPDATA%\PacificTogether\app\<version>`
+(`dist/PacificTogether-<version>-dev-<commit>/` is the same package unpacked).
 It copies the existing native DLL; it does not prove that DLL was rebuilt from the current commit.
 
 ```text
-PacificTogether.exe                 launcher
 install.cmd / install.ps1           command-line installer
 README.txt / GUIDE.md / CHANGELOG.md player documentation
 game/                               payload installed into PenDriverPro/Binaries/Win64/

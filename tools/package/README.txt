@@ -21,7 +21,7 @@ Features
 - Join through Steam invites or by IP address. The host owns the world and save; the guest's own saves are protected.
 
 Install
-1. Close the game. Unpack this zip anywhere and open PacificTogether.exe. Check the game folder it found.
+1. Close the game. Open PacificTogether-<version>.exe (one file, nothing to unpack). Check the game folder it found.
 2. Choose Host and click Install & play. (Both players choose Host when joining through Steam: it just means "no IP".)
    Windows may warn about an unknown publisher: More info, Run anyway.
 
@@ -30,7 +30,8 @@ Play with a friend
   or picks Join game on the host in the Steam friends list.
 - IP address: in the launcher the host picks Host, the guest picks Join and types the host's IP. The host loads a save,
   the guest connects from the main menu. The host may need to forward UDP port 7777 (or use a LAN or VPN).
-Command line instead of the launcher: install.cmd (Host/Steam), install.cmd -Join <host IP>, install.cmd -Uninstall.
+Install & play starts the game through Steam when Steam is installed.
+Command line instead of the launcher (in %LOCALAPPDATA%\PacificTogether\app\<version>): install.cmd (Host/Steam), install.cmd -Join <host IP>, install.cmd -Uninstall.
 
 Controls
 - E on the passenger door: get in (guest). X: get out.
@@ -49,7 +50,7 @@ Known issues
 - Tutorial steps done by the guest alone do not count for the host. Mixed DLC between players is untested.
 
 When something breaks
-Click Collect logs in the launcher on BOTH PCs before restarting the game (the log is overwritten) and send the zips
+Click Copy logs in the launcher on BOTH PCs (earlier runs' logs, saves and system info go along) and send the zips
 with what you were doing: https://github.com/ikeepcalm/pacific-together/issues
 Log: PenDriverPro\Binaries\Win64\ue4ss\UE4SS.log. The mod blocks the game's crash uploader: report crashes here, not
 to the game's developer. More help: GUIDE.md. Changes: CHANGELOG.md.
