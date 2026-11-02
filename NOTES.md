@@ -1086,3 +1086,19 @@ Red doors (owner, same session): "some doors were not opening for me as a guest,
   (`20261102-180918-keypad`), with nokeypad host_keypad_pressed FAILS. Not proven: that a real zone keypad then opens its door for both (needs a zone with one, live loop).
 
 Open: hood, garage ARC energy, research need the live loop (look at them on the guest with the console).
+
+Anomalies (owner, same session): the saw (left-right) showed its red line but no blade; the "wiggling wreck" that spawns electric
+coils did not fire with both players next to it. Probe session `20261102-182743-repl` (zone fixture, MCP), nothing changed in code.
+- Saw = BP_Hazard_SawBlade (host log `anom3 woke BP_Hazard_SawBlade_C_...` 16:32, 17:08). Atlas: the blade (StaticMesh) is shown only by
+  BP_HazardProperty_PlayerRange's OnPlayerInRange (SetVisibility true) and hidden on OutOfRange; movement is timelines + SyncToPhase. The
+  range check is the local player's: a guest copy (tick off, world.lua) never shows its blade. Guess for the guest side; whether the host saw
+  the blade is not known. A standalone or layout-spawned saw in the probe never built its spline (pts=0): needs a real zone saw.
+- Logic Driver SMs in the probe zone (4 PhysicsGrabber, 6 Bollard) all NetworkTick/TransitionConfiguration 0 (the garage-door listen bug).
+  A grabber 5.4 m from the host stayed "Patrol" 10 s with 0 and 10 s with 2: inconclusive (it may not have had a reason to act).
+- Wreck = probably BP_Template_CivCar_Mimic + BP_Hazard_MimicTrigger_ShockPoles (atlas). Trigger: sphere (r 750) overlap turns tick on;
+  each tick fires only if BP_CarManager PlayerCarState == 0 (the host on foot). Then it spawns BP_Hazard_Movement_Prong on valid ground.
+  Probe: trigger spawned on the host next to the guest, host on foot 294 m away: it fired (ToSpawn 15 -> 0), the host had 0 prongs after
+  (ground checks far from the host's player failed?), the guest had 13 prongs at 0,0,0 with Role 3 (spawned by the guest's own game,
+  origin not found). With both players next to it in the session, the cause is unknown; a host in the car would block it (state 1).
+- Next: a zone fixture saved next to a saw and a mimic wreck, then the live loop (both sides: blade visibility, SM config, prongs).
+
