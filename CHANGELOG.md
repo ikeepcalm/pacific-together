@@ -24,6 +24,7 @@ Development network protocol **5**: both players need the same development build
     confirmation the guest stands up by the door again after 4 s.
   - Scrapping as the guest: the resources that drop stay put. They used to vanish within a second and come back as the host's
     copies a few seconds later.
+  - Door keypads (the red lights by locked doors) exist for the guest too, and its press works the host's keypad.
   - The host pulling an ARC anchor: the guest's copy plays the take (sound, fade) at once and stays as a pulled anchor, instead
     of disappearing silently seconds later.
 - Delayed car actions and handshake/body-refresh callbacks stop at a world change. A previous passenger exit cannot

@@ -163,7 +163,10 @@ local ALLOW = { "BP_Destruct_", "BP_Door_", "BP_Prop_", "BP_Poster_", "BP_Decal_
     -- own backpack; share the stock if players ask for it
     -- shortcut: the Zone's fuel barrels (BP_Spawn_GasBarrel) are missing on the guest too; mirrored copies blocked the guest's way
     -- to a container in playpath (2026-11-01), so they wait for a proper fix
-    "BP_ZoneTrader" }
+    "BP_ZoneTrader",
+    -- door keypads and hand-dryer locks (the red light by a locked door): without a copy the guest had nothing to press and its E on the
+    -- locked door went to the host's door, which stayed locked (friend session 2026-11-01, "red doors do not open for the guest")
+    "BP_ExternalDoorLock_" }
 local function allowed(cn)
     for _, p in ipairs(ALLOW) do
         if cn:sub(1, #p) == p then return not cn:find("Part_", 1, true) end
@@ -532,6 +535,21 @@ net.on("g.vis.door", function(_, name)
     end
     log("PT|visual guest used door %s: %s, state=%s", name, d and "pressed on the host" or "not on the host", d and tostring(d.CurrentState) or "?")
 end)
+-- the guest pressed its copy of a door keypad / hand-dryer lock: the host's own lock is pressed (it checks and unlocks its door; the door's
+-- state reaches the guest with the props). shortcut: the guest's copy keeps its red light; mirror Success/Fail if players notice
+local keypadAt = {}
+net.on("g.vis.keypad", function(_, name)
+    if not M.enabled or os.clock() - (keypadAt[name] or -9) < 1 then return end -- one press fires several of the lock's events
+    keypadAt[name] = os.clock()
+    local k
+    for _, c in ipairs({ "BP_ExternalDoorLock_Keypad_C", "BP_ExternalDoorLock_HandDryer_C" }) do
+        for _, o in ipairs(FindAllOf(c) or {}) do
+            if live(o) and o:GetFName():ToString() == name and not fpath(o):find("/Engine/Transient", 1, true) then k = o end
+        end
+    end
+    if k then pcall(function() k.Highlight:InteractPressed(nil); k.Highlight:InteractReleased(nil) end) end
+    log("PT|visual guest pressed lock %s: %s", name, k and "pressed on the host" or "not on the host")
+end)
 net.on("g.vis.door2", function(_, data) -- the guest turned a double door's second leaf: "name|angle"
     if not M.enabled then return end
     local name, to = data:match("^(.*)|(%-?%d+)$")
@@ -667,6 +685,11 @@ local function make(f)
     end
     local door = f[1] == "B" and asset:find("/BP_Door_", 1, true) ~= nil
     if door then hookDoor(cls, INTERACT, "g.vis.door"); hookDoor(cls, UNLOCK, "g.vis.unlock") end
+    local lock = f[1] == "B" and asset:find("/BP_ExternalDoorLock_", 1, true) ~= nil and M.mutate ~= "nokeypad"
+    if lock then -- the guest's press goes to the host's lock (which of its four highlight events is the press is not known: all of them)
+        for i = 0, 3 do hookDoor(cls, "BndEvt__Highlight_K2Node_ComponentBoundEvent_" .. i .. "_OnHighlightInteract__DelegateSignature", "g.vis.keypad") end
+        door = true -- keeps the interact trace
+    end
     -- copies block pawns and the car but not the interaction/camera traces: a guest's interact, pickup and aim trace must not hit a copy
     -- (playpath, lootsync2 failed with the copies blocking them). Doors keep the interact trace: the guest's E on one goes to the host.
     pcall(function()

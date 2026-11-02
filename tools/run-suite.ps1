@@ -11,7 +11,7 @@ $Suite = [ordered]@{ # most affected by recent merges first, so a cut-short run 
     carfeel = "garage"; guestswap = "gateway"; pausemenu = "garage"; runloop = "garage"; worldsync = "gateway"; storysync = "garage"; storyprog = "garage"; overlay = "garage"; mapmark = "zone"; ping = "garage"; upgrades = "garage"; stations = "garage"; hands = "garage"; visual = "zone"; visualgarage = "garage"
     anomalies = "zone"; anomalies2 = "zone"; anomalies3 = "zone"; boons = "garage"; safety = ""; nametag = ""; sessiontravel = "garage"; sessionrejoin = ""
     zonejoin = ""; steamsession = ""
-    zonespawn = "zone"; guestui = "garage"; worlddoors = "garage"; worldzone = "zone"; weathersync = "zone"; anchordup = "zone"; radiation = "zone"; wheelflat = "zone"; portals = "gateway"; pausehost = "garage"; anomtesla = "zone"; carsit = "garage"; survivor = "garage"; carrelevant = "garage"; netflow = "garage"; zoneexit = "coop-zone"; transition = "coop-zone"; arcui = "gateway"
+    zonespawn = "zone"; guestui = "garage"; worlddoors = "garage"; worldzone = "zone"; weathersync = "zone"; anchordup = "zone"; keypad = "zone"; radiation = "zone"; wheelflat = "zone"; portals = "gateway"; pausehost = "garage"; anomtesla = "zone"; carsit = "garage"; survivor = "garage"; carrelevant = "garage"; netflow = "garage"; zoneexit = "coop-zone"; transition = "coop-zone"; arcui = "gateway"
 }
 $out = Join-Path $Repo "local\test-results\suite-$(Get-Date -f yyyyMMdd-HHmmss)$(if ($Shard) { '-' + ($Shard -replace '/', 'of') }).txt"
 $Suite.itemphysics = "garage"

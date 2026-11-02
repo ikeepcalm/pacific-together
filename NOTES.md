@@ -1073,4 +1073,16 @@ prediction"), with nopredict 28/29 (walk-in 2.02 s after the press); dropfall 21
 guest_drop_kept_single). Not run: lootsync and the rest of the suite; the real 80-100 ms ping (no udp-lag run); the rollback path
 (host refusing a seat); anchor sound and fade by ear.
 
+Red doors (owner, same session): "some doors were not opening for me as a guest, specifically red doors in the expedition".
+- Observed: host 17:41:07-10 five `guest used door BP_Door_Single5_160: pressed on the host, state=3` (3 = locked: the garage's rear
+  door read 3 before the guest's Unlocker and 2 after); 16:46:30-31 three presses of `BP_Door_Sliding_Single_Science_Trailer_Ext_T1`,
+  state=3. The guest's Unlocker uses did reach the host (`unlocked on the host`, 17:41:37 and 17:46:10).
+- Derived: a door keypad (BP_ExternalDoorLock_Keypad, matRed/matGreen, DoorActor) and the hand-dryer lock are their own actors;
+  visual.lua's ALLOW list had no BP_ExternalDoorLock_, so the guest had no copy to press. Guess: the "red doors" are these keypads.
+- Change: ALLOW + "BP_ExternalDoorLock_"; the guest's copy hooks the lock's highlight events 0-3 and sends g.vis.keypad; the host presses
+  its own lock (1 s dedupe, one press fires two events). shortcut: the guest's copy keeps its red light. Map-placed keypads (not
+  copies) are not covered. Mutation nokeypad.
+- Check: new scenario keypad (host spawns a keypad by the guest, the guest presses its copy by the interact action) 20/20
+  (`20261102-180918-keypad`), with nokeypad host_keypad_pressed FAILS. Not proven: that a real zone keypad then opens its door for both (needs a zone with one, live loop).
+
 Open: hood, garage ARC energy, research need the live loop (look at them on the guest with the console).
