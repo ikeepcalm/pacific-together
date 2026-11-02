@@ -5,7 +5,10 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
-Development network protocol **5**: both players need the same development build.
+## [0.8.8] - 2026-11-02
+
+Network protocol **6**: both players need 0.8.8. Includes the Everelsu fork's three commits (garage systems, passenger sway
+and controls, message lifetimes; native layer rebuilt).
 
 ### Changed
 
