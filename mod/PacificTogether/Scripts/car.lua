@@ -690,6 +690,7 @@ end
 -- frame and the interior shook against it at speed (POV in car space p5-p95 ~8 uu, 2026-10-30). The car's own ReceiveTick runs in
 -- the actor ticks, before the camera: the step runs there, the loop only stands in when the tick stops (mutation nocartick: loop only).
 local TICK = os.getenv("PT_MUTATE") ~= "nocartick"
+local LOOK = os.getenv("PT_MUTATE") ~= "nocarlook"
 local followed, followLoop = nil, nil
 local tickStep, tickAt, tickHooked = nil, 0, false
 local function hookTick(car)
@@ -739,10 +740,15 @@ local function sway(car, t)
     sw.as = vec(sw.as.X + (a.X - sw.as.X) * f, sw.as.Y + (a.Y - sw.as.Y) * f, sw.as.Z + (a.Z - sw.as.Z) * f)
     local aL = kml():InverseTransformDirection(car:GetTransform(), sw.as)
     local off, ov = sw.off, sw.ov
-    for _, k in ipairs({ "X", "Y", "Z" }) do
-        local target = math.max(-MAXOFF, math.min(MAXOFF, -aL[k] * GAIN))
-        ov[k] = ov[k] + (K * (target - off[k]) - C * ov[k]) * dt
-        off[k] = math.max(-MAXOFF, math.min(MAXOFF, off[k] + ov[k] * dt))
+    -- A whole frame destabilizes this spring below ~15 FPS, even after the parked car stops moving.
+    local steps = math.ceil(dt * 120)
+    local h = dt / steps
+    for _ = 1, steps do
+        for _, k in ipairs({ "X", "Y", "Z" }) do
+            local target = math.max(-MAXOFF, math.min(MAXOFF, -aL[k] * GAIN))
+            ov[k] = ov[k] + (K * (target - off[k]) - C * ov[k]) * h
+            off[k] = math.max(-MAXOFF, math.min(MAXOFF, off[k] + ov[k] * h))
+        end
     end
     local w = kml():TransformDirection(car:GetTransform(), off)
     cam:K2_SetRelativeLocation(kml():InverseTransformDirection(cam:GetAttachParent():K2_GetComponentToWorld(), w), false, {}, false)
@@ -756,6 +762,7 @@ local function follow(car)
     -- placed on the last sample's end point: nothing to do until the host's car moves again (a parked car cost the guest this
     -- loop's full price every frame, ~0.5 ms; part of 1-4 s a minute in the rendered profile, 2026-10-24)
     local settled = false
+    local lookYaw = car:K2_GetActorRotation().Yaw
     local name = car:GetFullName()
     log("PT|car follow %s", name)
     followed = name
@@ -785,7 +792,18 @@ local function follow(car)
             end
             delay = delay + (target - delay) * 0.01
             local to, rot = sample_at(buf, t - delay, "tm")
-            if to then car:K2_SetActorLocationAndRotation(to, rot, false, {}, true) end
+            if to then
+                car:K2_SetActorLocationAndRotation(to, rot, false, {}, true)
+                local turn = wrap(rot.Yaw - lookYaw)
+                lookYaw = rot.Yaw
+                local pc = localPC()
+                if LOOK and math.abs(turn) > 0.0001 and pc
+                    and valid(pc.Pawn) and same(pc.Pawn:GetAttachParentActor(), car) then
+                    -- ControlRotation is world-space; carry the passenger's current look through the car's turn.
+                    local view = pc:GetControlRotation()
+                    pc:SetControlRotation({ Pitch = view.Pitch, Yaw = view.Yaw + turn, Roll = view.Roll })
+                end
+            end
             -- past the last sample by more than sample_at's 0.25 s of extrapolation: the pose no longer changes
             if last and t - delay > last.tm + 0.3 then settled = true end
         end)
@@ -1101,66 +1119,23 @@ local function hookAll()
     common.onKey("E", function() ctlWanted = true end)
 end
 
--- the seated guest's ignition key and shifter: the game highlights them only for the driver ("Must be inside car!" in
--- BP_HighlightManager's Should Allow Highlight; a post-hook cannot change its out param), so the guest aims with its camera
--- and presses E; the host applies it (g.car.ctl)
--- 8 deg / 2 m was too tight: the guest never got the key from the passenger seat (no "car ctl" in a 1.5 h log, playtest 2026-10-31)
-local AIM_DEG, AIM_REACH = 14, 260
--- the aimed control gets the game's own outline (owner request 2026-11-01): BP_HighlightManager's SetHighlightEffect sets custom
--- depth with stencil mask 2, value 1 on the highlight's visuals
-local lit, litWhat = {}, nil
-local function outline(comps, on)
-    for _, c in ipairs(comps) do
-        pcall(function()
-            c:SetRenderCustomDepth(on); c:SetCustomDepthStencilWriteMask(on and 2 or 0); c:SetCustomDepthStencilValue(on and 1 or 0)
-        end)
-    end
-end
-local function light(what, car)
-    if what == litWhat then return end
-    outline(lit, false)
-    lit, litWhat = {}, what
-    if not what then return end
-    local m
-    if what == "ign" then m = car.SM_Wagon_01_KeyPhysics
-    else
-        local part = what == "gear" and carPart(car, "BP_Carpart_Shifter_Base_C") or carRadio(car)
-        m = part and part.MainMesh
-    end
-    if m and valid(m) then lit = { m }; outline(lit, true) end
-end
-local screenOff, screenWas -- the ARC screen whose collision is off, and its own setting
-local function blockScreen(sc)
-    local addr = function(o) local ok, a = pcall(function() return o:GetAddress() end); return ok and a or nil end
-    if (sc and addr(sc)) == (screenOff and addr(screenOff)) then return end
-    if screenOff then pcall(function() screenOff.ScreenCollision:SetCollisionEnabled(screenWas) end) end
-    screenOff = nil
-    if sc then
-        pcall(function() screenWas = sc.ScreenCollision:GetCollisionEnabled(); sc.ScreenCollision:SetCollisionEnabled(0); screenOff = sc end)
-    end
-end
-local function aimAt(pc, car)
+-- The guest remains a character, so enable the dashboard's native highlights for that state; E is applied by the host.
+local AIM_DEG, AIM_REACH = 12, 200
+local controlHighlights = {}
+local function aimAt(pc)
     local cam = pc.PlayerCameraManager
     local from, fwd = cam:GetCameraLocation(), kml():GetForwardVector(cam:GetCameraRotation())
     local best, bestCos = nil, math.cos(math.rad(AIM_DEG))
-    local function cosTo(p)
-        local d = { X = p.X - from.X, Y = p.Y - from.Y, Z = p.Z - from.Z }
-        local len = math.sqrt(d.X * d.X + d.Y * d.Y + d.Z * d.Z)
-        return len > 1 and (d.X * fwd.X + d.Y * fwd.Y + d.Z * fwd.Z) / len or -1, len
+    for what, h in pairs(controlHighlights) do
+        local comp = valid(h) and h.HighlightCollision:GetArrayNum() > 0 and h.HighlightCollision[1]
+        if valid(comp) then
+            local p = comp:K2_GetComponentLocation()
+            local d = { X = p.X - from.X, Y = p.Y - from.Y, Z = p.Z - from.Z }
+            local len = math.sqrt(d.X * d.X + d.Y * d.Y + d.Z * d.Z)
+            local c = len > 1 and (d.X * fwd.X + d.Y * fwd.Y + d.Z * fwd.Z) / len or -1
+            if len < AIM_REACH and c > bestCos then best, bestCos = what, c end
+        end
     end
-    local targets = { ign = car.UICollision_Key, gear = car.Socket_GearBox }
-    local r = carRadio(car)
-    if r then targets.radio = r.RootComponent end
-    for what, comp in pairs(targets) do
-        local c, len = cosTo(comp:K2_GetComponentLocation())
-        if len < AIM_REACH and c > bestCos then best, bestCos = what, c end
-    end
-    -- the ARC screen sits in front of the shifter and took the E (its ScreenCollision is what the game's interact trace hits; turning
-    -- the game's highlighter off did not help; hand test 2026-11-01): whichever is nearer the view centre wins, and while one of ours
-    -- does, the screen's collision is off
-    local sc = carPart(car, "BP_Carpart_Internal_GobblerScreen_C")
-    if best and sc and cosTo(sc:K2_GetActorLocation()) > bestCos then best = nil end
-    blockScreen(best and sc or nil)
     return best
 end
 
@@ -1251,17 +1226,69 @@ local function guestTick()
             stopRide(me)
         end
     end
-    aimed = riding and valid(me) and aimAt(pc, car) or nil
-    if not riding then blockScreen(nil) end
-    light(aimed, car)
-    if ctlWanted and aimed then log("PT|car ctl %s sent=%s", aimed, tostring(net.toHost("g.car.ctl", aimed)))
-    elseif ctlWanted and riding then log("PT|car ctl E aimed at nothing") end
-    ctlWanted = false
     if helloFor ~= car:GetFullName() then
         helloFor = car:GetFullName()
         net.toHost("g.car.hello")
     end
 end
+
+local controlCar, controlData, controlRetryAt = nil, {}, 0
+local function restoreControls()
+    for h, saved in pairs(controlData) do
+        if valid(h) then
+            if saved.inside ~= nil and valid(h.ExtraData) then h.ExtraData.IsInside = saved.inside end
+            if PTNative_Unmute then PTNative_Unmute(h:GetAddress()) end
+        end
+    end
+    controlCar, controlData, controlHighlights = nil, {}, {}
+end
+RegisterLoadMapPreHook(function() controlCar, controlData, controlHighlights, aimed, ctlWanted = nil, {}, {}, nil, false end)
+local function highlightControl(hm)
+    if not aimed or not controlCar or os.getenv("PT_MUTATE") == "nopasshighlight" then return end
+    local h = controlHighlights[aimed]
+    if valid(h) and not same(hm.CurrentHighlight, h) then
+        hm:SetHighlight(h)
+    end
+end
+LoopInGameThreadWithDelay(16, function()
+    if common.netMode() ~= "client" or not riding then
+        aimed, ctlWanted = nil, false
+        if controlCar then restoreControls() end
+        return
+    end
+    local car, pc, hm = theCar(false), localPC(), first("BP_HighlightManager_C")
+    if not (car and pc and hm) then return end
+    if not same(controlCar, car) or (not valid(controlHighlights.gear) and os.clock() >= controlRetryAt) then
+        restoreControls()
+        controlCar = car
+        controlRetryAt = os.clock() + 1
+        controlHighlights.ign = car.Highlight_Key
+        -- Cosmetic shifters own their collision and mesh; the old car.Highlight_GearBox contains null references.
+        for _, a in ipairs(FindAllOf("BP_Carpart_Shifter_Base_C") or {}) do
+            if valid(a) and same(a:GetAttachParentActor(), car) then
+                controlHighlights.gear = a.Highlight
+                break
+            end
+        end
+        local radio = carRadio(car)
+        controlHighlights.radio = radio and radio.Highlight1
+        for what, h in pairs(controlHighlights) do
+            if valid(h) then
+                local saved = {}
+                if what ~= "radio" and valid(h.ExtraData) and os.getenv("PT_MUTATE") ~= "nopasshighlight" then
+                    saved.inside = h.ExtraData.IsInside
+                    h.ExtraData.IsInside = false -- the passenger remains a character, outside the native driver state
+                end
+                controlData[h] = saved
+                if PTNative_Mute then PTNative_Mute(h:GetAddress(), "InteractPressed|InteractReleased") end
+            end
+        end
+    end
+    aimed = hm.Enabled and aimAt(pc) or nil
+    highlightControl(hm) -- dashboard controls win over the ARC's broad selection volume
+    if ctlWanted and aimed then log("PT|car ctl %s sent=%s", aimed, tostring(net.toHost("g.car.ctl", aimed))) end
+    ctlWanted = false
+end)
 
 LoopInGameThreadWithDelay(250, function()
     local mode = common.netMode()

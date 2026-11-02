@@ -97,7 +97,7 @@ return function(T)
         add({ check = "host_guest_seated", timeout = 240, cond = function()
             local g, car = S.guestChar(), L.car()
             if not g or not car or not attached(g, car) then return false end
-            local want = L.passengerLocal(car, T.myPawn())
+            local want = L.v(46.2, 45.8, -12.3) -- X8's measured seat; the native driver transform can be an entry pose above it.
             local d = L.d(L.toLocal(car, g:K2_GetActorLocation()), want)
             log("PT|info guest seat error %.1f", d)
             return d < 5

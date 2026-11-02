@@ -9,6 +9,9 @@ Development network protocol **5**: both players need the same development build
 
 ### Fixed
 
+- Passenger camera sway settles at low FPS instead of amplifying tiny parked-car movements into sustained shaking.
+- Passenger ignition and P/D interaction again use the game's native highlight and dashboard selection.
+- Passenger look follows car turns while preserving free look, and returns to world-space control after leaving.
 - Joining guests restore logbook history quietly; new discoveries still show notifications.
 - Remote damage is intercepted before local health and HUD feedback run, preventing the host's red damage frame for a guest hit.
 - A seated passenger can interact with the front passenger door to open it and leave on that side.

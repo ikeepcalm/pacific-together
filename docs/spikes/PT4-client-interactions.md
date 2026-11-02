@@ -14,8 +14,9 @@ The November 1 results below predate integration of the twelve upstream commits 
   receiver's damage/heal binds before their Blueprint bodies and queues the payload for the existing owner-directed
   message channel. Weak object identities and temporary payload roots protect deferred delivery. Local receivers keep
   the game's normal health, resistance and feedback logic.
-- Upstream 0.8.7 supplies the shared E edge dispatch, dashboard outlines, ARC collision priority and radio control.
-  Those implementations are retained. The extra cutscene check requires an actual boolean `CanSkip`.
+- Upstream 0.8.7 supplies the shared E edge dispatch and radio control. Passenger key/shifter selection was subsequently
+  restored to native highlights at the owner's request; see the November 2 passenger follow-up below.
+  The extra cutscene check requires an actual boolean `CanSkip`.
 - Passenger entry/exit glides use the front right door. Exit opens that door and closes it after the transition.
   The game's grounded driver exit is mirrored to the passenger side when ground exists there; the existing driver-side
   fallback remains when the passenger side has no ground. Wall clearance at the mirrored spot remains unverified.
@@ -136,3 +137,71 @@ Sensitivity controls on the integrated candidate:
 | Passenger-door exit | `20261102-100933-a-carexit-nopassdoorexit` | Expected failure, 26/31; detachment, passenger-side placement and subsequent walking fail |
 
 All three controls completed without new crash folders.
+
+## November 2 passenger follow-up
+
+At the owner's request, key and P/D selection again use the game's own highlight components and feedback, as in the
+saved pre-integration implementation. The cosmetic shifter's highlight supplies its actual collision and visuals.
+Radio control and the shared E dispatch remain available. The ARC screen keeps its normal collision; a 16 ms loop
+sets native selection without calling `SetHighlight` from a Blueprint hook.
+The original inside/outside flags and muted interaction functions are restored when the passenger leaves.
+
+The guest's look previously stayed in world space while the interpolated car turned beneath it. The car-follow step
+now adds its smoothed yaw delta to the seated guest's control rotation, before camera update. Mouse look and pitch are
+preserved. On foot, no car rotation is applied; the existing head-sway calculation is unchanged.
+
+`guestctl` now checks native selection and visuals, competing selection, ignition/P/D host authority, view direction
+through a turn and the yaw wrap, manual look, and unchanged on-foot view after exit. Mutations are `nopasshighlight`,
+`nocarlook` and the existing `noguestctl`. These checks use real game clients, not a mathematical mock.
+
+The first follow-up run (`20261102-112806-a-guestctl`) was stopped after a direct reentrant highlight probe ceased
+answering. It also exposed a stale test assumption that the key's highlighted mesh is always `SM_Wagon_01_KeyPhysics`;
+the assertions now read the highlight component's actual `HighlightVisuals`. That interrupted run is not a pass.
+The next attempt (`20261102-113146-a-guestctl`) passed native selection but also stopped answering with a Blueprint
+tick hook installed. Both Blueprint hooks were removed; no such hook is installed by the final implementation.
+
+The corrected headless `guestctl` run (`20261102-113414-a-guestctl`) passed 51/51. The camera kept relative yaw 30 degrees
+and pitch -12 through the first turn, then yaw 50 and pitch -20 through the second turn after manual look. Leaving
+stopped the car-relative yaw adjustment. A subsequent test-only addition also covers native radio selection.
+
+The disabled-look control (`20261102-113644-a-guestctl-nocarlook`) failed the two turn checks and the dependent manual-look
+check: 49/52, no crash. With native dashboard selection disabled (`20261102-114003-a-guestctl-nopasshighlight`), the key,
+radio, shifter and competing-selection checks failed while all camera checks passed: 47/52, no crash.
+
+The first `carsync` follow-up (`20261102-114235-a-carsync`) was stopped before driving: its host-side seat check used the
+native driver's transient entry transform, 22.3 uu above the seated character. The test now uses X8's measured passenger
+seat reference, as production seating already does. Production placement was not changed.
+
+Final validation was resumed later on November 2. `carsync` (`20261102-135055-a-carsync`) could not load the fixture:
+the game logged `Missing mounted DLC` and `SAVEFILE CONTAINS MISSING ENTITLEMENTS`. The rendered `guestctl` retry with
+the existing `local/fixtures-fresh/garage` save was rejected by the same entitlement check. Both runs were stopped;
+neither is a passing result. No entitlement, save or real-install changes were made. The completed evidence for the
+gameplay change remains the 51/51 headless run and the two failing mutation controls above; the final rendered run,
+driving regression and full release suite remain unverified. No release package was built.
+
+## November 2 stationary passenger shaking
+
+The owner reported shaking even with the car parked. A separate pair at `D:/PTLanes/passenger`, port 7823, opened
+`/Game/Maps/RunProto/RB_Garage` directly without a fixture save. The supported executable hash was verified. The owner's
+active pair was left running; its test console did not answer, so no runtime changes were applied there.
+
+Reproduction: seated guest, `t.MaxFPS 12`, host chassis made kinematic, host car moved 1 uu and returned after 500 ms.
+The guest's FP camera relative offset was sampled for eight seconds. Before the fix, its maximum and its maximum after
+five seconds both reached 17.3205 uu (all three axes at their 10 uu clamp), across 91 samples. The isolated spring also
+diverged with zero target at 12/15 FPS. This proves one cause of stationary shaking; it does not establish that every
+possible movement-replication writer conflict is absent.
+
+The semi-implicit spring used the whole frame as its integration step. With K=247 and damping=22, its stability limit
+is about 66 ms. Frames longer than that amplify an initial displacement instead of damping it. Only spring integration
+now uses steps no longer than 1/120 s. Its gain, damping, movement interpolation, camera yaw and seat positioning remain
+as before.
+
+After a full restart, the same 12 FPS perturbation peaked at 0.8597 uu and settled to zero in the five-to-eight-second
+window (97 samples). `scenarios/passengersway_probe.lua` preserves the live assertion: start after seating, apply the
+host perturbation, then call `check()` after eight seconds. It requires enough samples and tail displacement below 0.2 uu.
+The before/after runs use real host and guest game processes with headless rendering, not a mathematical mock.
+
+With FPS caps of 30 and 60, the probe also passed: peak offsets 0.6094 and 0.4651 uu, tail zero, 234 and 341 samples
+respectively. The sample counts do not establish a sustained 60 FPS. Baseline session archive:
+`20261102-140726-passenger-repl`; corrected session: `20261102-141113-passenger-repl`. Both sessions stopped cleanly,
+15/15 lifecycle checks, no new crashes. Full driving, rendered hand play and the release suite were not run for this fix.
