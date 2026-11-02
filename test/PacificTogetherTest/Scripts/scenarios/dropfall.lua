@@ -2,6 +2,7 @@
 -- Each side drops an item the way the game does (item to the hand, PlayerDropHandItem); after a few seconds the item's Z on the other
 -- side is within 20 cm of the dropper's resting Z, and below the dropper's own height.
 -- Run: tools/run-test.ps1 -Scenario dropfall -Fixture zone -Headless
+-- guest_drop_kept_single: the guest's dropped actor itself stays and is the only copy (mutation nodropadopt fails it).
 -- Mutation nofall: loot.lua does not send item positions after the first line (the copy stays where it appeared) -> FAILS.
 return function(T)
     local L = require("scenarios.sessionlib")(T)
@@ -37,7 +38,7 @@ return function(T)
         m:PlayerDropHandItem(o1, o2)
         assert(o1["Drop Success"], "drop failed")
         local l = o2["World Actor"]:K2_GetActorLocation()
-        return l.X, l.Y, l.Z
+        return l.X, l.Y, l.Z, o2["World Actor"]
     end
     local got = {}
     local function drain()
@@ -92,7 +93,17 @@ return function(T)
         return steps
     end
 
-    local gx, gy, gz, gp
+    local gx, gy, gz, gp, gActor
+    local function count(path, x, y)
+        local name, n = path:match("[^/%.]+$"), 0
+        for _, a in ipairs(FindAllOf("BP_WorldItem_C") or {}) do
+            if alive(a) and alive(a.Instance) and a.Instance.Archetype:GetFName():ToString() == name then
+                local l = a:K2_GetActorLocation()
+                if (l.X - x) ^ 2 + (l.Y - y) ^ 2 < 300 ^ 2 then n = n + 1 end
+            end
+        end
+        return n
+    end
     add({ check = "client_in_zone", timeout = 400, cond = function() return T.netMode() == "client" and T.map() == mapName and T.cls(T.myPawn()) == T.CHAR end })
     add({ check = "guest_told_hz", timeout = 240, cond = function() return has("t.hz") end })
     add({ check = "host_drop_on_guest_ground", timeout = 30, cond = function()
@@ -105,10 +116,17 @@ return function(T)
     add({ check = "guest_told_gstart", timeout = 120, cond = function() return has("t.gstart") end })
     add({ run = function()
         gp = T.myPawn():K2_GetActorLocation().Z
-        gx, gy, gz = drop(TAPE)
+        gx, gy, gz, gActor = drop(TAPE)
         log("PT|info dropfall guest dropped at %.0f,%.0f,%.0f (pawn z %.0f)", gx, gy, gz, gp)
     end })
     add({ wait = 8 })
+    -- the guest's own item stays (the host adopts it, loot.lua "K"): not deleted and replaced by the host's copy seconds later
+    -- (scrapped resources vanished and came back, friend session 2026-11-01). Mutation nodropadopt fails it.
+    add({ check = "guest_drop_kept_single", timeout = 1, cond = function()
+        local n = count(TAPE, gx, gy)
+        log("PT|info dropfall guest's own drop alive=%s copies near=%d", tostring(alive(gActor)), n)
+        return alive(gActor) and n == 1
+    end })
     add({ run = function()
         local z = zOf(TAPE, gx, gy)
         assert(z, "the guest's dropped item is gone")

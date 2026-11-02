@@ -924,19 +924,48 @@ local function ride(char, car, off)
         char.AttachmentReplication.LocationOffset.Y, char.AttachmentReplication.LocationOffset.Z)
 end
 -- the host seated us (g.car.seat, sent with its attach): attach here at once instead of waiting seconds for the replicated attachment
-net.on("g.car.seat", function(_, data)
-    if common.netMode() ~= "client" then return end
-    local x, y, z = data:match("^([^,]*),([^,]*),(.*)$")
-    local me, car = localPC() and localPC().Pawn, theCar(false)
-    if not (x and valid(me) and car) or same(me:GetAttachParentActor(), car) then return end
-    local off = vec(tonumber(x), tonumber(y), tonumber(z))
+local function seatMe(me, car, off)
     stopGlide(me) -- our own entry glide ends here at the latest
     local r = car:K2_GetActorRotation()
     me:K2_SetActorRotation({ Pitch = 0, Yaw = r.Yaw, Roll = 0 }, true) -- facing forward, as the host seats the body
     me:K2_AttachToActor(car, NONE, 1, 1, 1, false)
     ride(me, car, off)
+end
+local seatConfirmedAt = -math.huge -- guest: now() of the host's last g.car.seat
+net.on("g.car.seat", function(_, data)
+    if common.netMode() ~= "client" then return end
+    seatConfirmedAt = now()
+    local x, y, z = data:match("^([^,]*),([^,]*),(.*)$")
+    local me, car = localPC() and localPC().Pawn, theCar(false)
+    if not (x and valid(me) and car) or same(me:GetAttachParentActor(), car) then return end -- already seated by our own prediction
+    local off = vec(tonumber(x), tonumber(y), tonumber(z))
+    seatMe(me, car, off)
     log("PT|car seated by the host message at %.1f,%.1f,%.1f", off.X, off.Y, off.Z)
 end)
+
+-- Prediction: the guest walks in and sits down at once, as the host does the same; the host's g.car.seat confirms it. Waiting for the
+-- host's walk-in to end first made every entry take 2.1-2.3 s on the guest's screen (friend session 2026-11-01). No confirmation
+-- 4 s after we sat (the host refused: car gone, guest elsewhere on the host): stand up by the door again.
+local function predictEnter(me, car)
+    if noGlide() or os.getenv("PT_MUTATE") == "nopredict" or not (valid(me) and car) or riding or gliding(me) or valid(me:GetAttachParentActor()) then return end
+    local t0 = now()
+    glideIn(me, car, PASSENGER, function()
+        if not (valid(me) and valid(car)) then return end
+        if os.getenv("PT_MUTATE") ~= "nopredictseat" and seatConfirmedAt < t0 and not valid(me:GetAttachParentActor()) then
+            seatMe(me, car, PASSENGER)
+            log("PT|car seated by prediction")
+        end
+        common.defer(4000, function() pcall(function()
+            if seatConfirmedAt >= t0 or not valid(me) or same(me.AttachmentReplication.AttachParent, car) then return end
+            if same(me:GetAttachParentActor(), car) then pcall(function() me:K2_DetachFromActor(1, 1, 1) end) end
+            stopRide(me)
+            local d = doorPoint(car, PASSENGER)
+            if d then me:K2_SetActorLocation(toWorld(car, vec(d.X, d.Y, d.Z + 20)), false, {}, true) end
+            me:SetActorEnableCollision(true); me.CharacterMovement:SetMovementMode(1, 0)
+            log("PT|car seat not confirmed by the host: standing up again")
+        end) end)
+    end)
+end
 
 -- apply the host's state to our own car inventory (the manifestations on the replicated car follow it)
 local function applyState(data)
@@ -1070,7 +1099,8 @@ local function hookAll()
     local ok, err = pcall(RegisterHook, "/Game/Gameplay/Inventory/Items/Car/Doors/BP_CarPart_Door_Base.BP_CarPart_Door_Base_C:EnterCar", function(self)
         local okc, e = pcall(function()
             if common.netMode() ~= "client" then return end
-            sendEnter()
+            local me = sendEnter()
+            pcall(predictEnter, me, theCar(false))
             -- the door flow set this and waits for the (muted) enter to end it
             local door = self:get() -- a hook parameter must not outlive the callback
             common.defer(500, function() pcall(function() if valid(door) then door.PlayerStartedEnteringCar = false end end) end)
@@ -1099,17 +1129,7 @@ local function hookAll()
                 if suffix == "" and slot == "SLOT_FrontRightDoor" and not riding and valid(me) and not gliding(me)
                     and not valid(me:GetAttachParentActor()) and os.getenv("PT_MUTATE") ~= "nopassdoor" then
                     sendEnter()
-                    if not noGlide() then
-                        glideIn(me, car, PASSENGER, function()
-                            -- the host seats us at the same moment (g.car.seat); still standing here 4 s later: walk again
-                            common.defer(4000, function() pcall(function()
-                                if valid(me) and not valid(me:GetAttachParentActor()) and not gliding(me) then
-                                    me:SetActorEnableCollision(true); me.CharacterMovement:SetMovementMode(1, 0)
-                                    log("PT|car not seated after the entry: walking again")
-                                end
-                            end) end)
-                        end)
-                    end
+                    predictEnter(me, car)
                 end
             end)
         end)

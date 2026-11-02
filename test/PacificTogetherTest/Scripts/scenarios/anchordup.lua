@@ -3,8 +3,8 @@
 --   host_anchor_taken_by_guest    the guest pulls its copy of A (the game's own Long Grab Complete): the host's A is taken within 20 s, B is not
 --   host_pull_hazards_for_guest   the guest's pull runs the host's anchor-pull hazards once (AnchorTaken broadcasts CauseHazardDisturbance;
 --                                 the guest's game has no BP_HazardAnchorPull) and removes the anchor's Hot Dust (RadActor) on the host
---   guest_anchor_gone_when_host_pulls   the host pulls B (its own Long Grab Complete): the guest's copy of B goes
--- Run: tools/run-test.ps1 -Scenario anchordup -Fixture zone -Headless [-Root .. -Port ..]   Mutation noanchorsync: the guest's pull is not sent.
+--   guest_anchor_gone_when_host_pulls   the host pulls B (its own Long Grab Complete): the guest's copy of B is taken in place (sound, fade)
+-- Run: tools/run-test.ps1 -Scenario anchordup -Fixture zone -Headless [-Root .. -Port ..]   Mutations: noanchorsync (the guest's pull is not sent), noanchorfx (the host's pull is not sent).
 return function(T)
     local L = require("scenarios.sessionlib")(T)
     local function to(s) return s end
@@ -90,7 +90,9 @@ return function(T)
         { check = "guest_anchor_gone_when_host_pulls", timeout = to(60), cond = function()
             poll()
             if not got["t.hostpulled"] then return false end
-            if not near(bp, 60) then PTNative_MsgToHost(T.localPC():GetAddress(), "t.bgone", "1"); return true end
+            -- the copy plays the game's take (g.vis.anchortaken) and stays as a pulled anchor; removed by the slow prop sweep instead = FAIL
+            local b = near(bp, 60)
+            if b and b.SuccessfullyGrabbed == true then PTNative_MsgToHost(T.localPC():GetAddress(), "t.bgone", "1"); return true end
         end },
         { wait = 3 },
     }

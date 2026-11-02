@@ -18,6 +18,14 @@ Development network protocol **5**: both players need the same development build
   - Guest crash while the host's garage storage changed (expansion install, shredder output): the guest's sliced refill
     stops when the storage it was filling is gone.
   - The launcher's "collect logs" also saves the engine's crash context (native call stack) next to each crash marker.
+- Guest responsiveness (owner request 2026-11-02, "playing as a guest is not immersive"):
+  - Getting into the car: the guest's walk to the seat starts the moment the door is pressed (driver's door too) and it sits
+    down on its own; the host confirms. Before, every entry waited 2.1-2.3 s for the host's walk-in. Without the host's
+    confirmation the guest stands up by the door again after 4 s.
+  - Scrapping as the guest: the resources that drop stay put. They used to vanish within a second and come back as the host's
+    copies a few seconds later.
+  - The host pulling an ARC anchor: the guest's copy plays the take (sound, fade) at once and stays as a pulled anchor, instead
+    of disappearing silently seconds later.
 - Delayed car actions and handshake/body-refresh callbacks stop at a world change. A previous passenger exit cannot
   repossess an old character after that controller has received a replacement pawn.
 - Message buffers are cleared before map loads; incomplete messages follow controller identities instead of reused addresses,

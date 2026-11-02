@@ -44,6 +44,8 @@ local M = {}
 local ents, byName, nextId = {}, {}, 1 -- id -> entity; actor full name -> id (host)
 local partIds = {} -- wreck part actor full name -> id, both sides (idOf), checked on lookup
 local reported = {} -- guest: dropped items already told to the host
+local ADOPT = os.getenv("PT_MUTATE") ~= "nodropadopt" -- tests only: the guest's drop is replaced by the host's copy
+local pendingDrops, dropKey = {}, 0 -- guest: key -> its own dropped actor, until the host's "K" makes it an entity
 local claimed = {} -- guest: local actors that are some entity's copy
 local out = {} -- lines for the other side, sent at the end of the tick
 local tickN, hostScanned, fullAt = 0, false, nil
@@ -207,7 +209,7 @@ end
 local function menuShows(c) return os.getenv("PT_MUTATE") ~= "nomenuwait" and menuBox ~= nil and menuBox == c:GetAddress() end
 
 local filling = {} -- containers being filled a few steps a frame: { e, steps, i, finish, before, t0 }
-RegisterLoadMapPreHook(function() filling = {} end) -- their containers go with the old world
+RegisterLoadMapPreHook(function() filling, pendingDrops = {}, {} end) -- their containers (and our drops) go with the old world
 local function applyState(e, s)
     if e.kind == "R" then
         if s == "br" and alive(e.actor) then applyBroken(e.actor) end
@@ -655,12 +657,19 @@ local function scanGuest()
         local n = alive(a) and alive(a.Instance) and not claimed[a:GetFullName()] and not a:GetAttachParentActor():IsValid() and not tethered(a) and a:GetFullName()
         if n and not reported[n] then
             local l = a:K2_GetActorLocation()
-            if p and (l.X - p.X) ^ 2 + (l.Y - p.Y) ^ 2 + (l.Z - p.Z) ^ 2 < DROP ^ 2 then
+            local v = ADOPT and a:GetVelocity()
+            if v and v.X ^ 2 + v.Y ^ 2 + v.Z ^ 2 > 100 then
+                -- still falling: kept, the host's copy is spawned where it comes to rest (a mid-air report hung both copies in the air)
+            elseif p and (l.X - p.X) ^ 2 + (l.Y - p.Y) ^ 2 + (l.Z - p.Z) ^ 2 < DROP ^ 2 then
                 reported[n] = true
-                say(string.format("N|%s|%.0f|%.0f|%.0f|%.0f", ids.path(a.Instance.Archetype), l.X, l.Y, l.Z, a:K2_GetActorRotation().Yaw))
+                -- the item stays where our game dropped it (scrapped resources vanished and came back seconds later, friend session
+                -- 2026-11-01): the host spawns its own at this spot and answers "K|id|key", which makes this actor that entity
+                local key = ""
+                if ADOPT then dropKey = dropKey + 1; key = tostring(dropKey); pendingDrops[key] = a end
+                say(string.format("N|%s|%.0f|%.0f|%.0f|%.0f|%s", ids.path(a.Instance.Archetype), l.X, l.Y, l.Z, a:K2_GetActorRotation().Yaw, key))
                 log("PT|loot guest drop %s told the host", ids.path(a.Instance.Archetype):match("[^/]+$"))
-                -- the host's copy comes back as an "A": keeping this one too left two tools on the guest's ground (a dupe)
-                if os.getenv("PT_MUTATE") ~= "nodropfix" then a:K2_DestroyActor() end
+                -- without adoption the host's copy comes back as an "A": keeping this one too left two tools on the ground (a dupe)
+                if not ADOPT and os.getenv("PT_MUTATE") ~= "nodropfix" then a:K2_DestroyActor() end
             else
                 a:K2_DestroyActor()
             end
@@ -831,6 +840,19 @@ local function handle(l, guest)
     elseif op == "N" and not guest then
         local w = spawnItem(f[2], tonumber(f[3]), tonumber(f[4]), tonumber(f[5]), tonumber(f[6]))
         log("PT|loot guest's drop %s spawned=%s", f[2]:match("[^/]+$"), tostring(w ~= nil))
+        if w and f[7] and f[7] ~= "" then -- the guest keeps its own actor: it becomes this entity instead of getting an "A"
+            local e = register("W" .. nextId, "W", w)
+            nextId, byName[w:GetAddress()] = nextId + 1, e.id
+            say("K|" .. e.id .. "|" .. f[7])
+        end
+    elseif op == "K" and guest then
+        local a = pendingDrops[f[3]]
+        pendingDrops[f[3]] = nil
+        if alive(a) and not ents[id] then
+            claimed[a:GetFullName()] = true
+            register(id, "W", a)
+            freezeItem(a)
+        end
     elseif op == "T" and not guest and ents[id] then
         local e = ents[id]
         ents[id], byName[e.addr] = nil, nil

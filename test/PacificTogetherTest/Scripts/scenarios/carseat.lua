@@ -3,6 +3,8 @@
 -- step per frame). Then the exit intent: the guest must stand on the passenger side, the host's view of its mesh must move there
 -- without a jump, and the guest's own pawn must end next to where the host has it, walking.
 -- Run: tools/run-test.ps1 -Scenario carseat -Fixture garage -FixturesDir local/fixtures-fresh -Headless
+-- Variant PT_VARIANT=driver: the guest presses the driver's door (EnterCar). guest_walks_in_at_once: the walk-in starts at once
+-- (mutation nopredict with the driver variant fails it).
 -- Mutations: nopassdoor (the passenger door does not get you in), noglide (jumps as before), driverexit (out on the driver's side).
 return function(T)
     local L = require("scenarios.sessionlib")(T)
@@ -84,17 +86,41 @@ return function(T)
         return steps
     end
 
-    local id
+    local id, pressedAt, pressedClock
+    local DRIVER = os.getenv("PT_VARIANT") == "driver"
     return {
         T.onMap("RB_MainMenu", 90),
         { check = "client_in_garage", timeout = 400, cond = function() return T.netMode() == "client" and T.map() == "RB_Garage" and T.cls(T.myPawn()) == T.CHAR end },
         { check = "guest_told_enter", timeout = 240, cond = function() return g("t.enter") ~= nil end },
         { wait = 2 },
-        { run = function() id = T.act_begin("door_press", { passenger = true }) end },
+        -- variant driver: walk to the driver's door and run its own entry (a simulated press of that door does not reach EnterCar headless)
+        { run = function()
+            if DRIVER then id = T.act_begin("move_to", { actor = theCar().SLOT_FrontLeftDoor:GetItemActor({}):GetFullName(), radius = 120, timeout = 30 })
+            else id = T.act_begin("door_press", { passenger = true }) end
+        end },
         { check = "guest_door_press", timeout = 90, cond = function()
             local d, _, ok = T.act_done(id)
             if not d then PTNative_MsgToHost(T.localPC():GetAddress(), "t.pressing", "1") end
+            if d and ok then
+                pressedAt, pressedClock = T.myPawn():K2_GetActorLocation(), os.clock()
+                if DRIVER then theCar().SLOT_FrontLeftDoor:GetItemActor({}):StartEntry(false) end
+            end
             return d and ok
+        end },
+        -- the walk to the seat starts on the guest's own screen at once, not after the host's 1.9 s one (friend session 2026-11-01:
+        -- every entry took 2.1-2.3 s). Variant driver + mutation nopredict fails it.
+        -- the runner's timeout is coarse (whole seconds): the time since the press is measured here. Without prediction the host's
+        -- walk-in shows up ~2 s after the press (2026-11-02 run), with it ~1 s.
+        { check = "guest_walks_in_at_once", timeout = 3, cond = function()
+            -- the passenger door already glided locally before; door_press returns only after the walk-in, so its spot is too late here
+            if not DRIVER then return true end
+            local l = T.myPawn():K2_GetActorLocation()
+            local d = math.sqrt((l.X - pressedAt.X) ^ 2 + (l.Y - pressedAt.Y) ^ 2)
+            if d <= 30 then return false end
+            local t = os.clock() - pressedClock
+            T.log("PT|info guest moved %.0f uu %.2f s after the press", d, t)
+            assert(t < 1.5, string.format("the walk-in started only %.2f s after the press", t))
+            return true
         end },
         { check = "guest_seated", timeout = 30, cond = function() return attached(T.myPawn()) end },
         { check = "guest_told_exit", timeout = 120, cond = function() return g("t.exit") ~= nil end },

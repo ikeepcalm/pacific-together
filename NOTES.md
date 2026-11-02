@@ -1035,3 +1035,42 @@ Changes (each a guess from the logs, not reproduced)
 Checks: progsync 31/31 (`20261102-171347-progsync`, guest "1 nodes set, 0 not found" for the later unlock); radio 31/34
 (`20261102-171742-radio`, the same 3 custom-file checks as 0.8.5/0.8.7; guest logged exterior 0.87 standing in the garage). Gateway, radio
 muffle, false death and the storage crash have no scenario run; they need the live loop.
+
+## 2026-11-02 (later): guest responsiveness pass
+
+Owner: as the guest (80-100 ms ping) actions feel 1-2 s late. Their examples: car entry; scrapped resources spawn, vanish and come back;
+no ARC energy at the garage; the research machine does not research; the host's hood opening not seen; the host's anchor
+pull has no effects and the anchor lingers.
+
+Observations (friend-session logs above)
+- The transport is not the delay: net.lua dispatches every frame and sends at once. The delays come from the guest waiting
+  for the host's result, the host noticing state by scans, and the guest discarding its own result.
+- Car entry: guest `enter intent` -> `riding` 2.1-2.3 s every time; host `enter from` -> `seated` 1.9 s (its walk-in glide, run
+  before the seat message). The driver's door path did no local glide on the guest.
+- Scrap: guest `loot guest drop ... told the host` per resource; the sweep destroyed the guest's drop at once and the host's
+  copy came back as an "A" after the host's scan.
+- Host anchor pull: only the prop sweep's `tk=1` (seconds), which destroyed the guest's copy without effects.
+- Research: zero `st buy` lines in the guest log: the game's screen never called PurchaseNode (blocked before our hook).
+- ARC energy: guestact mirrors only the car's ARC screen charge; nothing for the garage's display.
+- Hood: car.lua sends door open bits (EOpenableDoors 0-5) and physics poses of swinging door meshes; which index (if any) is
+  the hood, and how it animates, is not known.
+
+Changes
+- car.lua: predictEnter (both doors): the guest glides at once and seats itself (PASSENGER offset) at the glide's end;
+  g.car.seat confirms. No confirmation in 4 s -> detach, stand at the passenger door. Mutations nopredict, nopredictseat.
+- loot.lua: the guest keeps its drop; "N" carries a key, the host registers its spawned copy and answers "K|id|key" instead of
+  an "A". Mutation nodropadopt.
+- visual.lua: the host hooks Long Grab Complete too and sends g.vis.anchortaken; the guest's copy runs PlayPrySound,
+  AddAnchorPulledTag, AnchorTaken, removeAnchorGoo (guessed from the function names) and stays; tk=1 no longer destroys a taken
+  copy. Mutation noanchorfx.
+
+- loot.lua: a drop is reported only once it rests (velocity <= 10 uu/s): reported mid-air, the host's copy hung there and the
+  guest froze its own on the "K" (dropfall guest_drop_on_host_ground failed until then).
+
+Checks (headless, default root): anchordup 23/23, with noanchorfx 21/23 (only guest_anchor_gone_when_host_pulls fails);
+carsync 39/39; carseat 29/29, carseat PT_VARIANT=driver 29/29 (guest moved 95 uu 1.01 s after the press, "seated by
+prediction"), with nopredict 28/29 (walk-in 2.02 s after the press); dropfall 21/21, with nodropadopt 20/21 (only
+guest_drop_kept_single). Not run: lootsync and the rest of the suite; the real 80-100 ms ping (no udp-lag run); the rollback path
+(host refusing a seat); anchor sound and fade by ear.
+
+Open: hood, garage ARC energy, research need the live loop (look at them on the guest with the console).

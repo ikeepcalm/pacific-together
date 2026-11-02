@@ -415,7 +415,12 @@ LoopInGameThreadWithDelay(16, function()
 end)
 
 local function applyState(a, st)
-    if st:find("tk=1", 1, true) then pcall(function() a:K2_DestroyActor() end) return end
+    if st:find("tk=1", 1, true) then
+        -- already taken here by the host's g.vis.anchortaken (its sound and fade still playing): left as the game leaves a pulled one
+        local ok, taken = pcall(function() return a.SuccessfullyGrabbed == true end)
+        if not (ok and taken) then pcall(function() a:K2_DestroyActor() end) end
+        return
+    end
     if st:find("br=1", 1, true) then
         pcall(function() -- crates and fences are "complex", cones and signs "simple" destructibles; both take the break impulse
             local z = vec(0, 0, 0)
@@ -554,10 +559,16 @@ local function hookAnchors()
     if anchorHooked or M.mutate == "noanchorsync" then return end
     -- a post hook never fires for this Blueprint function: the pre hook looks again once the pull has run
     anchorHooked = pcall(RegisterHook, ANCHOR_FN, function(self)
-        if not (M.enabled and safety.guest()) then return end
+        if not (M.enabled and safety.active()) then return end
         local a = self:get()
+        local guest = safety.guest()
         ExecuteInGameThreadWithDelay(300, function()
             if not (live(a) and a.SuccessfullyGrabbed == true) then return end -- inventory full: nothing was taken
+            if not guest then
+                -- the host's pull reaches the guest at once (the prop sweep's tk=1 came seconds later, and removed the copy silently)
+                if M.mutate ~= "noanchorfx" then net.toGuests("g.vis.anchortaken", a:GetFName():ToString()) end
+                return
+            end
             local name = doorName(a)
             if name then
                 net.toHost("g.vis.anchor", name)
@@ -566,6 +577,17 @@ local function hookAnchors()
         end)
     end)
 end
+-- guest: the host pulled this anchor; our copy runs the game's own take (sound, beam fade, goo) without giving us the item
+-- guess: AnchorTaken/PlayPrySound carry the effects (names in BP_Spawn_Anchor_Base_01); confirm by ear in a live session
+net.on("g.vis.anchortaken", function(_, name)
+    local a = mine[name]
+    if not (M.enabled and live(a)) or a.SuccessfullyGrabbed == true then return end
+    a.SuccessfullyGrabbed = true
+    for _, f in ipairs({ "PlayPrySound", "AddAnchorPulledTag", "AnchorTaken", "removeAnchorGoo" }) do pcall(a[f], a) end
+    pcall(function() a.Highlight:SetActive(false, false) end)
+    pcall(function() a.GrabbableMesh:K2_DestroyComponent(a) end)
+    log("PT|visual host pulled anchor %s: taken here", name)
+end)
 net.on("g.vis.anchor", function(_, name)
     if not M.enabled then return end
     for _, o in ipairs(FindAllOf("BP_Spawn_Anchor_Base_01_C") or {}) do
@@ -745,6 +767,7 @@ local function hostTick()
     beat = beat + 1
     if not M.ready then return end
     hookPaint()
+    if beat % 40 == 5 then try("anchorhook", hookAnchors) end -- the host's own pulls go to the guest at once
     if beat % 8 == 1 then
         local s = table.concat(levelPackages(), "\n")
         if s ~= lastLv or beat % 40 == 1 then lastLv = s; net.toGuests("g.vis.lv", s) end
