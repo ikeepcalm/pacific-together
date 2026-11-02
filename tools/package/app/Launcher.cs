@@ -1,5 +1,6 @@
 // Pacific Together launcher. C# 5 (the .NET Framework csc every Windows has), WinForms, no dependencies.
-// Install logic stays in install.ps1 (next to the exe); this app only drives it and shows the bundled texts.
+// Install logic stays in install.ps1; this app only drives it and shows the bundled texts. A release is this one exe: the whole
+// package (install.ps1, the docs, game/) is embedded as payload.zip and unpacked once per version to %LOCALAPPDATA%\PacificTogether\app.
 // Test flags: --shot <png> [--tab 0-3] [--scale 1.5] renders the window to a PNG and exits.
 using System;
 using System.Collections.Generic;
@@ -148,7 +149,9 @@ class DocView : RichTextBox
 
 class App : Form
 {
-    readonly string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+    public static string baseDir = AppDomain.CurrentDomain.BaseDirectory;  // the unpacked payload, or the exe's folder in a dev build
+    static readonly string Data = Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? "", "PacificTogether");
+    static readonly string Archive = Path.Combine(Data, "logs");  // UE4SS.log of earlier runs (the game empties it at every start)
     readonly string settingsFile = Path.Combine(Environment.GetEnvironmentVariable("APPDATA") ?? "", @"PacificTogether\launcher.txt");  // line 1 folder, 2 IP, 3 host|join
     TextBox folder, ip, output;
     RadioButton rHost, rJoin;
@@ -202,6 +205,11 @@ class App : Form
         Location = new Point(wa.Left + Math.Max(0, (wa.Width - Width) / 2), wa.Top + Math.Max(0, (wa.Height - Height) / 2));
         LoadSettings(); ShowTab(startTab); Refresh2();
         Shown += delegate { install.Focus(); };
+        // while the launcher is open: each time the game has closed, its log is kept (a restart from Steam would empty it)
+        bool wasRunning = false;
+        var watch = new System.Windows.Forms.Timer { Interval = 5000 };
+        watch.Tick += delegate { bool r = GameRunning(); if (wasRunning && !r && GameOk) ArchiveLog(); wasRunning = r; };
+        watch.Start();
         folder.TextChanged += delegate { Refresh2(); };
         Load += delegate { int v = 1; try { DwmSetWindowAttribute(Handle, 20, ref v, 4); } catch { } };
     }
@@ -251,7 +259,7 @@ class App : Form
         install.Font = UI.Head(12f, false);
         uninstall = new PtButton("&Uninstall", Kind.Danger) { Size = new Size(UI.S(110), UI.S(44)), Margin = new Padding(0, 0, UI.S(10), 0) };
         openLogs = new PtButton("Open &log folder", Kind.Normal) { Size = new Size(UI.S(150), UI.S(44)), Margin = new Padding(0, 0, UI.S(10), 0) };
-        collect = new PtButton("&Collect logs", Kind.Normal) { Size = new Size(UI.S(130), UI.S(44)), Margin = new Padding(0) };
+        collect = new PtButton("&Copy logs", Kind.Normal) { Size = new Size(UI.S(130), UI.S(44)), Margin = new Padding(0) };
         bf.Controls.AddRange(new Control[] { install, uninstall, openLogs, collect });
         row(bf, SizeType.Absolute, UI.S(66));
         install.Click += delegate { DoInstall(); };
@@ -366,12 +374,45 @@ class App : Form
                 SetBusy(false); Refresh2();
                 if (code != 0) { Fail("The installer stopped. Read its message in the box below."); return; }
                 Log(doneOk);
-                if (launch) { try { Process.Start(new ProcessStartInfo(Path.Combine(Bin, "PenDriverPro-Win64-Shipping.exe")) { WorkingDirectory = Bin }); Log("Starting Pacific Drive."); } catch (Exception ex) { Fail("Could not start the game: " + ex.Message); } }
+                if (launch) StartGame();
             }));
         });
     }
 
     void Fail(string m) { MessageBox.Show(this, m, "Pacific Together", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+
+    // through Steam when it is installed (overlay, invites, its own launch checks), else the exe itself (steam_appid.txt lets it start)
+    static string SteamExe()
+    {
+        try { var v = Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Valve\Steam", "SteamExe", null) as string; return v != null && File.Exists(v) ? v : null; }
+        catch { return null; }
+    }
+    void StartGame()
+    {
+        ArchiveLog();
+        try
+        {
+            if (SteamExe() != null) { Process.Start("steam://rungameid/1458140"); Log("Starting Pacific Drive through Steam."); }
+            else { Process.Start(new ProcessStartInfo(Path.Combine(Bin, "PenDriverPro-Win64-Shipping.exe")) { WorkingDirectory = Bin }); Log("Starting Pacific Drive (Steam not found)."); }
+        }
+        catch (Exception ex) { Fail("Could not start the game: " + ex.Message); }
+    }
+
+    static bool GameRunning() { return Process.GetProcessesByName("PenDriverPro-Win64-Shipping").Length > 0; }
+    // keeps a copy of UE4SS.log named after its last write (the game empties it at the next start); the newest 30 are kept
+    void ArchiveLog()
+    {
+        try
+        {
+            var log = Path.Combine(Bin, @"ue4ss\UE4SS.log");
+            if (!File.Exists(log) || new FileInfo(log).Length == 0) return;
+            Directory.CreateDirectory(Archive);
+            var dst = Path.Combine(Archive, "UE4SS-" + File.GetLastWriteTime(log).ToString("yyyyMMdd-HHmmss") + ".log");
+            if (!File.Exists(dst)) CopyShared(log, dst);
+            foreach (var old in new DirectoryInfo(Archive).GetFiles("UE4SS-*.log").OrderByDescending(f => f.Name).Skip(30)) old.Delete();
+        }
+        catch { }
+    }
 
     void DoInstall()
     {
@@ -402,39 +443,132 @@ class App : Form
         using (var o = new FileStream(dst, FileMode.Create)) i.CopyTo(o);
     }
 
+    // Copy logs: everything a bug report needs from this PC in one Desktop zip (list.txt says what is in it):
+    //   ue4ss/     UE4SS.log now, the launcher's copies of earlier runs, the mod's own run-01..10 logs (every run, however started),
+    //              version, join address, performance check results, UE4SS settings
+    //   engine/    the game's own logs of the last 7 days (PenDriverPro.log and its per-run backups)
+    //   crashes/   crash folders of the last 7 days: our marker, the engine's native call stack, its log
+    //   saves/     each slot's current save, backups of the last 2 days, the guest backpack side files, game settings
+    //   system.txt OS, CPU, GPU, memory, game exe check, Steam, launcher version
     void CollectLogs()
     {
         var tmp = Path.Combine(Path.GetTempPath(), "PacificTogether-logs-" + Guid.NewGuid().ToString("N"));
+        var list = new StringBuilder();
         try
         {
+            if (!GameRunning()) ArchiveLog();
             Directory.CreateDirectory(tmp);
-            var n = 0;
-            var log = Path.Combine(Bin, @"ue4ss\UE4SS.log");
-            if (File.Exists(log)) { CopyShared(log, Path.Combine(tmp, "UE4SS.log")); n++; }
-            var ver = Path.Combine(Bin, @"ue4ss\Mods\PacificTogether\version.txt");
-            if (File.Exists(ver)) { CopyShared(ver, Path.Combine(tmp, "version.txt")); n++; }
-            var crashes = Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? "", @"PenDriverPro\Saved\Crashes");
-            if (Directory.Exists(crashes))
-                foreach (var m in Directory.GetFiles(crashes, "PacificTogether-crash.txt", SearchOption.AllDirectories).OrderByDescending(f => File.GetLastWriteTime(f)).Take(3))
+            int n = 0;
+            Action<string, string> take = (src, rel) =>
+            {
+                try
                 {
-                    var id = Path.GetFileName(Path.GetDirectoryName(m));
-                    CopyShared(m, Path.Combine(tmp, "crash-" + id + ".txt")); n++;
-                    // the engine's native call stack: the marker only has the Blueprint frames (Settings crash, 2026-11-01)
-                    var ctx = Path.Combine(Path.GetDirectoryName(m), "CrashContext.runtime-xml");
-                    if (File.Exists(ctx)) CopyShared(ctx, Path.Combine(tmp, "crash-" + id + ".xml"));
+                    if (!File.Exists(src)) return;
+                    var dst = Path.Combine(tmp, rel);
+                    Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                    CopyShared(src, dst); n++;
+                    list.AppendLine(string.Format("{0,10:N0}  {1:yyyy-MM-dd HH:mm}  {2}", new FileInfo(src).Length, File.GetLastWriteTime(src), rel));
                 }
+                catch (Exception ex) { list.AppendLine("  (could not copy " + rel + ": " + ex.Message + ")"); }
+            };
+            var week = DateTime.Now.AddDays(-7);
+            var mod = Path.Combine(Bin, @"ue4ss\Mods\PacificTogether");
+            take(Path.Combine(Bin, @"ue4ss\UE4SS.log"), @"ue4ss\UE4SS.log");
+            if (Directory.Exists(Archive)) foreach (var f in Directory.GetFiles(Archive, "UE4SS-*.log")) take(f, @"ue4ss\earlier\" + Path.GetFileName(f));
+            if (Directory.Exists(mod))
+                foreach (var f in Directory.GetFiles(mod).Where(f => Regex.IsMatch(Path.GetFileName(f), @"^(run-\d+\.log|runs\.txt|version\.txt|join\.txt|performance\.txt)$")))
+                    take(f, @"ue4ss\" + Path.GetFileName(f));
+            take(Path.Combine(Bin, @"ue4ss\UE4SS-settings.ini"), @"ue4ss\UE4SS-settings.ini");
+
+            var saved = Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? "", @"PenDriverPro\Saved");
+            var logs = Path.Combine(saved, "Logs");
+            if (Directory.Exists(logs)) foreach (var f in Directory.GetFiles(logs, "*.log").Where(f => File.GetLastWriteTime(f) > week)) take(f, @"engine\" + Path.GetFileName(f));
+            var crashes = Path.Combine(saved, "Crashes");
+            if (Directory.Exists(crashes))
+                foreach (var d in Directory.GetDirectories(crashes).Where(d => Directory.GetLastWriteTime(d) > week))
+                    foreach (var f in Directory.GetFiles(d).Where(f => Regex.IsMatch(Path.GetFileName(f), @"(\.txt|\.xml|\.log|\.runtime-xml)$", RegexOptions.IgnoreCase)))
+                        take(f, @"crashes\" + Path.GetFileName(d) + @"\" + Path.GetFileName(f));
+            var saves = Path.Combine(saved, "SaveGames");
+            if (Directory.Exists(saves))
+                foreach (var f in Directory.GetFiles(saves, "*.sav").Where(f => !Path.GetFileName(f).Contains("-backup-") || File.GetLastWriteTime(f) > DateTime.Now.AddDays(-2)))
+                    take(f, @"saves\" + Path.GetFileName(f));
+            var side = Path.Combine(folder.Text.Trim(), @"PenDriverPro\Saved\SaveGames");  // backpack.lua's side files (guest backpacks per host slot)
+            if (Directory.Exists(side)) foreach (var f in Directory.GetFiles(side, "*.pt-*.txt")) take(f, @"saves\side\" + Path.GetFileName(f));
+            take(Path.Combine(saved, @"Config\Windows\GameUserSettings.ini"), @"saves\GameUserSettings.ini");
+
+            File.WriteAllText(Path.Combine(tmp, "system.txt"), SystemInfo());
             if (n == 0) { Fail("No logs found yet. Start the game once with the mod installed."); return; }
+            File.WriteAllText(Path.Combine(tmp, "list.txt"), "Copied " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "\r\n" + list);
             var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
             var zip = Path.Combine(desk, "PacificTogether-logs-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".zip");
-            ZipFile.CreateFromDirectory(tmp, zip);
-            Log("Logs saved to " + zip);
+            ZipFile.CreateFromDirectory(tmp, zip, CompressionLevel.Optimal, false);
+            Log(string.Format("{0} files saved to {1} ({2:N1} MB)", n, zip, new FileInfo(zip).Length / 1048576.0));
             Process.Start("explorer.exe", "/select,\"" + zip + "\"");
         }
-        catch (Exception ex) { Fail("Could not collect logs: " + ex.Message); }
+        catch (Exception ex) { Fail("Could not copy logs: " + ex.Message); }
         finally { try { Directory.Delete(tmp, true); } catch { } }
     }
 
+    string SystemInfo()
+    {
+        var s = new StringBuilder();
+        Action<string, string, string> wmi = (label, cls, props) =>
+        {
+            try
+            {
+                using (var q = new System.Management.ManagementObjectSearcher("SELECT " + props + " FROM " + cls))
+                    foreach (System.Management.ManagementObject o in q.Get())
+                        s.AppendLine(label + ": " + string.Join("  ", props.Split(',').Select(p => p.Trim() + "=" + o[p.Trim()])));
+            }
+            catch (Exception ex) { s.AppendLine(label + ": ? (" + ex.Message + ")"); }
+        };
+        s.AppendLine("Launcher: " + BundledVersion() + "   installed: " + (Stamp(Bin) ?? "not installed"));
+        wmi("OS", "Win32_OperatingSystem", "Caption, Version, OSArchitecture");
+        wmi("CPU", "Win32_Processor", "Name, NumberOfCores, NumberOfLogicalProcessors");
+        wmi("Memory", "Win32_ComputerSystem", "TotalPhysicalMemory");
+        wmi("GPU", "Win32_VideoController", "Name, DriverVersion, CurrentHorizontalResolution, CurrentVerticalResolution, CurrentRefreshRate");
+        s.AppendLine("Screens: " + string.Join(", ", Screen.AllScreens.Select(x => x.Bounds.Width + "x" + x.Bounds.Height + (x.Primary ? " primary" : ""))));
+        s.AppendLine("Steam: " + (SteamExe() ?? "not found") + "   game running: " + GameRunning());
+        var exe = Path.Combine(Bin, "PenDriverPro-Win64-Shipping.exe");
+        try
+        {
+            using (var sha = System.Security.Cryptography.SHA256.Create()) using (var f = File.OpenRead(exe))
+            {
+                var h = BitConverter.ToString(sha.ComputeHash(f)).Replace("-", "");
+                s.AppendLine("Game exe SHA-256: " + h + (h == "568BB63476C6DE5FC2B1878572A655DD631DD25BB44FE304E3D96A51F6B98F7E" ? " (the tested build)" : " (NOT the tested build)"));
+            }
+        }
+        catch (Exception ex) { s.AppendLine("Game exe: ? (" + ex.Message + ")"); }
+        s.AppendLine("Game folder: " + folder.Text.Trim());
+        return s.ToString();
+    }
+
     // ---- entry ----
+    // the release exe carries the package as the resource payload.zip: unpacked once per version (its version.txt names the folder)
+    static void Unpack()
+    {
+        var res = typeof(App).Assembly.GetManifestResourceStream("payload.zip");
+        if (res == null) return;  // dev build: the package sits next to the exe
+        using (res)
+        using (var z = new ZipArchive(res, ZipArchiveMode.Read))
+        {
+            var stamp = z.Entries.FirstOrDefault(e => e.FullName.Replace('\\', '/') == "game/ue4ss/Mods/PacificTogether/version.txt");
+            if (stamp == null) throw new InvalidDataException("payload has no version.txt");
+            string ver;
+            using (var r = new StreamReader(stamp.Open())) ver = r.ReadToEnd().Trim();
+            var dir = Path.Combine(Data, "app", Regex.Replace(ver, @"[^\w.\-]", "_"));
+            if (!File.Exists(Path.Combine(dir, @"game\ue4ss\Mods\PacificTogether\version.txt")))
+            {
+                var part = dir + ".part";
+                if (Directory.Exists(part)) Directory.Delete(part, true);
+                z.ExtractToDirectory(part);
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                Directory.Move(part, dir);
+            }
+            baseDir = dir;
+        }
+    }
+
     [STAThread]
     static void Main(string[] a)
     {
@@ -450,6 +584,8 @@ class App : Form
         Application.SetCompatibleTextRenderingDefault(false);
         using (var g = Graphics.FromHwnd(IntPtr.Zero)) UI.Px = g.DpiX / 96f * scale;
         UI.Pt = scale;
+        try { Unpack(); }
+        catch (Exception ex) { MessageBox.Show("Could not unpack the mod: " + ex.Message, "Pacific Together", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
         var f = new App(tab);
         if (doCollect) f.Shown += delegate { f.collect.PerformClick(); f.Close(); };  // test hook
         if (shot != null)

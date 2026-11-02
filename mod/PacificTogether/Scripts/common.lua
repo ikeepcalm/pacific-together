@@ -5,7 +5,27 @@ local M = {
     PROTOCOL_VERSION = 5, -- 5: msg.cpp chunks are confirmed ("PT1A|"); a 4 peer never confirms and a 5 sender would stall
 }
 
-function M.log(fmt, ...) print("[PacificTogether] " .. string.format(fmt, ...) .. "\n") end
+-- Each run also keeps its own copy of our lines (run-01.log .. run-10.log in the mod folder, runs.txt = the last one used): UE4SS.log
+-- starts empty at every launch, and a guest who restarted during the friend session 2026-11-01 sent only its last life. The launcher's
+-- "Copy logs" takes them all.
+local runLog
+do
+    local dir = debug.getinfo(1, "S").source:match("^@(.*[\\/])Scripts[\\/]") or ""
+    local f = io.open(dir .. "runs.txt", "r")
+    local n = f and tonumber(f:read("*l")) or 0
+    if f then f:close() end
+    n = n % 10 + 1
+    f = io.open(dir .. "runs.txt", "w")
+    if f then f:write(n); f:close() end
+    runLog = io.open(string.format("%srun-%02d.log", dir, n), "w")
+    -- flushed per line: Windows' C runtime has no line buffering, and a crash or a killed game lost the whole buffer (empty files)
+    if runLog then runLog:write(os.date("PT run started %Y-%m-%d %H:%M:%S\n")); runLog:flush() end
+end
+function M.log(fmt, ...)
+    local s = string.format(fmt, ...)
+    print("[PacificTogether] " .. s .. "\n")
+    if runLog then runLog:write(os.date("[%H:%M:%S] "), s, "\n"); runLog:flush() end
+end
 
 function M.replicateActor(o)
     if not o:HasAuthority() then return false end
