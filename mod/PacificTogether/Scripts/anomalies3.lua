@@ -47,15 +47,8 @@ LoopInGameThreadWithDelay(1000, function()
     try("replicate", function()
         for _, class in ipairs({ "BP_Hazard_Tesla_C", "BP_Hazard_PartStealer_C", "BP_Boon_LootCreature_C" }) do
             each(class, function(o)
-                local auth, rr, rep = o:HasAuthority(), o.RemoteRole, o.bReplicates
-                if M.debug then log("PT|anom3 saw %s auth=%s remoteRole=%s replicates=%s", o:GetFName():ToString(), tostring(auth), tostring(rr), tostring(rep)) end
-                if not auth or (rep and rr ~= 0) then return end
-                o:SetReplicates(true)
-                o:SetReplicateMovement(true)
-                o.bAlwaysRelevant = true
-                o.NetUpdateFrequency = 10
-                o:ForceNetUpdate()
-                log("PT|anom3 replicating %s", o:GetFName():ToString())
+                if M.debug then log("PT|anom3 saw %s auth=%s remoteRole=%s replicates=%s", o:GetFName():ToString(), tostring(o:HasAuthority()), tostring(o.RemoteRole), tostring(o.bReplicates)) end
+                if common.replicateActor(o) then log("PT|anom3 replicating %s", o:GetFName():ToString()) end
             end)
         end
     end)

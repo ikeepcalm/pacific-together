@@ -19,7 +19,7 @@ local bad = {}
 local function levels()
     local r = {}
     for _, l in ipairs(FindAllOf("LevelScriptActor") or {}) do
-        local ok, can = pcall(function() return l:IsValid() and l.CanSkip and not l:GetFullName():find("/Engine/Transient", 1, true)
+        local ok, can = pcall(function() return l:IsValid() and l.CanSkip == true and not l:GetFullName():find("/Engine/Transient", 1, true)
             and not bad[l:GetFullName()] end)
         if ok and can == true then r[#r + 1] = l end
     end

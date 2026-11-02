@@ -28,7 +28,7 @@ return function(T)
             if t:find("^WB%.GarageUpgrades%.") then wb[#wb + 1] = string.format("%s=%.2f", t, v:get()) end
         end)
         table.sort(wb)
-        local gs, un, pu = FindFirstOf("BaseGenericGraphState"), 0, 0
+        local gs, un, pu = im().UnlockState, 0, 0
         gs.UnlockedNodes:ForEach(function() un = un + 1 end)
         gs.PurchasedNodes:ForEach(function() pu = pu + 1 end)
         local legs = {}
@@ -93,7 +93,7 @@ return function(T)
         add({ run = function()
             pm().GlobalWhiteboard:SetTagFloat({ TagName = FName(TAG) }, 7)
             -- and one more research node (the fixture's unlock set is the fresh-game default)
-            local gs, have = FindFirstOf("BaseGenericGraphState"), {}
+            local gs, have = im().UnlockState, {}
             gs.UnlockedNodes:ForEach(function(n) have[n:get():GetFullName()] = true end)
             local pick
             StaticFindObject("/Game/Gameplay/Inventory/Items/RecipeResearchGraph.RecipeResearchGraph").Nodes:ForEach(function(_, n)
@@ -148,7 +148,7 @@ return function(T)
     add({ check = "guest_got_host_unlock", timeout = 30, cond = function()
         if not has("t.node") then return false end
         local found = false
-        FindFirstOf("BaseGenericGraphState").UnlockedNodes:ForEach(function(n) if n:get():GetFullName() == got["t.node"] then found = true end end)
+        im().UnlockState.UnlockedNodes:ForEach(function(n) if n:get():GetFullName() == got["t.node"] then found = true end end)
         return found
     end })
     add({ run = function() sendHost("t.changed") end })

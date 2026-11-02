@@ -671,6 +671,10 @@ return function(T)
         local cc = car()
         local door, cands = driverDoor(cc, o.passenger == true, o.ref and T.mcp_obj(o.ref))
         assert(door, "no allowed door interactable: " .. cands)
+        local parent = pc().Pawn:GetAttachParentActor()
+        if alive(parent) and parent:GetAddress() == cc:GetAddress() then
+            return ACT.interact({actor=door:GetFullName(),hold=o.hold or 0.3},job)
+        end
         -- the car is in the way from the other side: first a spot 170 uu outside the door (away from the car's centre), then the door
         local dp, cp = boundsOrigin(door.Highlight.HighlightCollision[1]) or door:K2_GetActorLocation(), cc:K2_GetActorLocation()
         local dx, dy = dp.X - cp.X, dp.Y - cp.Y

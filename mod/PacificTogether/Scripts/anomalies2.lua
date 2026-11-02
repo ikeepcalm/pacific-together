@@ -45,13 +45,7 @@ LoopInGameThreadWithDelay(1000, function()
     if not (M.enabled and safety.active() and not safety.guest()) then return end
     try("worlditem", function()
         each("BP_Base_Hazard_WorldItem_C", function(o)
-            if o.RemoteRole ~= 0 or not o:HasAuthority() then return end
-            o:SetReplicates(true)
-            o:SetReplicateMovement(true)
-            o.bAlwaysRelevant = true
-            o.NetUpdateFrequency = 10
-            o:ForceNetUpdate()
-            log("PT|anom2 replicating %s", o:GetFName():ToString())
+            if common.replicateActor(o) then log("PT|anom2 replicating %s", o:GetFName():ToString()) end
         end)
     end)
 end)

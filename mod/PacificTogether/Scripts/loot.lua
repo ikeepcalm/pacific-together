@@ -30,9 +30,13 @@ local NOCAR = os.getenv("PT_MUTATE") == "nocarloot"
 
 -- tests only: the host sends no positions of moving world items
 local NOFALL = os.getenv("PT_MUTATE") == "nofall"
+local NOROTATE = os.getenv("PT_MUTATE") == "norotationsync"
 
 local INV = { "Inventory_Trunk", "Inventory_LargeTrunk", "Inventory_Garage", "Inventory_GarageLarge", "Inventory_GarageExpansion1",
-              "Inventory_GarageExpansion1_Large", "Inventory_Garage_BackRoom" }
+              "Inventory_GarageExpansion1_Large", "Inventory_Garage_BackRoom", "Inventory_Tubes_In", "Inventory_Tubes_Out", "Inventory_GarageTransfer" }
+if os.getenv("PT_MUTATE") == "nomailsync" then
+    for _ = 1, 3 do table.remove(INV) end
+end
 local DROP = 500 -- uu: an unknown pickup this close to the guest is its own drop
 local MATCH = 60 -- uu: a local actor this close to the host's, same class, is the same thing
 
@@ -90,6 +94,13 @@ local function flush()
     send()
     out = {}
 end
+
+LoopInGameThreadWithDelay(500, function()
+    if common.netMode() ~= "client" or os.getenv("PT_MUTATE") == "nomailsync" then return end
+    for _, tube in ipairs(FindAllOf("BP_GarageTransferTube_C") or {}) do
+        if alive(tube) then tube:SetActorTickEnabled(false) end
+    end
+end)
 
 local function inventoryManager()
     local m = FindFirstOf("BP_InventoryManager_C")
@@ -314,7 +325,11 @@ local function line(e)
     elseif e.kind == "B" then what, state = ids.path2(a:GetClass()), "-"
     elseif e.kind == "P" then what, state = ids.path2(a:GetClass()), partState(a)
     else what, state = ids.path(a.Instance.Archetype), "-;" end
-    return string.format("A|%s|%s|%.0f|%.0f|%.0f|%.0f|%s", e.id, what, l.X, l.Y, l.Z, r.Yaw, state)
+    local add = string.format("A|%s|%s|%.0f|%.0f|%.0f|%.0f|%s", e.id, what, l.X, l.Y, l.Z, r.Yaw, state)
+    if e.kind == "W" and not NOROTATE and not NOFALL then
+        add = add .. string.format("\nM|%s|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f", e.id, l.X, l.Y, l.Z, r.Yaw, r.Pitch, r.Roll)
+    end
+    return add
 end
 
 -- host ------------------------------------------------------------------------------------------------------------
@@ -537,6 +552,14 @@ local function attachToBody(e)
     e.attached = pcall(function() e.actor:K2_AttachToActor(best, FName("None"), 1, 1, 1, false) end)
 end
 
+local function freezeItem(a)
+    if NOROTATE then return end
+    for _, wrapped in ipairs(a:K2_GetComponentsByClass(StaticFindObject("/Script/Engine.PrimitiveComponent"))) do
+        local c = wrapped.get and wrapped:get() or wrapped
+        if alive(c) and c:IsSimulatingPhysics(FName("None")) then c:SetSimulatePhysics(false) end
+    end
+end
+
 local function onAdd(id, what, x, y, z, yaw, state)
     local e = ents[id]
     if e then return end
@@ -565,6 +588,7 @@ local function onAdd(id, what, x, y, z, yaw, state)
     end
     if not a then log("PT|loot could not make %s %s", id, what); return end
     e = register(id, kind, a)
+    if kind == "W" then freezeItem(a) end
     if kind == "L" then applyState(e, state) end
 end
 
@@ -644,7 +668,8 @@ local function scanGuest()
     end
 end
 
--- host: a world item that moved since we told the guest (a drop falling, rolling) sends its new spot; the guest does not simulate it
+-- host: world items send rotation too; a tire can tip over without moving its centre.
+local function turned(a, b) return math.abs((a - b + 180) % 360 - 180) > 1 end
 local function scanMoves()
     if NOFALL then return end
     -- a resting item is read every ~5 s, a new or moving one every tick (all of them each tick held host frames, playtest 2026-10-31)
@@ -652,14 +677,13 @@ local function scanMoves()
     for id, e in pairs(ents) do
         if e.kind == "W" and (now < (e.hotUntil or 0) or now >= (e.moveAt or 0)) and alive(e.actor) then
             e.moveAt = now + 4 + math.random() * 2
-            local l = e.actor:K2_GetActorLocation()
+            local l, r = e.actor:K2_GetActorLocation(), e.actor:K2_GetActorRotation()
             local p = e.pos
-            if not p then
-                e.pos, e.hotUntil = { l.X, l.Y, l.Z }, now + 10
-            elseif (l.X - p[1]) ^ 2 + (l.Y - p[2]) ^ 2 + (l.Z - p[3]) ^ 2 > 9 then
-                e.pos, e.hotUntil = { l.X, l.Y, l.Z }, now + 5
-                local r = e.actor:K2_GetActorRotation()
-                say(string.format("M|%s|%.1f|%.1f|%.1f|%.0f|%.0f|%.0f", id, l.X, l.Y, l.Z, r.Yaw, r.Pitch, r.Roll))
+            if not p or (l.X - p[1]) ^ 2 + (l.Y - p[2]) ^ 2 + (l.Z - p[3]) ^ 2 > 9
+                or (not NOROTATE and (turned(r.Pitch, p[4]) or turned(r.Yaw, p[5]) or turned(r.Roll, p[6]))) then
+                e.pos, e.hotUntil = { l.X, l.Y, l.Z, r.Pitch, r.Yaw, r.Roll }, now + 5
+                if p or not NOROTATE then say(string.format("M|%s|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f", id, l.X, l.Y, l.Z, r.Yaw, r.Pitch, r.Roll)) end
+
             end
         end
     end
@@ -801,6 +825,7 @@ local function handle(l, guest)
         if e.kind == "W" and ov.settled() then ov.post(ov.other() .. " picked up an item", "info", "pick") end
     elseif op == "M" and guest and ents[id] and alive(ents[id].actor) then
         pcall(function()
+            if ents[id].kind == "W" then freezeItem(ents[id].actor) end
             ents[id].actor:K2_SetActorLocationAndRotation({ X = tonumber(f[3]), Y = tonumber(f[4]), Z = tonumber(f[5]) }, { Pitch = tonumber(f[7]) or 0, Yaw = tonumber(f[6]), Roll = tonumber(f[8]) or 0 }, false, {}, true)
         end)
     elseif op == "N" and not guest then

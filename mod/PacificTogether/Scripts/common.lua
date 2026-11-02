@@ -7,6 +7,17 @@ local M = {
 
 function M.log(fmt, ...) print("[PacificTogether] " .. string.format(fmt, ...) .. "\n") end
 
+function M.replicateActor(o)
+    if not o:HasAuthority() then return false end
+    if o.bReplicates and o.RemoteRole ~= 0 and o.bReplicateMovement and o.bAlwaysRelevant and o.NetUpdateFrequency == 10 then return false end
+    o:SetReplicates(true)
+    o:SetReplicateMovement(true)
+    o.bAlwaysRelevant = true -- default distance culling hides anomalies from a guest across the map
+    o.NetUpdateFrequency = 10
+    o:ForceNetUpdate()
+    return true
+end
+
 -- UEHelpers.GetPlayerController/GetWorld run FindAllOf("PlayerController") per call (0.26 ms in a zone, measured 2026-10-22),
 -- and every module calls them per item and per tick: keep the local controller and its world while they stay valid.
 -- A new map makes new ones, so the old ones fail IsValid and are looked up again.

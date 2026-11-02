@@ -20,6 +20,11 @@ and mutations before treating them as gameplay proof.
   **start a new Claude Code session** after cloning or pulling: servers are loaded at session start.
 - Check without an agent: `python tools/gamemcp/selftest.py --root C:/PTLanes/probe --port 7801` (starts real games).
 
+The project's `.mcp.json` also includes the read-only Co-op Anything playbook server:
+`python coop-anything/tools/mcp/coop_mcp.py` (requires PyYAML). The game server uses only Python's standard library.
+Pass the actual isolated pair path as `root` when it differs from `C:/PacificTogetherTest`; registering a server
+does not create a test pair or rebuild the native DLL.
+
 ## Tools
 
 Inspection/action tools use `root` (default `C:/PacificTogetherTest`) and `side` (`host` = client1, `client` = client2,

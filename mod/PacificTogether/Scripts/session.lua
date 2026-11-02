@@ -11,8 +11,14 @@ local MENU = "RB_MainMenu"
 -- the guest's hello only arrives once its first zone load ends: 20 s kicked slow loaders, who then sat frozen ~65 s until
 -- the rejoin (two games on one PC, 2026-10-22)
 local HELLO_WAIT_MS = 90000
--- X11: a connect to a host that is still loading must wait instead of dying at 20 s
+-- X11: address resolution and the pending connection must both survive the host's map load.
 local CONNECT_TIMEOUT = 120
+local function connectTimeouts()
+    if os.getenv("PT_MUTATE") == "shortconnect" then return end
+    local driver = StaticFindObject("/Script/OnlineSubsystemUtils.Default__IpNetDriver")
+    driver.ResolutionConnectionTimeout = CONNECT_TIMEOUT
+    driver.InitialConnectTimeout = CONNECT_TIMEOUT
+end
 local CHAR_CLASS = "/Game/Characters/Player/PDP_MainCharacter.PDP_MainCharacter_C"
 
 local DIR = (debug.getinfo(1, "S").source:match("^@(.*[\\/])Scripts[\\/]") or "")
@@ -309,7 +315,7 @@ local function join()
     if not JOIN or not guestActive or mapOf(world()) ~= MENU or os.time() - lastJoin < 5 then return end
     attempt, lastJoin = attempt + 1, os.time()
     local mine = attempt
-    StaticFindObject("/Script/OnlineSubsystemUtils.Default__IpNetDriver").ResolutionConnectionTimeout = CONNECT_TIMEOUT
+    connectTimeouts()
     log("PT|session join %s attempt=%d", JOIN, mine)
     console("open " .. JOIN)
     -- a connect that fails without a map load leaves us in the menu: try again once it has surely timed out
@@ -326,7 +332,7 @@ function M.setJoin(addr)
     end
     JOIN, M.join, guestActive, lastJoin = addr, "via Steam", true, -100
     if PTNative_SetAutoListen then PTNative_SetAutoListen(false) end
-    StaticFindObject("/Script/OnlineSubsystemUtils.Default__IpNetDriver").ResolutionConnectionTimeout = CONNECT_TIMEOUT
+    connectTimeouts()
     log("PT|session steam join %s rejoin without menu=%s", addr, tostring(PTNative_SetRejoin and PTNative_SetRejoin(addr)))
     -- a host who was in a world when the request came leaves it for the other host
     if mapOf(world()) ~= MENU then console("open " .. addr) else join() end
@@ -415,6 +421,7 @@ end)
 
 -- the native layer registers its functions only after the scripts started
 ExecuteInGameThreadWithDelay(1000, function()
+    connectTimeouts() -- pending connections on either side must survive a long host map load
     hookAll()
     -- Steam started the game for a friend's lobby: a guest, whose address steam.lua sets once the lobby is entered
     local viaSteam = JOIN == nil and steam and steam.pendingJoin() ~= nil
@@ -425,7 +432,7 @@ ExecuteInGameThreadWithDelay(1000, function()
     log("PT|session ready role=%s join=%s autolisten=%s game=%s build=%d", host and "host" or "guest", viaSteam and "steam" or tostring(JOIN), tostring(patched), gameVersion(), gameBuild())
     if JOIN then
         -- the host's map changes drop us: go straight back to the host instead of through the menu (native Browse swap)
-        StaticFindObject("/Script/OnlineSubsystemUtils.Default__IpNetDriver").ResolutionConnectionTimeout = CONNECT_TIMEOUT
+        connectTimeouts()
         log("PT|session rejoin without menu=%s", tostring(PTNative_SetRejoin and PTNative_SetRejoin(JOIN)))
         join()
     end

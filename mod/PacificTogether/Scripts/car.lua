@@ -447,7 +447,7 @@ local function doorPoint(car, p)
     local best, bd
     local arrow = StaticFindObject("/Script/Engine.ArrowComponent")
     for slot, d in pairs(doorParts(car)) do
-        if slot:find("Front") then
+        if slot == "SLOT_FrontRightDoor" then
             for _, c in ipairs(d:K2_GetComponentsByClass(arrow) or {}) do
                 local o = c.get and c:get() or c
                 if valid(o) and o:GetFName():ToString():find("EntranceLogicPoint", 1, true) then
@@ -473,7 +473,7 @@ end
 local function passengerSide(car, out)
     if os.getenv("PT_MUTATE") == "driverexit" then return out, "driver" end
     local l = toLocal(car, out)
-    if l.Y >= 0 then return out, "driver" end -- already on the passenger side
+    if l.Y >= 0 then return out, "passenger" end -- already on the passenger side
     local m = toWorld(car, vec(l.X, -l.Y, l.Z))
     local hit = false
     pcall(function()
@@ -547,6 +547,11 @@ net.on("g.car.exit", function(pc)
     if common.netMode() ~= "listen" then return end
     local char, car = guestChar(pc), theCar(true)
     if not char or not car or not same(char:GetAttachParentActor(), car) then return end
+    local door = doorParts(car).SLOT_FrontRightDoor
+    if valid(door) then
+        door:AttemptOpen()
+        ExecuteInGameThreadWithDelay(1500, function() if valid(door) then door:AttemptShut() end end)
+    end
     seated[char:GetFullName()] = nil
     char:K2_DetachFromActor(1, 1, 1)
     sitPose(char, false)
@@ -1067,6 +1072,10 @@ local function hookAll()
                 -- E opening the passenger's door from outside gets the guest in, as the driver's door does for the driver (the game
                 -- itself only enters through the driver's door: the guest walked round to it and sat down on the other side)
                 local me = localPC() and localPC().Pawn
+                if slot == "SLOT_FrontRightDoor" and riding and os.getenv("PT_MUTATE") ~= "nopassdoorexit" then
+                    sendExit()
+                    return
+                end
                 if suffix == "" and slot == "SLOT_FrontRightDoor" and not riding and valid(me) and not gliding(me)
                     and not valid(me:GetAttachParentActor()) and os.getenv("PT_MUTATE") ~= "nopassdoor" then
                     sendEnter()

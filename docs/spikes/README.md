@@ -4,6 +4,10 @@ These are dated experiments, implementation notes and test evidence, not the cur
 checks and revision recorded. Preserve failures, mutations and unknowns when condensing a report.
 Current behavior: [../../README.md](../../README.md). Current evidence/gaps: [../../NOTES.md](../../NOTES.md).
 
+Latest bounded anomaly continuation: [W8-boons](W8-boons.md) (Healer/Charging visibility and resource state, November 1).
+
+Client feedback, passenger controls and loose-item physics: [PT4-client-interactions](PT4-client-interactions.md).
+
 ## Reading order
 
 | Area | Earlier evidence | Later implementation/fixes |

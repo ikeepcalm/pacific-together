@@ -5,6 +5,21 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+Development network protocol **5**: both players need the same development build.
+
+### Fixed
+
+- Joining guests restore logbook history quietly; new discoveries still show notifications.
+- Remote damage is intercepted before local health and HUD feedback run, preventing the host's red damage frame for a guest hit.
+- A seated passenger can interact with the front passenger door to open it and leave on that side.
+- Research uses the inventory manager's saved unlock graph instead of transient chart graphs; the guest UI cannot print a second reward.
+- Pneumatic-mail inbox, outbox and return queue follow the host; guest tubes do not launch duplicate pickups.
+- Loose items receive pitch, yaw and roll, including rotation without translation; guest copies follow host physics.
+- Initial connection waiting covers long host loads; increasing address-resolution waiting alone left the game's 60-second cutoff active.
+- Healer and Charging boons reach the guest, including remaining power and depletion; guest-local duplicates and resource simulation are suppressed.
+- Already replicated anomalies also receive movement and distance-relevance settings. The three replication passes share idempotent setup.
+- Lag/loss tests route auto-joining guests through the tunnel; previously only delayed probes used it while gameplay could bypass it.
+
 ## [0.8.7] - 2026-11-01
 
 Fixes from the owner's live two-client test of 0.8.6 (each checked by hand on a test pair; zone travel, the Ida trader and
@@ -87,6 +102,7 @@ Fixes from the second two-hour friend session (friend hosting). Not yet tested b
 - Custom music with real files, the trunk crash, the Scrapper on the host's screen and the car rack items were not
   reproduced in tests; they follow the logs. Still open: the guest's Settings crash, crafting disappearing for the guest,
   the charging station not showing "Connected" for the guest, fuel barrels missing for the guest, the guest stuck in the driver's seat after the Sierra mission.
+
 
 ## [0.8.5] - 2026-10-31
 

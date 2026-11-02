@@ -10,11 +10,18 @@ player interaction works.
 tools\run-test.ps1 -Scenario boot
 tools\run-test.ps1 -Scenario carsync -Fixture garage -Headless
 tools\run-test.ps1 -Scenario zoneexit -Fixture coop-zone -Headless
+tools\run-test.ps1 -Scenario mail -Fixture garage -Headless
+
+tools\run-test.ps1 -Scenario boons -Fixture garage -Headless
+tools\run-test.ps1 -Scenario boons -Fixture garage -Mutate noboons -Headless
 tools\run-test.ps1 -Scenario listen -Mutate skipconnect -Headless
 tools\run-test.ps1 -Scenario listen -Tunnel "udp lag=150 loss=2" -Headless
 ```
 
 The mutation should fail its intended check. Shipping UE has no usable `NetEmulation.*`; use the tunnel for lag/loss.
+For auto-joining scenarios the runner sets `PT_JOIN` to the tunnel address too. Require `tunnel_carried` as well as
+`tunnel_lag_seen`: successful delay probes alone do not prove that gameplay used the tunnel. Mutation `tunnelbypass`
+keeps the direct join address and must fail `tunnel_carried` on both sides.
 Steam-specific scenarios are separate: `steamsession` tests the join flow using loopback UDP, while two-account
 Steam transport needs the human check in [spikes/PT2-steam.md](spikes/PT2-steam.md).
 

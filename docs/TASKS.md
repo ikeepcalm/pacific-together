@@ -14,11 +14,16 @@ Reviewed against 0.0.7 on 2026-10-24. This list tracks remaining work, not relea
 
 ## Current priorities
 
+November 1 continuation: Healer/Charging visibility and host resource state are covered by the focused `boons`
+scenario. Current evidence and remaining anomaly limits: [W8-boons](spikes/W8-boons.md).
+
+Client notifications, damage feedback, passenger controls and item physics: [PT4-client-interactions](spikes/PT4-client-interactions.md).
+
 | Work | Starting points | Completion evidence |
 |---|---|---|
 | Guest anchor duplication | `loot.lua`, `guestact.lua`; 0.0.7 known issues | Guest pickup removes the host anchor; energy can be deposited only once; mutation fails |
 | Guest tutorial progress | `story.lua`, `progression.lua`; Oppy/tutorial whiteboard | Reproduce a guest-only tutorial step and prove the intended host progress |
-| Passenger re-entry pose | `car.lua`, `zoneexit` | Rendered driver-door re-entry after travel; guest stays in the passenger seat |
+| Passenger re-entry pose | `car.lua`, `zoneexit` | Rendered passenger-door re-entry after travel; guest stays in the passenger seat |
 | T06: full-run playtest | Packaged `PacificTogether.exe`, `tools/play-local.ps1` | Garage, junctions, gateway, death/failure, leave/rejoin; both logs and observed defects |
 | T08: remove test natives from public builds | Native registration in `guard.cpp`, native CMake, packaging | Test build retains crash scenarios; public DLL excludes test-only registrations |
 | T09: name-tag fade mutation | `nametag.lua` and its scenario | Normal fade passes; disabled fade fails the distance checks |

@@ -1,0 +1,138 @@
+# Client feedback, passenger controls and loose items
+
+November 2, 2026. Development candidate based on upstream `ce717a3` (0.8.7); protocol 5, as requested. No release package.
+
+The November 1 results below predate integration of the twelve upstream commits and are historical evidence.
+
+## Observations and changes
+
+- Logbook restoration called `AddEntry` for historical entries. The native notification widget queues a toast per entry,
+  with increasingly long delays. `progression.lua` marks baseline chunks with their total count and mutes only
+  `UMG_LogBook_NotifMain_C.OnLogbookEntryAdded` while applying that baseline. Fresh discoveries retain notifications.
+- Remote characters use `AC_PlayerHealthReceiverHelper_C`, which changes the process-wide player resource manager
+  and starts local feedback. Refunding health afterward leaves the red damage frame. `damage.cpp` blocks the remote
+  receiver's damage/heal binds before their Blueprint bodies and queues the payload for the existing owner-directed
+  message channel. Weak object identities and temporary payload roots protect deferred delivery. Local receivers keep
+  the game's normal health, resistance and feedback logic.
+- Upstream 0.8.7 supplies the shared E edge dispatch, dashboard outlines, ARC collision priority and radio control.
+  Those implementations are retained. The extra cutscene check requires an actual boolean `CanSkip`.
+- Passenger entry/exit glides use the front right door. Exit opens that door and closes it after the transition.
+  The game's grounded driver exit is mirrored to the passenger side when ground exists there; the existing driver-side
+  fallback remains when the passenger side has no ground. Wall clearance at the mirrored spot remains unverified.
+- Loose items previously received yaw at creation; movement updates ignored rotation at a fixed position. `loot.lua`
+  now sends full initial poses and rotation-only updates using the existing movement record. Guest copies disable
+  independent physics while retaining collision and pickup. Host physics remains authoritative.
+- A prior `zonejoin` failure reached the game's 60-second `InitialConnectTimeout` while the host loaded the map
+  (`20261101-140459-a-zonejoin`). Raising `ResolutionConnectionTimeout` alone did not cover that phase.
+  `session.lua` now configures both initial and address-resolution waiting to 120 seconds on both sides before
+  connecting/listening. Established-connection timeout is unchanged. `zonejoin` waits 75 seconds before loading the host
+  map; mutation `shortconnect` leaves the original limit in place.
+
+Cooked Blueprint listings and live probes are private under `local/client-controls/`, `local/probe-*.txt` and
+`local/item-physics-{host,client}.txt`. The tested tire's simulating mesh is its actor root, so actor pose carries its
+physical orientation. Extracted game files are not included in the repository.
+
+## Validation
+
+Test pair: `D:\PTLanes\a`, port 7811, supported executable hash, isolated `garage` fixture. Native build:
+`tools\build-native.cmd`, final log `local/build-client-fixes-final.log`.
+
+| Check | Result folder under `local/test-results/` | Result |
+|---|---|---|
+| Loose tire initial pose, rotation-only changes, kinematic guest copy, pickup on both sides | `20261101-185044-a-itemphysics` | 20/20 |
+| Quiet logbook baseline, fresh discovery notification | `20261101-185438-a-progressquiet` | 17/17 |
+| Remote hit has no intermediate host health change; local host damage remains | `20261101-191539-a-damagefeedback` | 20/20 |
+| Key subscribers, held/repeated presses, callback errors | `20261101-194537-a-keyedges` | 6/6 |
+| Native key/shifter highlights, selection priority, passenger ignition/gear intents | `20261101-200504-a-guestctl` | 38/38 |
+| Passenger-door interaction, right-side exit, restored walking and matching views | `20261101-200638-a-carexit` | 30/30 |
+| One connection through a delayed host forest load | `20261101-200918-a-zonejoin` | 14/14 |
+| Session lifecycle and cleanup | `20261101-201326-a-session` | 40/40 |
+| Map transition and host exit | `20261101-201546-a-travel` | 23/23 |
+| Both player bodies and placement timeline | `20261101-201847-a-body` | 20/20 |
+| Guest leaves and rejoins the session | `20261101-202120-a-sessionrejoin` | 36/36 |
+
+The first damage test read local health before the game's deferred hit completed (`20261101-185222-a-damagefeedback`,
+19/20). The corrected check waits for the real local loss and verifies it remains afterward.
+
+The first extended native-guard run (`20261101-200218-a-damagefeedback`, 21/22) passed health isolation and the remote
+receiver feedback check. Its extra repeated-payload fixture dispatched the same object twice in one frame; the game's
+message queue merged that pair before the receiver. The revised fixture retains the object and dispatches again 200 ms
+later, exercising separate ticks.
+
+| Disabled fix | Result folder | Relevant failure |
+|---|---|---|
+| Item pose/physics | `20261101-192354-a-itemphysics-norotationsync` | Initial pose, kinematic copy, rotation-only update; 17/20 |
+| Quiet catch-up | `20261101-192811-a-progressquiet-noprogressquiet` | History notification queue returns; 16/17 |
+| Dashboard priority | `20261101-193015-a-guestctl-nopasshighlight` | Competing selection wins; 37/38 |
+| Passenger-side exit | `20261101-193218-a-carexit-driverexit` | Driver-side position; 29/30 |
+
+The first extended `guestctl` test passed both native highlights and selection priority, but attempted to call the
+shipping mod's Lua key callback from the test mod's separate Lua environment. That test was invalid; the replacement
+keeps native selection assertions and uses the established intent channel. The interrupted run
+`20261101-191945-a-guestctl` is a failure, including a client shutdown crash, and is not a passing regression result.
+
+Rendered inspection confirmed the key outline (`HighresScreenshot00020.png` in the test client's screenshot directory).
+Automated intent/pose checks do not establish physical keyboard capture, every rendered transition, audio or Steam
+connectivity. Full regression and release certification remain separate gates.
+
+## November 2 integration
+
+All twelve upstream commits from `191fc63` through `ce717a3` are included. The upstream loot scan scheduling,
+controller cache, radio, charger, radiation and performance changes remain in place.
+
+The inventory manager's `UnlockState` is the authoritative research graph. The owner's garage save also has transient
+chart graphs; selecting the first `BaseGenericGraphState` silently read and purchased against those unrelated states.
+Progression snapshots, station purchases and their scenarios now use `UnlockState`.
+The guest bench's `OnNodePurchased` is muted before it can print the UI's local duplicate reward.
+
+`Inventory_Tubes_In`, `Inventory_Tubes_Out` and `Inventory_GarageTransfer` now use existing shared-container sync.
+Live baseline: host inbox 0, guest inbox 7 before the fix; guest inbox 0 afterward. A host deposit reached the guest,
+and removing that item on the guest reached the host. The guest's physical transfer tube has ticking disabled;
+the host launches the physical output and normal loot replication displays it to the guest.
+
+The first station run passed research purchase, exact host cost and matching resource checks, then hit an outdated
+scenario assumption that an advanced garage save must have an unbuilt station. That run is not an overall pass.
+The revised check uses an existing station when both candidates are already built and verifies no duplicate installation.
+
+Passenger-door native interaction: `20261102-092841-a-carexit`, 31/31. This covers entry, interaction to exit,
+passenger-side placement on both copies and restored walking. It does not exercise OS keyboard capture.
+
+### Integrated candidate results
+
+Isolated pair `D:\PTLanes\a`, port 7811, protocol 5. Executable SHA-256 was rechecked against `AGENTS.md`.
+Native DLL SHA-256: `5E18F71804A05D1EF29CD901ADE9B1EE96F4A4A7B800AEDE5ACE929538037A34`.
+
+| Scenario | Checks | Result folder under `local/test-results/` |
+|---|---|---|
+| `session` | 40/40 | `20261102-093342-a-session` |
+| `stations` | 50/50 | `20261102-093722-a-stations` |
+| `safety` | 30/30 | `20261102-094228-a-safety` |
+| `sessionrejoin` | 36/36 | `20261102-094430-a-sessionrejoin` |
+| `zonejoin` | 14/14 | `20261102-094733-a-zonejoin` |
+| `itemphysics` | 20/20 | `20261102-094859-a-itemphysics` |
+| `damagefeedback` | 22/22 | `20261102-094957-a-damagefeedback` |
+| `progressquiet` | 17/17 | `20261102-095101-a-progressquiet` |
+| `keyedges` | 6/6 | `20261102-095118-a-keyedges` |
+| `mail` | 22/22 | `20261102-095225-a-mail` |
+| `guestctl` | 38/38 | `20261102-095409-a-guestctl` |
+| `travel` | 23/23 | `20261102-095605-a-travel` |
+| `body` | 20/20 | `20261102-095856-a-body` |
+
+All thirteen scenarios completed without test errors or new crash folders. The separate passenger-door scenario passed 31/31.
+The runner SHA-256 snapshot function was checked against the standard `abc` digest under Windows PowerShell 5.1.
+A second invocation with forward-slash root `D:/PTLanes/a` refused the busy pair before modifying it.
+
+This is the focused integration and smoke set, not the full release suite or a two-account Steam playtest.
+Rendered OS keyboard input, audio, wall clearance beside the passenger exit and a complete hand-played run remain unverified.
+
+Additional current-base anomaly run: `20261102-100021-a-boons`, 26/26.
+
+Sensitivity controls on the integrated candidate:
+
+| Disabled fix | Result folder | Outcome |
+|---|---|---|
+| Mail containers and passive guest tube | `20261102-100400-a-mail-nomailsync` | Expected failure, 16/22; baseline, deposit, withdrawal and passive-tube assertions fail |
+| Remote damage guard | `20261102-100559-a-damagefeedback-nodamageguard` | Expected failure, 19/22; receiver feedback, retained local damage and repeated-payload assertions fail |
+| Passenger-door exit | `20261102-100933-a-carexit-nopassdoorexit` | Expected failure, 26/31; detachment, passenger-side placement and subsequent walking fail |
+
+All three controls completed without new crash folders.

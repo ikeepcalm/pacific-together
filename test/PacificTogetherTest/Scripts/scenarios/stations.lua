@@ -11,7 +11,7 @@ return function(T)
     local function alive(o) return o ~= nil and o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) end
     local function real(o) return alive(o) and not o:GetFullName():find("/Engine/Transient", 1, true) end
     local function im() return T.first("BP_InventoryManager_C") end
-    local function graph() return FindFirstOf("BaseGenericGraphState") end
+    local function graph() return im().UnlockState end
     local function arch(o) return o.Archetype:GetFName():ToString() end
 
     -- owned items (backpack, hand, garage, car) by archetype name
@@ -208,6 +208,7 @@ return function(T)
             for _, k in ipairs({ "fax", "destabilizer" }) do
                 if not st.up and upCount(k) == 0 then st.up = k end
             end
+            st.up = st.up or "fax" -- an advanced fixture may already have both; check reinstallation stays idempotent
             T.log("PT|info host upgrade to build: %s", tostring(st.up))
             if st.up then toGuest("t.go.up", st.up) end
         end })
@@ -297,6 +298,7 @@ return function(T)
         st.benchPrints = 0 -- the bench prints the blueprint / kit from OnNodePurchased: only the host's bench may
         T.log("PT|info guest bench hook registered: %s", tostring(pcall(RegisterHook, "/Game/Gameplay/CarGarage/Stations/ResearchStation/BP_Garage_InventingBench.BP_Garage_InventingBench_C:OnNodePurchased", function() st.benchPrints = st.benchPrints + 1 end)))
         local ok = graph():PurchaseNode(node)
+        T.first("BP_Garage_InventingBench_C"):OnNodePurchased(node) -- the station UI also emits this delegate
         T.log("PT|info guest PurchaseNode(%s) -> %s", g("t.go.buy"), tostring(ok))
     end })
     add({ check = "guest_go_buydone", timeout = 180, cond = function() return has("t.buydone") end })

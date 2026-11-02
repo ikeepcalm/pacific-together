@@ -1,6 +1,6 @@
 set(TARGET PacificTogetherNative)
 
-add_library(${TARGET} SHARED dllmain.cpp trace.cpp net.cpp guard.cpp transport.cpp steam.cpp mute.cpp blackbox.cpp msg.cpp background.cpp find.cpp)
+add_library(${TARGET} SHARED dllmain.cpp trace.cpp net.cpp guard.cpp transport.cpp steam.cpp mute.cpp blackbox.cpp msg.cpp background.cpp find.cpp damage.cpp)
 target_include_directories(${TARGET} PRIVATE .)
 target_link_libraries(${TARGET} PUBLIC UE4SS)
 

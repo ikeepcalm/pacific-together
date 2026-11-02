@@ -2,10 +2,10 @@
 -- inert), and the hazards' logic targets "the player" through single-reference managers, so the host's own process decides.
 --   damage   hazards hurt by dispatching MSG_Damage_* messages to pawns in a sphere. The guest's pawn exists on the host too and
 --            its AC_PlayerHealthReceiverHelper adjusts the HOST's PlayerHealth: the host was hurt for the guest's hit. The host
---            takes the damage off that message (Damage = 0) and sends it as "g.anom.msg"; the guest dispatches the same message
+--            intercepts the remote receiver before its health/feedback logic and sends "g.anom.msg"; the guest dispatches the same message
 --            class to its own pawn, so its own health, magic HP, feedback and death run as for any hit (health.lua handles death).
 --            The same the other way: the guest hitting the host's body (a melee swing) hurt the GUEST (hand playtest 2026-10-23);
---            the guest puts its own health back and the host takes the hit on its own character.
+--            the guest intercepts that receiver and the host takes the hit on its own character.
 --   tourists a Tourist creeps only when camera 0 (the host's) does not see it; a post-hook on CreepCheck also asks the guest's
 --            camera as the host sees it (ServerUpdateCamera), docs/research/tourists.md.
 -- Everything is inert outside a session (Q7).
@@ -49,11 +49,7 @@ local function isGuestPawn(receiver)
     return valid(c) and not c:IsLocalController()
 end
 
--- The receiver's handler cannot be cancelled (a nulled or zeroed payload, playerProtected: the host was hurt all the same, and
--- GameResource:Adjust is called from Blueprint, out of reach of a hook), and the host's health is already changed when the first
--- bind event of the message runs (post-hooks of the bind events never fire). So the host's health is sampled every frame, and a
--- moment after a bind on the guest's pawn the host gets back what it lost since the sample (at most what the message could have
--- done). One message reaches two binds (MSG_Base_Damage and its own class): sent once per payload.
+-- Legacy fallback for native builds without receiver interception; the native guard also prevents HUD feedback and refunds.
 local lastHp, lastPayload, lastAt = nil, nil, 0
 
 local function hostHealth()
@@ -62,6 +58,7 @@ local function hostHealth()
 end
 
 LoopInGameThreadWithDelay(16, function()
+    if PTNative_DamagePoll and os.getenv("PT_MUTATE") ~= "nodamageguard" then lastHp = nil return end
     if not (M.enabled and safety.active()) then lastHp = nil return end
     local rm = hostHealth()
     lastHp = rm and rm.PlayerHealth.Current or nil
@@ -80,22 +77,23 @@ end
 local loadedAt, GUARD = 0, os.getenv("PT_MUTATE") == "noseatguard" and 0 or 20 -- mutation noseatguard: zoneexit
 RegisterLoadMapPostHook(function() loadedAt = os.clock() end)
 
-local function pre(self, payload)
+local function pre(rec, p, intercepted)
     if not (M.enabled and safety.active()) then return end
     local guest = safety.guest()
-    local rec, p = self:get(), payload:get()
     if not (valid(rec) and valid(p)) then return end
     if guest then if not isHostBody(rec) or os.clock() - loadedAt < GUARD then return end elseif not isGuestPawn(rec) then return end
     local dmg = p.Damage
     local key, now = p:GetAddress(), os.clock()
-    if key == lastPayload and now - lastAt < 0.5 then return end
-    lastPayload, lastAt = key, now
+    if not intercepted then
+        if key == lastPayload and now - lastAt < 0.5 then return end
+        lastPayload, lastAt = key, now
+    end
     if dmg == 0 then return end
     -- a bump of the host's body in the guest's world (seating jolts, its copy of the car): the host's game already deals its own
     -- physical hits, and a forwarded 60 came out of nowhere for the host (playtest 2026-10-31)
     if guest and p:GetClass():GetFName():ToString():find("Physical_Impact", 1, true) then return end
     local sample, cap = lastHp, math.abs(dmg) * 1.5 + 1
-    if sample then
+    if sample and not intercepted then
         ExecuteInGameThreadWithDelay(40, function() try("put back", function()
             local rm = hostHealth()
             if not rm then return end
@@ -117,8 +115,29 @@ local function pre(self, payload)
 end
 
 for _, fn in ipairs(BINDS) do
-    hook(RECEIVER .. fn, function(self, payload) try("forward", pre, self, payload) end)
+    hook(RECEIVER .. fn, function(self, payload)
+        if PTNative_DamagePoll and os.getenv("PT_MUTATE") ~= "nodamageguard" then return end
+        try("forward", pre, self:get(), payload:get(), false)
+    end)
 end
+
+RegisterLoadMapPreHook(function() if PTNative_DamageClear then PTNative_DamageClear() end end)
+LoopInGameThreadWithDelay(16, function()
+    if not PTNative_DamagePoll then return end
+    if not (M.enabled and safety.active()) or os.getenv("PT_MUTATE") == "nodamageguard" then PTNative_DamageClear(); return end
+    try("receiver guard", function()
+        for _, rec in ipairs(FindAllOf("AC_PlayerHealthReceiverHelper_C") or {}) do
+            if valid(rec) and (safety.guest() and isHostBody(rec) or not safety.guest() and isGuestPawn(rec)) then
+                PTNative_DamageReceiver(rec:GetAddress())
+            end
+        end
+        while true do
+            local rec, payload = PTNative_DamagePoll()
+            if not rec then break end
+            pre(rec, payload, true)
+        end
+    end)
+end)
 
 -- Car crashes (from PDCoopNet's hazards.lua, MIT, BroZYTnikkkk): the car's damage controller works out the player's share of
 -- every hit on the car (LimitDamageToPlayerOverTime, limited over time; ~20 MSG_Damage_Physical_Impact of 0.04-0.5 per crash) and

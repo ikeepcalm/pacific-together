@@ -2,6 +2,7 @@ Pacific Together 0.8.7 - co-op for Pacific Drive
 ================================================
 
 Play Pacific Drive with a friend: one drives, one rides shotgun, both scavenge.
+Development tree: protocol 5; both players need the same development build.
 Early access: fully playable, still being polished. If something breaks mid-run, press F9 for the rescue menu.
 
 Both players need this same mod version (0.8.7, protocol 5) and Pacific Drive on Steam, v1.15.0 (build 21896301), on Windows.

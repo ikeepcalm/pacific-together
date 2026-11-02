@@ -27,7 +27,11 @@ end
 
 local function valid(o) return o ~= nil and o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) end
 local function pm() local m = FindFirstOf("BP_ProgressionManager_C"); return valid(m) and m or nil end
-local function gstate() local g = FindFirstOf("BaseGenericGraphState"); return valid(g) and g or nil end
+local function gstate()
+    local im = FindFirstOf("BP_InventoryManager_C")
+    local g = valid(im) and im.UnlockState
+    return valid(g) and g or nil
+end
 local function mcm() local m = FindFirstOf("BP_MainCharacterManager_C"); return valid(m) and m or nil end
 local function path(o) return o:GetFullName():match("^%S+ (.+)$") end
 local function short(o) return o:GetFName():ToString() end
@@ -83,6 +87,7 @@ local function send(sec, list, to)
         while i <= n and len + #list[i] + 1 <= CHUNK do buf[#buf + 1] = list[i]; len = len + #list[i] + 1; i = i + 1 end
         if #buf == 0 and i <= n then i = i + 1 end -- one entry larger than a chunk cannot happen with paths; skip rather than loop
         local data = table.concat(buf, ";")
+        if sec == "lb" then data = "@" .. n .. ";" .. data end
         if to then net.toGuest(to, "g.prog." .. sec, data) else net.toGuests("g.prog." .. sec, data) end
     until i > n
 end
@@ -197,18 +202,41 @@ local function applyRt(data)
     end
 end
 
+local lbSeen, lbCount, lbExpected, lbReady = {}, 0, nil, false
+RegisterLoadMapPostHook(function() lbSeen, lbCount, lbExpected, lbReady = {}, 0, nil, false end)
 local function applyLb(data)
     local m = pm()
     local lb = m and m.LogBook
     if not valid(lb) then return end
     local have = {}
     for i = 1, #lb.Entries do local o = lb.Entries[i].DataObject; if valid(o) then have[path(o)] = true end end
-    for _, p in ipairs(split(data)) do
-        if not have[p] then
-            local o = StaticFindObject(p)
-            if valid(o) then pcall(function() lb:AddEntry(o) end) end
+    local rows = split(data)
+    local expected = tonumber((rows[1] or ""):match("^@(%d+)$"))
+    if expected then lbExpected = expected end
+    local muted = {}
+    if lbExpected and not lbReady and os.getenv("PT_MUTATE") ~= "noprogressquiet" and PTNative_Mute then
+        -- Native AddEntry broadcasts this widget delegate; restored history must not look like hundreds of new discoveries.
+        for _, w in ipairs(FindAllOf("UMG_LogBook_NotifMain_C") or {}) do
+            if valid(w) and PTNative_Mute(w:GetAddress(), "OnLogbookEntryAdded") then muted[#muted + 1] = w end
         end
     end
+    local ok, err = pcall(function()
+        for _, p in ipairs(rows) do
+            if p:sub(1, 1) ~= "@" then
+                if not lbSeen[p] then lbSeen[p], lbCount = true, lbCount + 1 end
+                if not have[p] then
+                    local o = StaticFindObject(p)
+                    if valid(o) then
+                        local added = pcall(function() lb:AddEntry(o) end)
+                        if added then have[p] = true end
+                    end
+                end
+            end
+        end
+    end)
+    for _, w in ipairs(muted) do PTNative_Unmute(w:GetAddress()) end
+    if not ok then error(err) end
+    if lbExpected and lbCount >= lbExpected then lbReady = true end
 end
 
 local function applyPu(data)

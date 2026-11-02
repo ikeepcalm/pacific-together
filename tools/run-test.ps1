@@ -24,11 +24,22 @@ $BinRel = "PenDriverPro\Binaries\Win64"
 $Defaults = @{ boot = @(2, 150); listen = @(2, 330); dump = @(1, 600); travel = @(2, 1500); zonejoin = @(2, 420); guestsave = @(2, 1200); body = @(2, 420); fixtureload = @(1, 300); session = @(2, 1500); sessionmismatch = @(2, 420); sessionsolo = @(1, 600); sessionrejoin = @(2, 900); safety = @(2, 600); x2garage = @(2, 420); x2zone = @(2, 420); sessionabrupt = @(2, 900); sessionabruptzone = @(2, 900); sessiontravel = @(2, 1500); safetysaves = @(2, 900); carenter = @(2, 1200); reload = @(2, 900); channel = @(2, 600); playerhealth = @(2, 900); worldsync = @(2, 600); weathersync = @(2, 600); anchordup = @(2, 600); carsync = @(2, 900); lootsync = @(2, 900); backpacksync = @(2, 1500); guestact = @(2, 900); lootsync2 = @(2, 900); storysync = @(2, 900); anomalies = @(2, 900); progsync = @(2, 900); overlay = @(2, 900); playpath = @(2, 1500); anomalies2 = @(2, 1200); pausemenu = @(2, 1200); garagesync = @(2, 900); lootcar = @(2, 1200); dropfall = @(2, 900); guestdeath = @(2, 900); guestcraft = @(2, 1500); carexit = @(2, 1200); carsit = @(2, 1200); arckey = @(2, 1200); runloop = @(2, 1800); guestparts = @(2, 1800); carfeel = @(2, 1200); guestswap = @(2, 900); anomalies3 = @(2, 1500); storyprog = @(2, 1200); mapmark = @(2, 1200); ping = @(2, 900); steamsession = @(2, 900); steamplayhost = @(1, 1800); steamplayguest = @(1, 1800); upgrades = @(2, 1500); stations = @(2, 1500); hands = @(2, 900); visual = @(2, 1200); visualgarage = @(2, 900); carrelevant = @(2, 900); netflow = @(2, 900); zoneexit = @(2, 1200); zonespawn = @(2, 1200); guestui = @(2, 1200); worlddoors = @(2, 900); worldzone = @(2, 1200); radiation = @(2, 900); wheelflat = @(2, 900); portals = @(2, 900); pausehost = @(2, 1200); anomtesla = @(2, 1200); survivor = @(2, 600); transition = @(2, 1200); arcui = @(2, 900); radio = @(2, 900); bigjoin = @(2, 600); frames = @(2, 600); desync = @(2, 600); netspeed = @(2, 600); cutscene = @(2, 1200); carcrash = @(2, 900); carseat = @(2, 900); storagelayout = @(2, 900); doubledoor = @(2, 900); guestctl = @(2, 900); q01anchor = @(2, 900); sharedworld = @(2, 900); rescue = @(2, 900) }
 # M2: in these scenarios the shipping mod's guest joins by itself (PT_JOIN), the test mod never runs `open`
 $AutoJoin = @("repl", "session", "sessionlook", "sessionprobe", "sessionrejoin", "sessionabrupt", "sessionabruptzone", "sessiontravel", "carenter", "reload", "channel", "playerhealth", "worldsync", "weathersync", "anchordup", "carsync", "lootsync", "backpacksync", "guestact", "lootsync2", "storysync", "anomalies", "progsync", "overlay", "playpath", "anomalies2", "pausemenu", "garagesync", "guestparts", "lootcar", "dropfall", "guestdeath", "guestcraft", "carexit", "carsit", "arckey", "runloop", "carfeel", "guestswap", "anomalies3", "storyprog", "mapmark", "ping", "upgrades", "stations", "hands", "visual", "visualgarage", "carrelevant", "netflow", "zoneexit", "zonespawn", "guestui", "worlddoors", "worldzone", "radiation", "wheelflat", "portals", "pausehost", "anomtesla", "transition", "arcui", "radio", "bigjoin", "frames", "desync", "netspeed", "cutscene", "carcrash", "carseat", "storagelayout", "doubledoor", "guestctl", "q01anchor", "sharedworld", "rescue")
+$Defaults.boons = @(2, 600)
+$AutoJoin += "boons"
+$Defaults.itemphysics = @(2, 600)
+$AutoJoin += "itemphysics"
+$Defaults.damagefeedback = @(2, 600)
+$Defaults.progressquiet = @(2, 600)
+$AutoJoin += "damagefeedback", "progressquiet"
+$Defaults.mail = @(2, 300)
+$AutoJoin += "mail"
+$Defaults.keyedges = @(1, 180)
 # per-run Engine.ini additions, restored after the run; the mutations in skip run without them
 $IniEdits = @{ zonejoin = @{ client = "[/Script/OnlineSubsystemUtils.IpNetDriver]`r`nResolutionConnectionTimeout=120`r`n"; skip = @("noconfig", "cdo") } }
 # M6: the shipping mod's Steam lobby/join runs in these scenarios only (test runs keep it off so they never touch the owner's Steam presence);
 # the guest's join request comes through a file instead of Steam's command line (steam.lua inbox)
 $SteamMod = @("steamsession", "steamplayhost", "steamplayguest")
+$Root = [IO.Path]::GetFullPath($Root).TrimEnd([char[]]'\/')
 # Q9: a side crashes on purpose, so the run needs that crash instead of "no crash" and keeps waiting after it
 $CrashExpected = @("safety_crash", "crashfw")
 # S5: a scenario asks the runner to kill a side (PT|runner kill side=<role> n=<k>) and start it again later
@@ -72,7 +83,10 @@ function Get-Snapshot($s) {
     $base = Join-Path $s.Dir "PenDriverPro\Saved"
     foreach ($sub in "SaveGames", "Config") {
         Get-ChildItem (Join-Path $base $sub) -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
-            $h = (Get-FileHash $_.FullName -Algorithm SHA256 -ErrorAction SilentlyContinue).Hash
+            $stream = [IO.File]::Open($_.FullName, 'Open', 'Read', 'ReadWrite')
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { $h = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '') }
+            finally { $sha.Dispose(); $stream.Dispose() }
             "{0}`t{1}`t{2:o}`t{3}" -f $_.FullName.Substring($base.Length + 1), $_.Length, $_.LastWriteTimeUtc, $h
         }
     }
@@ -152,7 +166,9 @@ function Start-Side($s, $life) {
     $env:PT_VISUAL_ZONE = if ($Scenario -eq "visual") { "1" } else { $null }  # the zone props mirror is on by default (visual.lua); null keeps it on, "0" would turn it off
     try {
         $env:PT_ROLE = $s.Role
-        $env:PT_JOIN = if ($s.Role -eq "client" -and $AutoJoin -contains $Scenario) { "127.0.0.1:$Port" } else { "" }
+        $env:PT_JOIN = if ($s.Role -eq "client" -and $AutoJoin -contains $Scenario) {
+            if ($Tunnel -and $Mutate -ne "tunnelbypass") { "10.77.0.1:$Port" } else { "127.0.0.1:$Port" }
+        } else { "" }
         $exe = Join-Path $s.Bin "PenDriverPro-Win64-Shipping.exe"
         # -nullrhi: no rendering, ~1 GB RAM and no GPU per instance, so many lanes can test at once; screenshots need a normal run
         $gameArgs = if ($Headless) { "-NotInstalled", "-nullrhi", "-nosound", "-log", "-port=$Port" } else {

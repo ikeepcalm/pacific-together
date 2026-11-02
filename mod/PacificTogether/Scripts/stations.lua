@@ -106,8 +106,8 @@ local buying = false -- guest: inside the game's own PurchaseNode, whose cost re
 net.on("g.st.buy", function(_, data)
     if not host() then return end
     local node = StaticFindObject(data)
-    local g = FindFirstOf("BaseGenericGraphState")
     local im = FindFirstOf("BP_InventoryManager_C")
+    local g = valid(im) and im.UnlockState
     if not (valid(node) and valid(g) and valid(im)) then log("PT|st buy: no node or graph %s", data); return end
     if g:HasNodeBeenPurchased(node) then return end
     im:SetActiveTier(3, true, true) -- what the research station's screen sets: pay from backpack, garage and car
@@ -120,8 +120,10 @@ net.on("g.st.buy", function(_, data)
     end
 end)
 
-local function buyPre(_, node)
+local function buyPre(self, node)
     if not guest() then return end
+    local im = FindFirstOf("BP_InventoryManager_C")
+    if not (valid(im) and valid(im.UnlockState) and self:get():GetAddress() == im.UnlockState:GetAddress()) then return end
     local n = node:get()
     if not valid(n) then return end
     buying = true
@@ -300,6 +302,8 @@ local HOOKS = {
     { "/Game/Gameplay/CarGarage/BP_GarageInstallation_Spawner.BP_GarageInstallation_Spawner_C:InstallSpecificUpgrade", nil, upHook },
 }
 local done = {}
+local mutedBench
+RegisterLoadMapPreHook(function() mutedBench = nil end)
 local function hookAll()
     for i, h in ipairs(HOOKS) do
         if not done[i] then
@@ -319,6 +323,11 @@ end
 
 LoopInGameThreadWithDelay(500, function()
     if common.netMode() == "client" then
+        local bench = first("BP_Garage_InventingBench_C")
+        if bench and bench ~= mutedBench and PTNative_Mute then
+            PTNative_Mute(bench:GetAddress(), "OnNodePurchased")
+            mutedBench = bench
+        end
         local ok, err = pcall(hookAll)
         if not ok then log("PT|error stations hook %s", tostring(err)) end
         local ok2, err2 = pcall(guestQuirks)

@@ -1,5 +1,9 @@
 {
   "mcpServers": {
+    "coop-anything": {
+      "command": "python",
+      "args": ["coop-anything/tools/mcp/coop_mcp.py"]
+    },
     "pacific-game": {
       "command": "python",
       "args": ["tools/gamemcp/server.py"]

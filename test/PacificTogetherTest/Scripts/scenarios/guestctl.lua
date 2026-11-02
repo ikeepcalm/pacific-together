@@ -1,5 +1,5 @@
 -- The seated guest turns the ignition key and moves the shifter (P <-> D, P holds the parking brake) through the host (car.lua
--- g.car.ctl). The guest's E is a polled key, not drivable headless: the guest sends the intent its E sends (as carexit does for X).
+-- g.car.ctl). Headless checks aim at native components and send E's intent; OS keyboard capture is separate.
 -- Host: ignition 0 -> 2 -> 0 and gear 1 -> 0 (brake off) -> 1 (brake on); guest: its car shows the host's ignition and gear.
 -- Run: tools/run-test.ps1 -Scenario guestctl -Fixture garage -Headless      Mutation: noguestctl (host ignores the intent)
 return function(T)
@@ -55,6 +55,7 @@ return function(T)
         end })
         add({ check = "guest_seated", timeout = 120, cond = function() local g = L.guestChar(); return g ~= nil and attached(g) end })
         add({ check = "host_start_off_park", timeout = 5, cond = function() return is(0, 1) end })
+        add({ check = "guest_dashboard_ready", timeout = 45, cond = function() return has("t.ui") end })
         add({ run = function() sendGuest("t.ign") end })
         add({ check = "host_ignition_on_by_guest", timeout = 20, cond = function() return is(2, 1) end })
         add({ run = function() sendGuest("t.gear") end })
@@ -74,9 +75,34 @@ return function(T)
     local steps = { T.onMap("RB_MainMenu", 90) }
     local function add(s) steps[#steps + 1] = s end
     local id
+    local function control(what)
+        local c = theCar()
+        if what == "ign" then return c.Highlight_Key end
+        for _, a in ipairs(FindAllOf("BP_Carpart_Shifter_Base_C") or {}) do
+            if a:IsValid() and a:GetAttachParentActor():IsValid() and a:GetAttachParentActor():GetAddress() == c:GetAddress() then return a.Highlight end
+        end
+    end
+    local function aim(what)
+        local h, pc = control(what), T.localPC()
+        if not (h and h:IsValid() and h.HighlightCollision[1]:IsValid()) then return end
+        pc:SetControlRotation(KML:FindLookAtRotation(pc.PlayerCameraManager:GetCameraLocation(), h.HighlightCollision[1]:K2_GetComponentLocation()))
+        return h
+    end
+    local function selected(what)
+        local c = theCar()
+        local mesh = what == "ign" and c.SM_Wagon_01_KeyPhysics
+        if what == "gear" then
+            for _, a in ipairs(FindAllOf("BP_Carpart_Shifter_Base_C") or {}) do
+                if a:IsValid() and a:GetAttachParentActor():IsValid() and a:GetAttachParentActor():GetAddress() == c:GetAddress() then mesh = a.MainMesh; break end
+            end
+        end
+        return mesh and mesh:IsValid() and mesh.bRenderCustomDepth
+    end
     local function intentOn(kind, what)
         return { check = "guest_" .. kind, timeout = 120, cond = function()
             if not has(kind) then return false end
+            aim(what)
+            if not selected(what) then return false end
             got[kind] = nil
             sendHost("g.car.ctl", what)
             return true
@@ -89,6 +115,18 @@ return function(T)
     add({ run = function() id = T.act_begin("door_press", {}) end })
     add({ check = "guest_door_press", timeout = 90, cond = function() local d, _, ok = T.act_done(id); return d and ok end })
     add({ check = "guest_seated", timeout = 60, cond = function() return attached(T.myPawn()) end })
+    for _, what in ipairs({"ign", "gear"}) do
+        add({ check = "guest_native_highlight_" .. what, timeout = 15, tick = function() aim(what) end, cond = function() return selected(what) end })
+    end
+    add({ check = "guest_shifter_beats_arc_selection", timeout = 5, cond = function()
+        for _, a in ipairs(FindAllOf("BP_Carpart_Internal_GobblerScreen_C") or {}) do
+            if a:IsValid() and a:GetAttachParentActor():IsValid() and a:GetAttachParentActor():GetAddress() == theCar():GetAddress() then
+                return selected("gear") and a.ScreenCollision:GetCollisionEnabled() == 0
+            end
+        end
+        return false
+    end })
+    add({ run = function() sendHost("t.ui") end })
     add(intentOn("t.ign", "ign"))
     add(intentOn("t.gear", "gear"))
     add({ check = "guest_told_check1", timeout = 60, cond = function() return has("t.check1") end })

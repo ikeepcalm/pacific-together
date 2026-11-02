@@ -26,6 +26,13 @@ local function short(o) return (o and o:IsValid()) and o:GetFName():ToString() o
 
 local WI = StaticFindObject("/Game/Gameplay/Hazards/BaseHazard/BP_Base_Hazard_WorldItem.BP_Base_Hazard_WorldItem_C")
 local REPLICATED = { "BP_Base_Hazard_C", "BP_ZoneStorm_Base_C", "BP_LevelTransition_ExitPortal_C" }
+-- These inherit Actor through BP_Base_Boon, outside BP_Base_Hazard.
+local BOONS = {
+    BP_Boon_Healer_C = { power = "HealingPowerRemaining", stop = "EndHeal", depleted = "OnRunOutOfJuice" },
+    BP_Boon_Charging_C = { power = "ChargePowerRemaining", stop = "EndCharge", depleted = "PowerDrainedCompletely" },
+}
+if M.mutate == "noboons" then BOONS = {} end
+for class in pairs(BOONS) do REPLICATED[#REPLICATED + 1] = class end
 
 -- weather override struct (build 21896301): field names carry the Blueprint GUIDs
 local OV = { "Priority_2_E0B18C1F4F7065861D754CBC1717C0F4", "RainAmount_6_1DF01C624F8A4DABBCF2D9B45FEE5251", "FogAmount_7_DF39641648DD1C067F04379E79B4AC5F",
@@ -50,13 +57,8 @@ end
 local function replicate()
     for _, class in ipairs(REPLICATED) do
         each(class, function(o)
-            if o.RemoteRole ~= 0 or not o:HasAuthority() then return end
             if WI:IsValid() and class == "BP_Base_Hazard_C" and o:IsA(WI) then return end -- item actors need their item instance: not today
-            o:SetReplicates(true)
-            o:SetReplicateMovement(true)
-            o.bAlwaysRelevant = true -- the default 15000 uu cull would hide anomalies from a guest across the map
-            o.NetUpdateFrequency = 10
-            o:ForceNetUpdate()
+            common.replicateActor(o)
         end)
     end
 end
@@ -97,6 +99,12 @@ local function snapshot()
     add("keep", table.concat(names, ","))
     local st = firstLive("BP_ZoneStorm_Base_C")
     if st then add("wall", table.concat({ f(st.Vol_Rad_Main), f(st.Vol_Rad_Weak), tostring(st.Collapsed) }, "|")) end
+    for class, b in pairs(BOONS) do
+        each(class, function(o)
+            local l = o:K2_GetActorLocation()
+            add("boon", table.concat({ class, f(l.X), f(l.Y), f(l.Z), f(o[b.power]), tostring(o.OutOfJuice) }, "|"))
+        end)
+    end
     return table.concat(L, "\n")
 end
 
@@ -172,15 +180,54 @@ end
 local lastState = 0 -- os.clock() of the last state from the host
 
 local function parse(data)
-    local s = { ov = {} }
+    local s = { ov = {}, boons = {} }
     for line in (data .. "\n"):gmatch("(.-)\n") do
         local k, v = line:match("^([^\t]+)\t(.*)$")
-        if k == "ov" then s.ov[#s.ov + 1] = v elseif k then s[k] = v end
+        if k == "ov" then s.ov[#s.ov + 1] = v
+        elseif k == "boon" then s.boons[#s.boons + 1] = v
+        elseif k then s[k] = v end
     end
     return s
 end
 
 local function split(s) local t = {} for x in (s .. "|"):gmatch("(.-)|") do t[#t + 1] = x end return t end
+
+local function passiveBoon(o, b)
+    if o.Sphere1:GetGenerateOverlapEvents() then
+        o.Sphere1:SetGenerateOverlapEvents(false)
+        o[b.stop](o, false) -- also stops a timer started before the first host snapshot
+    end
+    o:SetActorTickEnabled(false)
+end
+
+local function applyBoons(lines)
+    if #lines == 0 then return end
+    local copies = {}
+    for class in pairs(BOONS) do
+        copies[class] = {}
+        each(class, function(o) if o.Role == 1 then copies[class][#copies[class] + 1] = o end end)
+    end
+    for _, line in ipairs(lines) do
+        local v = split(line)
+        local b, x, y, z, power = BOONS[v[1]], tonumber(v[2]), tonumber(v[3]), tonumber(v[4]), tonumber(v[5])
+        if b and x and y and z and power and power >= 0 and power < math.huge and (v[6] == "true" or v[6] == "false") then
+            -- shortcut: stationary boons match by class/location; use a replicated ID if they can move or overlap.
+            local best, distance = nil, 100 ^ 2
+            for _, o in ipairs(copies[v[1]]) do
+                local l = o:K2_GetActorLocation()
+                local d = (l.X - x) ^ 2 + (l.Y - y) ^ 2 + (l.Z - z) ^ 2
+                if d < distance then best, distance = o, d end
+            end
+            if best then
+                passiveBoon(best, b)
+                best[b.power] = power
+                local depleted = v[6] == "true"
+                if depleted and not best.OutOfJuice then best[b.depleted](best) end
+                best.OutOfJuice = depleted
+            end
+        end
+    end
+end
 
 local function applyTime(s)
     local tod = first("BP_ToDManager_C")
@@ -264,12 +311,15 @@ local function cleanGuest()
     -- the test mutation: the old behaviour, own story pickups destroyed at once
     if os.getenv("PT_MUTATE") == "noportals" then each(PROP, function(o) if o.Role ~= 1 then o:K2_DestroyActor() end end) end
     if os.clock() - lastState > 5 or os.clock() - (M.since or os.clock()) < 5 then return end
-    for _, class in ipairs({ "BP_Base_Hazard_C", "BP_ZoneStorm_Base_C", "BP_LevelTransition_ExitPortal_C", PROP }) do
+    local classes = { PROP }
+    for _, class in ipairs(REPLICATED) do classes[#classes + 1] = class end
+    for _, class in ipairs(classes) do
         each(class, function(o)
             if (class == PROP or class == "BP_LevelTransition_ExitPortal_C") and keep[short(o)] then return end
             if o.Role == 1 then
                 -- the host's copy decides where it is: the guest's own motion code stays off (position updates: g.world.pos)
                 if class == "BP_Base_Hazard_C" and not (WI:IsValid() and o:IsA(WI)) then o:SetActorTickEnabled(false) end
+                if BOONS[class] then passiveBoon(o, BOONS[class]) end
                 return
             end
             if WI:IsValid() and class == "BP_Base_Hazard_C" and o:IsA(WI) then return end
@@ -288,6 +338,7 @@ net.on("g.world.state", function(_, data)
     if s.keep and os.getenv("PT_MUTATE") ~= "noportals" then keep = {} for n in s.keep:gmatch("[^,]+") do keep[n] = true end end
     try("time", applyTime, s)
     try("storm", applyStorm, s)
+    try("boons", applyBoons, s.boons)
 end)
 
 -- falling rain, splashes and radiation haze follow the local character (BP_AmbienceManager). The guest's manager initialised before

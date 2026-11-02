@@ -19,6 +19,8 @@ Olympic Exclusion Zone.
 > **Early access.** The mod is fully playable, but it is still being polished - expect the odd glitch, and see
 > [Known issues](#known-issues). If something breaks mid-run, press **F9** for the rescue menu.
 
+Unreleased development changes use protocol **5**; both players need the same development build.
+
 ## Features
 
 - 🚗 **One car, two players.** The host drives, the guest rides in the passenger seat and can start the engine or shift

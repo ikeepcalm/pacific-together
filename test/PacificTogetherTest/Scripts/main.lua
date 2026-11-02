@@ -476,7 +476,7 @@ local scenarios = {
             return {
                 onMap("RB_MainMenu", 90),
                 { run = function() log("PT|info timeouts %s", timeouts()) end },
-                { wait = 45 }, -- the client opens as soon as its menu is up (~8 s after ours), so its connect stays pending ~40 s
+                { wait = 75 }, -- exceed the game's 60 s InitialConnectTimeout; mutation shortconnect retains that limit
                 { run = function() console("open " .. FOREST .. "?listen") end },
                 { check = "host_listen_zone", timeout = 180, cond = function() return netMode() == "listen" and map() == "Wilderness_Forest_01" end },
                 { check = "host_two_pcs", timeout = 120, cond = function() return pcs() == 2 end },
@@ -494,7 +494,7 @@ local scenarios = {
                 log("PT|info timeouts %s", timeouts()); opened = os.time(); console("open " .. HOST)
             end },
             -- one open only: a timeout must show as a failure, not be hidden by a retry
-            { check = "client_connected_zone", timeout = 150, cond = function() return netMode() == "client" and map() == "Wilderness_Forest_01" end,
+            { check = "client_connected_zone", timeout = 180, cond = function() return netMode() == "client" and map() == "Wilderness_Forest_01" end,
               tick = function(t) if t % 2 == 0 then log("PT|info t=%d %s %s", t, state(), timeouts()) end end },
             { run = function() log("PT|info connected %ds after open", os.time() - opened) end },
             { wait = 20 },
