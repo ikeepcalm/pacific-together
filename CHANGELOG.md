@@ -9,6 +9,15 @@ Development network protocol **5**: both players need the same development build
 
 ### Fixed
 
+- From the 2026-11-01 friend session (owner as guest; see NOTES "2026-11-02"):
+  - The guest no longer "dies" a moment after every junction arrival and gets put next to the car. A likely cause of
+    items vanishing from the guest's hands at junctions; not yet confirmed in play.
+  - A gateway summoned by the host now shows on the guest's side (beam, lights, sound, map icon).
+  - Blueprints the host unlocks mid-session reach the guest's benches and crafting lists without a rejoin.
+  - The car radio no longer sounds muffled ("behind a wall") to a seated guest.
+  - Guest crash while the host's garage storage changed (expansion install, shredder output): the guest's sliced refill
+    stops when the storage it was filling is gone.
+  - The launcher's "collect logs" also saves the engine's crash context (native call stack) next to each crash marker.
 - Delayed car actions and handshake/body-refresh callbacks stop at a world change. A previous passenger exit cannot
   repossess an old character after that controller has received a replacement pawn.
 - Message buffers are cleared before map loads; incomplete messages follow controller identities instead of reused addresses,

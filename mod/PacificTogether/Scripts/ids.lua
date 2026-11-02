@@ -204,13 +204,16 @@ function M.applyLayout(container, body, steps)
         end
         container:RemoveAllItems()
     end)
-    local L = container.Layout
     for x, y, r, entry in body:sub(2):gmatch("(%d+)%.(%d+)%.(%d)=([^,]+)") do
         local stack = {} -- the slot this stack's first item made; the rest go on top
         for k, c in entry:gmatch("([^+*]+)%*(%d+)") do
             local p = k:match("^[^:]+")
             for _ = 1, tonumber(c) do
                 step(steps, function()
+                    -- the steps run over many frames: the container or its layout can be gone or replaced meanwhile (the host's
+                    -- storage expansion install; guest crash in EmplaceSlot on CL_Garage_V1, 2026-11-01)
+                    if not (container:IsValid() and container.Layout:IsValid()) then return end
+                    local L = container.Layout
                     local inst = pool[p] and table.remove(pool[p])
                     if not inst then
                         local a = archetype(p)

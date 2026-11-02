@@ -416,7 +416,13 @@ class App : Form
             var crashes = Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? "", @"PenDriverPro\Saved\Crashes");
             if (Directory.Exists(crashes))
                 foreach (var m in Directory.GetFiles(crashes, "PacificTogether-crash.txt", SearchOption.AllDirectories).OrderByDescending(f => File.GetLastWriteTime(f)).Take(3))
-                { CopyShared(m, Path.Combine(tmp, "crash-" + Path.GetFileName(Path.GetDirectoryName(m)) + ".txt")); n++; }
+                {
+                    var id = Path.GetFileName(Path.GetDirectoryName(m));
+                    CopyShared(m, Path.Combine(tmp, "crash-" + id + ".txt")); n++;
+                    // the engine's native call stack: the marker only has the Blueprint frames (Settings crash, 2026-11-01)
+                    var ctx = Path.Combine(Path.GetDirectoryName(m), "CrashContext.runtime-xml");
+                    if (File.Exists(ctx)) CopyShared(ctx, Path.Combine(tmp, "crash-" + id + ".xml"));
+                }
             if (n == 0) { Fail("No logs found yet. Start the game once with the mod installed."); return; }
             var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
             var zip = Path.Combine(desk, "PacificTogether-logs-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".zip");

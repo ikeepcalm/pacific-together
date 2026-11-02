@@ -300,6 +300,13 @@ local function applyStorm(s)
             if short(p) == s.gate then
                 p.IsPickedExit = true
                 sm["Select Exit Portal Actor"](sm, p)
+                -- the beam, lights, sound and map icon: the visual part of the portal's Activate, which runs on the host only
+                -- (playtest 2026-11-01: summoned gateway invisible to the guest). Not Activate itself: it also turns on the
+                -- portal's collision, and a transition must not start in the guest's own game.
+                pcall(function() p:Portal_AnimStart() end)
+                pcall(function() p:SetExitPortalActive(true) end)
+                pcall(function() p.BP_AkComponent_Ambient:RequestPlay() end)
+                log("PT|world guest gateway %s shown", s.gate)
                 ov.post("Gateway summoned", "good")
             end
         end)

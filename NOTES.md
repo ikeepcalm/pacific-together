@@ -998,3 +998,40 @@ Fixes (0.8.6) and results
 Not checked: real custom files, the trunk crash, Scrapper on the host HUD, car rack contents (fixture car has none), trader copy,
 heal and F10 in game. Open: guest Settings crash (only the old 0.0.8 stack), crafting button gone, charging "Connected", guest in
 driver seat after Sierra.
+
+## 2026-11-02: friend session 2026-11-01 (0.8.7 ce717a3), owner was the guest
+
+Logs: `local/playtest-20261102-175321` (host "Medici", 16:11-17:52), `local/playtest-20261102-185310` (owner = guest, only its
+last life 18:30-18:52 = host 17:30-17:52, plus 3 crash markers). Merged first: Everelsu fork main 18e3f07 (fast-forward, 3
+commits; native DLL rebuilt for msg.cpp/damage.cpp).
+
+Observations
+- Owner reports: held items vanish at junctions; host-summoned gateway invisible to the guest; blueprints sometimes reach the
+  guest only after a rejoin; car radio muffled for the guest; one crash opening Settings.
+- Guest `PT|health guest died` 0.5 s before "host says go" on both zone arrivals in the guest log (18:36:49, 18:51:59), each
+  followed by a respawn next to the car. The 8 s grace counted from LoadMapPost; the guest waited 29 s and 52 s for the go.
+- The guest's newest local crash (owner PC, Saved/Crashes, 18:29) is `ItemTileLayout:EmplaceSlot` on CL_Garage_V1, access
+  violation 0x1000001bc; on the host just before: shredder output and `loot got S I:Stations.Install.Inventory.Expansion` 0 -> 9.
+- The Settings crash marker (0.8.7, guest) has the same Blueprint stack as the 0.0.8 one (Settings press -> Graphics page
+  constructed -> native). No native stack: the log zip did not carry CrashContext.runtime-xml.
+- Host summoned the gateway itself (exits 16:51, 17:20; no `act gate`). Guest code only called Select Exit Portal Actor; the
+  portal's Activate (ubergraph 5167: Portal_AnimStart, SetExitPortalActive(true), ambient AkComponent, map icon, collision)
+  ran on the host only.
+- Guest unlocks used UnlockNode(node, bSuppressEvents=true) for every change, so OnNodeUnlocked listeners (ProgressionManager,
+  benches) never heard of mid-session unlocks. Nodes not loaded were skipped silently.
+- `radio_car_distance_exterior` is set only in BP_CarPart_Internal_Radio when the radio switches on: 0 if PlayerCarState==1,
+  else distance/10000. The guest's PlayerCarState stays 0 (seated by car.lua).
+- Host error once: `g.vis.unlock visual.lua:545 ForceUnlockDoor` is a TrivialObject (not looked into).
+
+Changes (each a guess from the logs, not reproduced)
+- health.lua: grace restarts while transition.lua has a phase; death lines carry the reason.
+- world.lua: guest runs Portal_AnimStart + SetExitPortalActive(true) + ambient sound for the host's gateway (not Activate:
+  it enables the portal collision).
+- progression.lua: unlocks after the first 5 s of a map use the game's events; LoadAsset fallback; count of nodes not found.
+- radio.lua: guest sets the RTPC itself every 1 s (0 when attached to the car).
+- ids.lua: applyLayout re-reads container/Layout per sliced step and stops when either is gone.
+- Launcher.cs: collect copies CrashContext.runtime-xml beside each crash marker.
+
+Checks: progsync 31/31 (`20261102-171347-progsync`, guest "1 nodes set, 0 not found" for the later unlock); radio 31/34
+(`20261102-171742-radio`, the same 3 custom-file checks as 0.8.5/0.8.7; guest logged exterior 0.87 standing in the garage). Gateway, radio
+muffle, false death and the storage crash have no scenario run; they need the live loop.

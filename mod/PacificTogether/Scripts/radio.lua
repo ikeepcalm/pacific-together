@@ -386,6 +386,38 @@ RegisterLoadMapPostHook(function()
     if mode() == "client" then resyncAt = now() + 6 else hbAt = -1; resyncAt = now() + 6 end
 end)
 
+-- The car radio's muffle: the game sets this global RTPC only when the radio part switches on, from the player's distance to
+-- the car (0 = in the car). The guest's copy took it while away from the car and kept the outside sound in its seat (playtest
+-- 2026-11-01: "as if behind a wall"). The guest sets it itself, the way the game would for where it is.
+local EXT = "/Game/WwiseAudio/Game_Parameters/Radio/radio_car_distance_exterior.radio_car_distance_exterior"
+local extAt, extSent = 0, nil
+local function guestExterior()
+    if now() - extAt < 1 then return end
+    extAt = now()
+    local pc = UEHelpers.GetPlayerController()
+    local pawn = valid(pc) and pc.Pawn
+    if not valid(pawn) then return end
+    local car
+    for _, c in ipairs(FindAllOf("BP_CarPart_Internal_Radio_C") or {}) do
+        if valid(c) and valid(c:GetAttachParentActor()) then car = c:GetAttachParentActor(); break end
+    end
+    if not car then return end
+    local v = 0
+    local seat = pawn:GetAttachParentActor()
+    if not (valid(seat) and seat:GetAddress() == car:GetAddress()) then
+        local a, b = car:K2_GetActorLocation(), pawn:K2_GetActorLocation()
+        v = math.min(1, math.sqrt((a.X - b.X) ^ 2 + (a.Y - b.Y) ^ 2 + (a.Z - b.Z) ^ 2) / 10000)
+    end
+    if extSent and math.abs(extSent - v) < 0.01 then return end
+    local rtpc = StaticFindObject(EXT)
+    if not valid(rtpc) then pcall(LoadAsset, EXT); rtpc = StaticFindObject(EXT) end
+    if not valid(rtpc) then return end
+    StaticFindObject("/Script/AkAudio.Default__AkGameplayStatics"):SetRTPCValue(rtpc, v, 0, nil, FName("None"))
+    if extSent == nil or (v == 0) ~= (extSent == 0) then log("PT|radio guest exterior %.2f", v) end
+    extSent = v
+end
+RegisterLoadMapPostHook(function() extSent = nil end)
+
 local function tick()
     hookSkip()
     finishPlay()
@@ -397,6 +429,8 @@ local function tick()
         pcall(function() mm.NextNaturalInterstitialCounter, mm.NextManualInterstitialCounter = 999, 999 end)
         local okf, ef = pcall(guestFollow, mm)
         if not okf then log("PT|error radio follow %s", tostring(ef)) end
+        local oke, ee = pcall(guestExterior)
+        if not oke then log("PT|error radio exterior %s", tostring(ee)) end
         local d = {}
         for k, v in pairs(s) do
             if last[k] == nil then last[k] = v elseif last[k] ~= v then d[k] = v; last[k] = v end

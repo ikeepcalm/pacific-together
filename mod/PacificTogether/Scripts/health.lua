@@ -61,9 +61,9 @@ local function revive()
     log("PT|health guest revived")
 end
 
-local function die(h, pre)
+local function die(h, pre, why)
     dying = true
-    log("PT|health guest died")
+    log("PT|health guest died (%s)", why)
     local okb, bp = pcall(require, "backpack") -- D6: the backpack drops as a bag at this spot
     if okb then pcall(bp.died, pre) end
     local pc = localPC()
@@ -110,7 +110,7 @@ local function hookKill()
         undoGameDeath(self:get())
         local h = health()
         if h then h:Adjust(manager, h.Maximum - h.Current) end
-        die(h, pre)
+        die(h, pre, "game kill")
     end)
     if killHooked then log("PT|health kill hook registered") end
 end
@@ -160,9 +160,13 @@ local function tick()
     if safety.guest() then
         -- the game's death needs Current <= 0: stay above it (a runtime value on the resource, not a saved setting)
         if h.Minimum ~= 1 then h.Minimum, clamped = 1, true end
+        -- the grace runs from the end of the host's transition: the guest waits for the host's go up to a minute after its load,
+        -- and the game drops health to the minimum at the release (false death on every zone arrival, playtest 2026-11-01)
+        local tr = package.loaded["transition"]
+        if tr and tr.state().phase then loadedAt, seenAlive = os.clock(), false end
         if cur > 1.01 then seenAlive = true end
         -- a level loads its health over the first seconds (seen: 100 then the minimum 0.5 s after arrival): no death then
-        if not dying and seenAlive and os.clock() - loadedAt > 8 and cur <= 1.01 then die(h) end
+        if not dying and seenAlive and os.clock() - loadedAt > 8 and cur <= 1.01 then die(h, nil, "health at minimum") end
     end
     -- on change, else every 2 s so a late joiner and a missed message catch up
     local msg = string.format("%.1f,%.1f", cur, max)

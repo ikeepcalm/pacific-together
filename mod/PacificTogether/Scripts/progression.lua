@@ -161,24 +161,33 @@ local function applyWb(data)
     if n > 0 then log("PT|prog guest whiteboard %d tags set", n) end
 end
 
+local unFirst -- os.clock() of the first graph chunk since the map load: the join's full graph (several chunks) stays quiet
+RegisterLoadMapPostHook(function() unFirst = nil end)
 local function applyUn(data)
     local g = gstate()
     if not g then return end
+    unFirst = unFirst or os.clock()
+    local loud = os.clock() - unFirst > 5
     local have = { U = {}, P = {} }
     g.UnlockedNodes:ForEach(function(n) have.U[path(n:get())] = true end)
     g.PurchasedNodes:ForEach(function(n) have.P[path(n:get())] = true end)
-    local nu = 0
+    local nu, miss = 0, 0
     for _, e in ipairs(split(data)) do
         local kind, p = e:sub(1, 1), e:sub(2)
         if have[kind] and not have[kind][p] then
             local node = StaticFindObject(p)
+            if not valid(node) then pcall(LoadAsset, p); node = StaticFindObject(p) end -- a node asset not loaded yet was skipped for good
             if valid(node) then
-                if kind == "U" then g:UnlockNode(node, true) else g:MarkAsPurchased(node) end
+                -- after the first sync the game's own events run, like the host's unlock: the guest's benches and crafting
+                -- lists refresh (playtest 2026-11-01: new blueprints only showed after a rejoin)
+                if kind == "U" then g:UnlockNode(node, not loud) else g:MarkAsPurchased(node) end
                 nu = nu + 1
+            else
+                miss = miss + 1
             end
         end
     end
-    if nu > 0 then log("PT|prog guest unlock graph %d nodes set", nu) end
+    if nu > 0 or miss > 0 then log("PT|prog guest unlock graph %d nodes set, %d not found", nu, miss) end
 end
 
 local function applyRt(data)
