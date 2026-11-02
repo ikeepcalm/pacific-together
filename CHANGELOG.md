@@ -9,6 +9,10 @@ Development network protocol **5**: both players need the same development build
 
 ### Fixed
 
+- Delayed car actions and handshake/body-refresh callbacks stop at a world change. A previous passenger exit cannot
+  repossess an old character after that controller has received a replacement pawn.
+- Message buffers are cleared before map loads; incomplete messages follow controller identities instead of reused addresses,
+  and queued messages from expired controllers are discarded.
 - Passenger camera sway settles at low FPS instead of amplifying tiny parked-car movements into sustained shaking.
 - Passenger ignition and P/D interaction again use the game's native highlight and dashboard selection.
 - Passenger look follows car turns while preserving free look, and returns to world-space control after leaving.

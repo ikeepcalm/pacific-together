@@ -50,7 +50,7 @@ constexpr long long PER_FRAME = 8;
 struct Msg
 {
     std::string kind, data;
-    uintptr_t from;
+    FWeakObjectPtr from;
 };
 
 UFunction* g_to_host{};
@@ -59,7 +59,6 @@ bool g_sending = false; // our own ProcessEvent calls pass through the pre-callb
 bool g_capture = true;
 bool g_pace = true;
 std::deque<Msg> g_inbox;
-std::map<std::pair<uintptr_t, std::string>, std::string> g_partial;
 long long g_sent = 0, g_recv = 0, g_chunks_out = 0, g_chunks_in = 0, g_dropped = 0, g_queued_max = 0, g_waits = 0;
 
 // One per PlayerController we talk through (the host's copy of a guest's controller, or the guest's own). Its RPC (out) is the
@@ -69,6 +68,7 @@ struct Link
     FWeakObjectPtr pc; // a guest that left takes its queue with it
     UFunction* out{};
     std::deque<std::wstring> chunks;
+    std::map<std::string, std::string> partial;
     long long sent = 0, acked = 0;    // our chunks on this link, and how many the other side confirmed
     long long got = 0, confirmed = 0; // their chunks we received, and how many we confirmed
     long long this_frame = 0;         // our chunks sent since the last tick
@@ -201,16 +201,16 @@ auto on_pre(Hook::TCallbackIterationData<void>& it, UObject* context, UFunction*
     if (bar == std::wstring_view::npos || bar + 3 > v.size() || v[bar + 2] != L'|') { ++g_dropped; return; }
     std::string kind(v.begin(), v.begin() + bar);
     bool last = v[bar + 1] == L'e';
-    auto key = std::make_pair(reinterpret_cast<uintptr_t>(context), kind);
-    // shortcut: a message cut off by a dropped connection waits here; a new controller at the same address and kind would
-    // get it as a prefix. Upgrade (reset on login) if that shows up.
-    auto& buf = g_partial[key];
+    // Reassembly belongs to this controller's weak identity, just like its outbound queue.
+    auto& buf = l.partial[kind];
     if (buf.size() > MAX_MSG) { buf.clear(); ++g_dropped; }
     for (auto c : v.substr(bar + 3)) buf += static_cast<char>(c & 0xFF);
     if (!last) return;
     if (g_inbox.size() >= MAX_INBOX) { g_inbox.pop_front(); ++g_dropped; }
-    g_inbox.push_back({kind, std::move(buf), key.first});
-    g_partial.erase(key);
+    Msg message{kind, std::move(buf), {}};
+    message.from = context;
+    g_inbox.push_back(std::move(message));
+    l.partial.erase(kind);
     ++g_recv;
 }
 
@@ -243,17 +243,25 @@ auto pt_register_msg(const LuaMadeSimple::Lua& lua) -> void
     ensure_hook();
     lua.register_function("PTNative_MsgToHost", [](const LuaMadeSimple::Lua& l) -> int { return lua_send(l, true); });
     lua.register_function("PTNative_MsgToGuest", [](const LuaMadeSimple::Lua& l) -> int { return lua_send(l, false); });
+    lua.register_function("PTNative_MsgReset", [](const LuaMadeSimple::Lua&) -> int {
+        g_inbox.clear();
+        g_links.clear();
+        return 0;
+    });
     lua.register_function("PTNative_MsgPoll", [](const LuaMadeSimple::Lua& l) -> int {
         ensure_hook();
         auto prefix = std::string(l.get_string());
-        for (auto it = g_inbox.begin(); it != g_inbox.end(); ++it)
+        for (auto it = g_inbox.begin(); it != g_inbox.end();)
         {
-            if (it->kind.compare(0, prefix.size(), prefix) != 0) continue;
+            auto* sender = it->from.Get();
+            if (!sender)
+            { it = g_inbox.erase(it); ++g_dropped; continue; }
+            if (it->kind.compare(0, prefix.size(), prefix) != 0) { ++it; continue; }
             auto m = std::move(*it);
             g_inbox.erase(it);
             l.set_string(m.kind);
             l.set_string(m.data);
-            l.set_integer(static_cast<int64_t>(m.from));
+            l.set_integer(static_cast<int64_t>(reinterpret_cast<uintptr_t>(sender)));
             return 3;
         }
         return 0;

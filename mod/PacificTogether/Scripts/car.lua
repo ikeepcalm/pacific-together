@@ -500,7 +500,7 @@ net.on("g.car.enter", function(pc)
         local door = entryDoor and now() - entryDoor.at < 8 and entryDoor.part
         entryDoor = nil
         if door then
-            ExecuteInGameThreadWithDelay(800, function() pcall(function() if valid(door) then door:AttemptShut() end end) end)
+            common.defer(800, function() pcall(function() if valid(door) then door:AttemptShut() end end) end)
         end
         ov.post(ov.other() .. " entered the car")
     end
@@ -550,7 +550,7 @@ net.on("g.car.exit", function(pc)
     local door = doorParts(car).SLOT_FrontRightDoor
     if valid(door) then
         door:AttemptOpen()
-        ExecuteInGameThreadWithDelay(1500, function() if valid(door) then door:AttemptShut() end end)
+        common.defer(1500, function() if valid(door) then door:AttemptShut() end end)
     end
     seated[char:GetFullName()] = nil
     char:K2_DetachFromActor(1, 1, 1)
@@ -608,10 +608,12 @@ net.on("g.car.exit", function(pc)
             char.CharacterMovement:SetMovementMode(1, 0)
         end
     end
-    ExecuteInGameThreadWithDelay(150, function()
+    common.defer(150, function()
+        if os.getenv("PT_MUTATE") ~= "nostaleactions" and not (valid(pc) and same(pc.Pawn, char)) then return end
         local ok, e = pcall(function() if valid(pc) and valid(char) then pc:UnPossess(); pc:Possess(char); walk() end end)
         if not ok then log("PT|error car repossess %s", tostring(e)) end
-        ExecuteInGameThreadWithDelay(500, function()
+        common.defer(500, function()
+            if os.getenv("PT_MUTATE") ~= "nostaleactions" and not (valid(pc) and same(pc.Pawn, char)) then return end
             pcall(walk)
             pcall(function()
                 local cap = char.CapsuleComponent
@@ -1071,7 +1073,7 @@ local function hookAll()
             sendEnter()
             -- the door flow set this and waits for the (muted) enter to end it
             local door = self:get() -- a hook parameter must not outlive the callback
-            ExecuteInGameThreadWithDelay(500, function() pcall(function() if valid(door) then door.PlayerStartedEnteringCar = false end end) end)
+            common.defer(500, function() pcall(function() if valid(door) then door.PlayerStartedEnteringCar = false end end) end)
         end)
         if not okc then log("PT|error car door hook %s", tostring(e)) end
     end)
@@ -1100,7 +1102,7 @@ local function hookAll()
                     if not noGlide() then
                         glideIn(me, car, PASSENGER, function()
                             -- the host seats us at the same moment (g.car.seat); still standing here 4 s later: walk again
-                            ExecuteInGameThreadWithDelay(4000, function() pcall(function()
+                            common.defer(4000, function() pcall(function()
                                 if valid(me) and not valid(me:GetAttachParentActor()) and not gliding(me) then
                                     me:SetActorEnableCollision(true); me.CharacterMovement:SetMovementMode(1, 0)
                                     log("PT|car not seated after the entry: walking again")

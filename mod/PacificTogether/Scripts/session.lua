@@ -285,7 +285,7 @@ local function onLogin(pc)
     local key = pc:GetFullName()
     log("PT|session login %s", key)
     giveInput(pc)
-    ExecuteInGameThreadWithDelay(HELLO_WAIT_MS, function()
+    common.defer(HELLO_WAIT_MS, function()
         if valid(pc) and not greeted[key] and listening(pc:GetWorld()) then
             refuse(pc, "no handshake received. Install the same Pacific Together version as the host.")
         end
@@ -381,7 +381,7 @@ local function hookAll()
         -- shortcut: a host character that becomes relevant later (far apart in a zone) stays invisible; hook its arrival in M3/M4
         -- (NotifyOnNewObject would fire on the loading thread)
         refreshBodies()
-        ExecuteInGameThreadWithDelay(3000, function() pcall(refreshBodies) end)
+        common.defer(3000, function() pcall(refreshBodies) end)
     end)
     -- the save manager starts most native travel: remove the guest's character before the travel is even queued
     -- (removing it in the LoadMap pre-hook alone crashed the host's next map load, seen before the s:set heap fix;

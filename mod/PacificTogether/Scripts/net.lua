@@ -7,6 +7,7 @@
 local UEHelpers = require("UEHelpers")
 local common = require("common")
 local log = common.log
+assert(type(PTNative_MsgReset) == "function", "PacificTogetherNative is outdated: update main.dll together with the Lua mod")
 
 local M = {}
 local handlers = {}
@@ -22,7 +23,11 @@ end
 -- every send and every received message looked the controllers up (1340 times a minute on a host, PT|perf 2026-10-22):
 -- the list is reused for 100 ms; a sender not in it looks again
 local pcs, pcsAt = {}, -1
-RegisterLoadMapPreHook(function() pcs, pcsAt = {}, -1 end)
+RegisterLoadMapPreHook(function()
+    pcs, pcsAt, M.heardAt = {}, -1, {}
+    -- Native queues outlive Lua worlds; no fragment or pending message belongs to the next map.
+    if os.getenv("PT_MUTATE") ~= "nomessageepoch" then PTNative_MsgReset() end
+end)
 local function controllers(fresh)
     if fresh or os.clock() - pcsAt > 0.1 then pcs, pcsAt = FindAllOf("PlayerController") or {}, os.clock() end
     return pcs

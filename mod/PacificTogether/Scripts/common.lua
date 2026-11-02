@@ -123,6 +123,16 @@ local function forget() singles, cachedPC, cachedWorld = {}, nil, nil end
 RegisterLoadMapPreHook(forget)
 RegisterLoadMapPostHook(forget)
 
+local worldGeneration = 0
+RegisterLoadMapPreHook(function() worldGeneration = worldGeneration + 1 end)
+-- A still-valid handle may belong to the world we just left; do not even enter its callback.
+function M.defer(ms, fn)
+    local generation = worldGeneration
+    return ExecuteInGameThreadWithDelay(ms, function()
+        if generation == worldGeneration or os.getenv("PT_MUTATE") == "nostaleactions" then fn() end
+    end)
+end
+
 function M.netMode()
     local ksl, wco = UEHelpers.GetKismetSystemLibrary(), UEHelpers.GetWorldContextObject()
     if not wco:IsValid() then return "none" end
