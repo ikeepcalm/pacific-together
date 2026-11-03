@@ -97,7 +97,7 @@ return function(T)
         add({ run = function()
             local me = T.myPawn()
             log("PT|info guest%d before X: attached=%s pos=%s", i, tostring(attachedToCar(me)), pos(me))
-            PTNative_MsgToHost(T.localPC():GetAddress(), "g.car.exit", "") -- what X sends
+            T.intent("g.car.exit", "") -- what X sends
         end })
         add({ wait = 5 })
         add({ run = function() PTNative_MsgToHost(T.localPC():GetAddress(), "t.x" .. i, pos(T.myPawn())) end })

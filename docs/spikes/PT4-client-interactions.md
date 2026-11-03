@@ -205,3 +205,5 @@ With FPS caps of 30 and 60, the probe also passed: peak offsets 0.6094 and 0.465
 respectively. The sample counts do not establish a sustained 60 FPS. Baseline session archive:
 `20261102-140726-passenger-repl`; corrected session: `20261102-141113-passenger-repl`. Both sessions stopped cleanly,
 15/15 lifecycle checks, no new crashes. Full driving, rendered hand play and the release suite were not run for this fix.
+
+Thrown-item trajectory, garage part lockers, remote wheels and passenger windshield follow-up: [PT7](PT7-motion-parts.md).

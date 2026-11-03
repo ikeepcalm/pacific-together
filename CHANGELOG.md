@@ -5,9 +5,28 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve author protocol 6 and keyed drop adoption; optional motion, heap and intent extensions activate only after negotiation.
+- Bind cached actors/controllers to UE weak identities and the current world; reject replayed or previous-pawn actions.
+- Shared item IDs have tombstones, newest-wins poses and a reliable settled pose; creation stays before dependent updates.
+- Motion can use independent datagrams on the existing Steam/UDP tunnel, with reliable fallback on ordinary direct IP.
+- Loading waits for applied car, loot and prop baselines; control traffic gets priority over bulk state.
+
+- Wheel rolling uses unwrapped native phase/velocity with a render clock independent of packet arrival; steering keeps its native axle.
+- Native motion queues replace obsolete snapshots and drain before bulk state; wheel packets follow the current car identity.
+- Passenger radio gets its native highlight and host-authoritative power, volume and station controls using game action bindings.
+- Lucky Junk Heap interactions, prizes, animations and presentation sounds follow the host, with cancellation and duplicate/stale-request guards.
+
+- Thrown items stream host-authoritative movement at 20 Hz with interpolation; guest throws retain their velocity and rotation.
+- Garage part lockers use their own installation tags instead of sharing an empty upgrade-slot tag.
+- Remote wheels follow the host's rolling, steering and suspension poses while guest vehicle physics stays disabled.
+- A seated guest cannot highlight the windshield; ignition, shifter and on-foot selection remain available.
+
+
 ## [0.8.8] - 2026-11-02
 
-Network protocol **6**: both players need 0.8.8. Includes the Everelsu fork's three commits (garage systems, passenger sway
+Network protocol **6** in this integration; optional extensions negotiate support. Both players need 0.8.8. Includes the Everelsu fork's three commits (garage systems, passenger sway
 and controls, message lifetimes; native layer rebuilt).
 
 ### Changed

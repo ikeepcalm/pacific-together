@@ -12,7 +12,7 @@ local function log(fmt, ...) print(TAG .. string.format(fmt, ...) .. "\n") end
 
 if not SCENARIO then return end
 
-local function world() return UEHelpers.GetWorld() end
+local function world() return UEHelpers.GetWorld() or CreateInvalidObject() end
 
 local function map()
     local w = world()
@@ -635,8 +635,14 @@ end
 
 -- New scenarios go in Scripts/scenarios/<name>.lua (one file per scenario, so parallel work does not collide):
 -- the module returns function(T) -> steps, with T = the helpers below.
+local function intent(kind, data)
+    local pc = localPC()
+    if PTNative_ObjectIdentity and kind:sub(1, 2) == "g." then
+        pc:ClientMessage("PT1|g.net.testintent|e|" .. kind .. "|" .. (data or ""), FName("None"), 0)
+    else PTNative_MsgToHost(pc:GetAddress(), kind, data or "") end
+end
 local T = {
-    ROLE = ROLE, MUTATE = MUTATE, HOST = HOST, GARAGE = GARAGE, FOREST = FOREST, CHAR = CHAR,
+    intent = intent, ROLE = ROLE, MUTATE = MUTATE, HOST = HOST, GARAGE = GARAGE, FOREST = FOREST, CHAR = CHAR,
     log = log, check = check, world = world, map = map, netMode = netMode, pcs = pcs, state = state, console = console,
     onMap = onMap, name = name, cls = cls, first = first, saveMgr = saveMgr, mapPath = mapPath, driver = driver,
     listening = listening, quitToMenu = quitToMenu, join = join, survey = survey, timeouts = timeouts, snap = snap,

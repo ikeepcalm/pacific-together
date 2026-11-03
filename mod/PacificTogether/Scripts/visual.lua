@@ -290,7 +290,8 @@ local function scanStep(budget)
 end
 
 local sent, queue, lastMap, lastGuests = {}, {}, nil, 0
-local function reset() sent, queue, cache, ids, nextId, newDefs, kinds, sweep = {}, {}, {}, {}, 0, {}, {}, nil end
+local baselineQueued, baselineReceived = false, false
+local function reset() baselineQueued = false; sent, queue, cache, ids, nextId, newDefs, kinds, sweep = {}, {}, {}, {}, 0, {}, {}, nil end
 local function propsHost()
     local guests = #net.guests()
     local map = mapName()
@@ -338,6 +339,7 @@ local function propsHost()
     newDefs = {}
     batch("A", add)
     batch("D", del)
+    if not baselineQueued then queue[#queue + 1], baselineQueued = "F\n", true end
 end
 net.on("g.vis.hello", function() M.hello, M.ready = true, true; log("PT|visual hello from the guest") end)
 
@@ -439,7 +441,7 @@ local function dispose(a)
     if not live(a) then return end
     if a:GetClass():GetFName():ToString():find("^BP_Destruct_") then
         applyState(a, "br=1")
-        ExecuteInGameThreadWithDelay(8000, function() if live(a) then a:K2_DestroyActor() end end)
+        common.defer(8000, function() if live(a) then a:K2_DestroyActor() end end)
     else
         a:K2_DestroyActor()
     end
@@ -482,7 +484,7 @@ local function hookDoor(cls, event, msg)
                     -- 2026-10-28). Our own game turns it here only sometimes, and AnimTargetOther is not where it ends up: 1.2 s later
                     -- the angle it has is sent, or, if it did not move, the toggle (shut <-> 90 degrees open) is done here and sent
                     local before = d.OtherDoor.RelativeRotation.Yaw
-                    ExecuteInGameThreadWithDelay(1200, function()
+                    common.defer(1200, function()
                         local ok, err = pcall(function()
                             local now, shut = d.OtherDoor.RelativeRotation.Yaw, d.AnimTargetClosedOther
                             local function same(a, b) return math.abs(((a - b + 180) % 360) - 180) < 5 end
@@ -580,7 +582,7 @@ local function hookAnchors()
         if not (M.enabled and safety.active()) then return end
         local a = self:get()
         local guest = safety.guest()
-        ExecuteInGameThreadWithDelay(300, function()
+        common.defer(300, function()
             if not (live(a) and a.SuccessfullyGrabbed == true) then return end -- inventory full: nothing was taken
             if not guest then
                 -- the host's pull reaches the guest at once (the prop sweep's tk=1 came seconds later, and removed the copy silently)
@@ -744,7 +746,8 @@ net.on("g.vis.p", function(_, data)
     if not M.zone then return end
     if not M.enabled then return end
     local kind, rest = data:match("^(%a)\n(.*)$")
-    if kind == "M" then
+    if kind == "F" then baselineReceived = true
+    elseif kind == "M" then
         for id, p in rest:gmatch("(%d+)\t([^\n]+)") do dict[id] = p end
     elseif kind == "A" then
         for line in rest:gmatch("[^\n]+") do
@@ -807,7 +810,12 @@ local function hostTick()
     end
     if beat % 2 == 0 then -- one small message per 500 ms: see intern()
         local q = table.remove(queue, 1)
-        if q then net.toGuests("g.vis.p", q) end
+        if q == "F\n" then
+            for _, pc in ipairs(net.guests()) do
+                if net.peerSupports(pc, "intents") then net.toGuest(pc, "g.vis.p", q)
+                elseif (package.loaded.session.guestInfo(pc) or {}).caps == "mv" then queue[#queue + 1] = q end
+            end
+        elseif q then net.toGuests("g.vis.p", q) end
     end
 end
 
@@ -816,7 +824,7 @@ local function guestTick()
     beat = beat + 1
     local map = mapName()
     if map ~= guestMap then
-        guestMap, mapSince = map, os.clock()
+        guestMap, mapSince, baselineReceived = map, os.clock(), false
         dropAll()
         asked, wantLevels, wantPaint, helloFor, paintDone = {}, nil, nil, nil, nil
     end
@@ -831,6 +839,7 @@ local function guestTick()
     -- a new list, and every 10 s for parts installed since (each pass reads every part's tint)
     if wantPaint and (wantPaint ~= paintDone or beat % 40 == 0) then paintDone = wantPaint; try("paint", applyPaint, wantPaint) end
     if #todo > 0 then try("props", applyProps) end
+    if baselineReceived and #todo == 0 then net.baselineComplete("visual") end
     if beat % 40 == 3 then try("doorhooks", hookPlacedDoors) end -- map-placed doors (garage)
     if beat % 40 == 5 then try("anchorhook", hookAnchors) end -- ARC anchor structures (zones)
     for name, a in pairs(mine) do if not live(a) then mine[name], specs[name] = nil, nil end end
@@ -842,6 +851,9 @@ local function guestTick()
 end
 
 LoopInGameThreadWithDelay(250, function()
+    if not M.enabled or not M.zone then
+        if common.netMode() == "client" then net.baselineComplete("visual") end
+    end
     if not M.enabled or not netted() or not safety.active() then
         if next(mine) then dropAll() end
         guestMap, lastMap, sent, queue, M.ready = nil, nil, {}, {}, false

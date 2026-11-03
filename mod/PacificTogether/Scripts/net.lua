@@ -11,6 +11,41 @@ assert(type(PTNative_MsgReset) == "function", "PacificTogetherNative is outdated
 
 local M = {}
 local handlers = {}
+-- Extensions ride the author's PT1/PT1A contract, only after both peers opt in.
+local offered = "motion,drop-velocity,intents,heap" .. (PTNative_TunnelMotionSend and ",datagrams" or "")
+local hostFeatures, hostEpoch, hostTicket, serial, baselineComplete = {}, nil, nil, 0, false
+local peers = {}
+local baselineParts, motionSeen = {}, {}
+local worldEpoch = string.format("%x-%x", os.time(), math.random(1, 0x7fffffff))
+local function features(s)
+    local t = {}; for v in s:gmatch("[^,]+") do t[v] = true end; return t
+end
+function M.worldToken()
+    if common.netMode() == "client" then return hostEpoch end
+    return worldEpoch
+end
+function M.hostSupports(feature) return hostFeatures[feature] == true end
+function M.peerSupports(pc, feature)
+    local p = peers[pc:GetAddress()]
+    return p and common.resolve(p.lease) and p.name == pc:GetFullName() and p.features[feature] == true or false
+end
+local function protected(kind)
+    return kind == "g.heap.intent" or kind:find("^g%.parts%.") or kind == "g.rescue.do" or kind == "g.story.task"
+        or kind:find("^g%.act%.") or kind:find("^g%.st%.") or kind == "g.loot.b" or kind == "g.swap.set"
+        or kind == "g.garage.btn" or kind == "g.garage.charge" or kind == "g.car.ctl"
+        or kind == "g.vis.keypad" or kind == "g.car.enter" or kind == "g.car.exit" or kind == "g.car.door"
+end
+local function permitted(pc, kind, data)
+    if common.netMode() ~= "listen" or not protected(kind) then return true end
+    local info = require("session").guestInfo(pc)
+    return info and (info.caps ~= "mv" or (kind == "g.loot.b" and data == "H"))
+end
+RegisterLoadMapPreHook(function()
+    hostFeatures, hostEpoch, hostTicket, serial, peers, baselineComplete, baselineParts = {}, nil, nil, 0, {}, false, {}
+    worldEpoch = string.format("%x-%x", os.time(), math.random(1, 0x7fffffff))
+    motionSeen = {}
+    if PTNative_TunnelMotionReset then PTNative_TunnelMotionReset() end
+end)
 
 function M.on(kind, fn) handlers[kind] = fn end
 M.heardAt = {} -- kind -> os.clock() when its last message was handled
@@ -44,6 +79,13 @@ end
 
 function M.toHost(kind, data)
     local pc = localPC()
+    if kind == "g.heap.intent" and not M.hostSupports("heap") then return false end
+    if protected(kind) and M.hostSupports("intents") then
+        serial = serial + 1
+        local pawn = pc and pc.Pawn
+        if not (pawn and pawn:IsValid()) then return false end
+        data, kind = hostEpoch .. "|" .. serial .. "|" .. hostTicket .. "|" .. kind .. "|" .. (data or ""), "g.net.intent"
+    end
     return pc ~= nil and PTNative_MsgToHost ~= nil and PTNative_MsgToHost(pc:GetAddress(), kind, data or "")
 end
 
@@ -60,8 +102,8 @@ local function costOf(data) return math.ceil((#data + 40) / 1000) * (data:find("
 local function flowFor(pc)
     local key = pc:GetAddress()
     local f = flow[key]
-    if not f or not f.pc:IsValid() or f.name ~= pc:GetFullName() then
-        f = { pc = pc, name = pc:GetFullName(), queue = {}, inflight = {}, at = os.clock(), ackAt = os.clock() }
+    if not f or not common.resolve(f.lease) or f.name ~= pc:GetFullName() then
+        f = { pc = pc, name = pc:GetFullName(), lease = common.lease(pc), queue = {}, inflight = {}, at = os.clock(), ackAt = os.clock() }
         flow[key] = f
     end
     return f
@@ -86,9 +128,10 @@ local function drain(f)
     end
     while #f.queue > 0 do
         local i = 1
-        if not f.ready then
-            while i <= #f.queue and not urgent(f.queue[i][1]) do i = i + 1 end
-            if i > #f.queue then return end
+        while i <= #f.queue and not urgent(f.queue[i][1]) do i = i + 1 end
+        if i > #f.queue then
+            if not f.ready then return end
+            i = 1
         end
         local m = f.queue[i]
         local out = 0
@@ -103,6 +146,7 @@ end
 local byKind, byAt = {}, os.clock()
 function M.toGuest(pc, kind, data)
     if not (pc:IsValid() and PTNative_MsgToGuest ~= nil) then return false end
+    if kind == "g.heap.fx" and not M.peerSupports(pc, "heap") then return false end
     data = data or ""
     byKind[kind] = (byKind[kind] or 0) + #data
     if os.clock() - byAt > 30 then
@@ -113,6 +157,12 @@ function M.toGuest(pc, kind, data)
         for i = 1, math.min(8, #L) do s[i] = string.format("%s=%.0fK", L[i][1], L[i][2] / 1024) end
         log("PT|net bytes per kind in %.0f s: %s", os.clock() - byAt, table.concat(s, " "))
         byKind, byAt = {}, os.clock()
+    end
+    if kind:sub(1, 9) == "g.motion." then
+        if os.getenv("PT_MUTATE") ~= "nodgramlane" and M.peerSupports(pc, "datagrams") and PTNative_TunnelMotionSend
+            and PTNative_TunnelMotionSend(kind, worldEpoch .. "|" .. data) then return true end
+        return M.peerSupports(pc, "motion") and PTNative_MsgMotionToGuest ~= nil
+            and PTNative_MsgMotionToGuest(pc:GetAddress(), kind, data) or false
     end
     if os.getenv("PT_MUTATE") == "noflow" then return PTNative_MsgToGuest(pc:GetAddress(), kind, data) end
     -- transition.lua's one-word notices skip the queue: after a map load they would wait behind the loot lists for the guest
@@ -126,7 +176,7 @@ end
 -- engine would have dropped a really full buffer by now, so the window starts over
 LoopInGameThreadWithDelay(100, function()
     for key, f in pairs(flow) do
-        if not f.pc:IsValid() then flow[key] = nil
+        if not common.resolve(f.lease) then flow[key], peers[key] = nil, nil
         elseif #f.queue > 0 then
             if f.acked and #f.inflight > 0 and os.clock() - f.ackAt > 20 then
                 f.inflight, f.ackAt = {}, os.clock()
@@ -142,20 +192,106 @@ M.on("g.net.ready", function(pc)
         f.ready = true
         log("PT|net guest ready after %.1f s, %d messages waiting", os.clock() - f.at, #f.queue)
         drain(f)
-        if M.ready then pcall(M.ready, pc) end -- transition.lua lets go of the held loading screen
+        if f.baselineApplied or (require("session").guestInfo(pc) or {}).caps ~= "mv" then
+            f.baseline = true
+            if M.ready then pcall(M.ready, pc) end
+        end
+    end
+end)
+M.on("g.net.cap", function(pc, data)
+    local epoch, list, ticket = data:match("^([^|]+)|([^|]+)|([^|]+)$")
+    if not epoch or #epoch > 64 or #ticket > 128 then return end
+    if common.netMode() == "client" then
+        if hostEpoch ~= epoch then motionSeen = {} end
+        if hostEpoch ~= epoch or hostTicket ~= ticket then serial, baselineComplete = 0, false end
+        hostEpoch, hostTicket, hostFeatures = epoch, ticket, features(list)
+        M.toHost("g.net.cap", epoch .. "|" .. offered .. "|" .. ticket)
+        M.baselineComplete()
+    elseif common.netMode() == "listen" and epoch == worldEpoch then
+        local info = require("session").guestInfo(pc)
+        if info and info.caps == "mv" and flowFor(pc).ticket == ticket then
+            local previous = peers[pc:GetAddress()]
+            peers[pc:GetAddress()] = { name = pc:GetFullName(), lease = common.lease(pc), features = features(list), ticket = ticket, pawnLease = flowFor(pc).pawnLease,
+                serial = previous and previous.ticket == ticket and previous.name == pc:GetFullName() and previous.serial or 0 }
+        end
+    end
+end)
+M.on("g.net.intent", function(pc, data)
+    if common.netMode() ~= "listen" or not M.peerSupports(pc, "intents") then return end
+    local epoch, n, ticket, kind, payload = data:match("^([^|]+)|(%d+)|([^|]+)|([^|]+)|(.*)$")
+    n = tonumber(n)
+    local peer = peers[pc:GetAddress()]
+    if epoch ~= worldEpoch or not n or n % 1 ~= 0 or n <= peer.serial or n > 9007199254740991
+        or not protected(kind) or not handlers[kind] or not pc.Pawn:IsValid()
+        or ticket ~= peer.ticket or not common.resolve(peer.pawnLease)
+        or common.identity(pc.Pawn) ~= peer.pawnLease.key
+        or (not flowFor(pc).baseline and not (kind == "g.loot.b" and payload == "H"))
+        or not require("session").guestInfo(pc) then return end
+    peer.serial = n -- Consume before calling: an exception must not replay a partly applied action.
+    handlers[kind](pc, payload)
+    M.heardAt[kind] = os.clock()
+    if M.tap then M.tap(kind) end
+end)
+function M.baselineComplete(part)
+    if part then baselineParts[part] = true end
+    local complete = baselineParts.loot and baselineParts.car and (baselineParts.visual or not M.hostSupports("intents"))
+    if complete and not baselineComplete and M.hostSupports("intents") then M.toHost("g.net.baseline", hostEpoch) end
+    baselineComplete = complete and true or false
+end
+function M.lifecycle(pc)
+    if common.netMode() == "client" then return baselineComplete and "active" or "loading" end
+    local f = pc and flow[pc:GetAddress()]
+    if not f or not common.resolve(f.lease) then return "disconnected" end
+    return f.baseline and "active" or (f.ready and "baseline" or "loading")
+end
+M.on("g.net.baseline", function(pc, data)
+    if common.netMode() ~= "listen" or data ~= worldEpoch or not M.peerSupports(pc, "intents") then return end
+    local f = flowFor(pc)
+    f.baselineApplied = true
+    if f.ready and not f.baseline then
+        f.baseline = true
+        log("PT|net baseline applied after %.1f s", os.clock() - f.at)
+        if M.ready then M.ready(pc) end
     end
 end)
 M.on("g.net.ack", function(pc, data)
-    local n = tonumber(data) or 0
+    local n = tonumber(data)
+    if not n or n ~= n or n < 0 or n % 1 ~= 0 or n > 9007199254740991 then return end
+    local info = common.netMode() == "listen" and require("session").guestInfo(pc)
     local f = flowFor(pc)
+    if info and info.caps == "mv" and common.identity(pc.Pawn) then
+        if not common.resolve(f.pawnLease) or common.identity(pc.Pawn) ~= f.pawnLease.key then
+            f.pawnLease = common.lease(pc.Pawn)
+            f.ticket = worldEpoch .. ":" .. f.pawnLease.key
+        end
+        local peer = peers[pc:GetAddress()]
+        if not M.peerSupports(pc, "intents") or peer.ticket ~= f.ticket then
+            M.toGuest(pc, "g.net.cap", worldEpoch .. "|" .. offered .. "|" .. f.ticket)
+        end
+    end
     if f.acked == nil or n < f.acked then -- first ack on this connection (or the guest's count restarted): nothing of ours in flight
         f.acked, f.inflight = n, {}
     end
-    for _ = 1, n - f.acked do if #f.inflight > 0 then table.remove(f.inflight, 1) end end
+    for _ = 1, math.min(n - f.acked, #f.inflight) do if #f.inflight > 0 then table.remove(f.inflight, 1) end end
     f.acked = n
     f.ackAt = os.clock()
     drain(f)
 end)
+
+-- Test bot calls the actual shipping sender across UE4SS's separate Lua states.
+if os.getenv("PT_SCENARIO") then
+    local function testIntent(data, tries)
+        if common.netMode() ~= "client" then return end
+        if not baselineComplete then
+            if tries < 1500 then common.defer(100, function() testIntent(data, tries + 1) end) end
+            return
+        end
+        local kind, payload = data:match("^([^|]+)|(.*)$")
+        if kind and kind:sub(1, 2) == "g." then M.toHost(kind, payload) end
+    end
+    M.on("g.net.testintent", function(_, data) testIntent(data, 0) end)
+    M.on("g.net.testready", function(pc) PTNative_MsgToGuest(pc:GetAddress(), "t.baseline", "") end)
+end
 
 -- netflow scenario only (PT_SCENARIO is set by the test runner, never by players): the host bursts 400 x 1 KB at a guest 10 s
 -- after it joined, the guest reports its count to the host's test mod
@@ -201,11 +337,11 @@ local function dispatch()
     while true do
         local kind, data, from = PTNative_MsgPoll("g.")
         if not kind then return end
-        if common.netMode() == "client" then received = received + 1 end -- every one, handled or not: the host counts them all
+        if common.netMode() == "client" and kind:sub(1, 9) ~= "g.motion." and kind ~= "g.net.testintent" then received = received + 1 end -- motion has its own native window, outside the reliable gameplay queue
         local fn, pc = handlers[kind], sender(from)
         if not fn then
             log("PT|error net no handler for %s", kind)
-        elseif pc then
+        elseif pc and permitted(pc, kind, data) then
             local t0 = os.clock()
             local ok, err = pcall(fn, pc, data)
             if not ok then log("PT|error net %s %s", kind, tostring(err)) end
@@ -221,6 +357,20 @@ end
 LoopInGameThreadWithDelay(16, function()
     local ok, err = pcall(dispatch)
     if not ok then log("PT|error net dispatch %s", tostring(err)) end
+    if PTNative_TunnelMotionPoll then
+        while true do
+            local kind, data, sequence = PTNative_TunnelMotionPoll("g.motion.")
+            if not kind then break end
+            local epoch, payload = data:match("^([^|]+)|(.*)$")
+            if common.netMode() == "client" and M.hostSupports("datagrams") and epoch == hostEpoch
+                and sequence > (motionSeen[kind] or -1) and handlers[kind] then
+                motionSeen[kind] = sequence
+                local applied, why = pcall(handlers[kind], localPC(), payload)
+                if not applied then log("PT|error motion %s %s", kind, tostring(why)) end
+                M.heardAt[kind] = os.clock()
+            end
+        end
+    end
 end)
 -- the guest's ack: ten times a second while messages come in, every 2 s anyway (the host holds its messages until the first)
 local ackAt = 0

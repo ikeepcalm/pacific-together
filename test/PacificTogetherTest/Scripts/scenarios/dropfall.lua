@@ -3,6 +3,7 @@
 -- side is within 20 cm of the dropper's resting Z, and below the dropper's own height.
 -- Run: tools/run-test.ps1 -Scenario dropfall -Fixture zone -Headless
 -- guest_drop_kept_single: the guest's dropped actor itself stays and is the only copy (mutation nodropadopt fails it).
+-- Mutation nobaselinewait: a one-shot early drop is sent before host admission and never reaches the host.
 -- Mutation nofall: loot.lua does not send item positions after the first line (the copy stays where it appeared) -> FAILS.
 return function(T)
     local L = require("scenarios.sessionlib")(T)
@@ -64,7 +65,7 @@ return function(T)
         for _, s in ipairs(T.loadFixture("zone")) do add(s) end
         add({ check = "host_listen", timeout = 120, cond = function() return T.netMode() == "listen" and T.listening() and T.map() == mapName end })
         add({ check = "host_guest_in", timeout = 240, cond = function() return L.guestChar() ~= nil end })
-        add({ wait = 12 })
+        add({ check = "guest_applied_baseline", timeout = 360, cond = function() return has("t.baseline") end })
         -- 1. the host drops
         add({ run = function()
             hp = T.myPawn():K2_GetActorLocation().Z
@@ -105,6 +106,19 @@ return function(T)
         return n
     end
     add({ check = "client_in_zone", timeout = 400, cond = function() return T.netMode() == "client" and T.map() == mapName and T.cls(T.myPawn()) == T.CHAR end })
+    -- The loot purge must finish first; visual copies are still loading when this one-shot drop is created.
+    add({ check = "client_loot_list_applied", timeout = 120, cond = function()
+        local f = io.open("ue4ss/UE4SS.log", "r"); if not f then return false end
+        local text = f:read("a"); f:close(); return text:find("PT|loot guest purged", 1, true) ~= nil
+    end })
+    add({ wait = 4 })
+    add({ run = function()
+        gp = T.myPawn():K2_GetActorLocation().Z
+        gx, gy, gz, gActor = drop(TAPE)
+        T.intent("g.net.testready", "")
+    end })
+    add({ check = "client_applied_baseline", timeout = 360, cond = function() return has("t.baseline") end })
+    add({ run = function() sendHost("t.baseline") end })
     add({ check = "guest_told_hz", timeout = 240, cond = function() return has("t.hz") end })
     add({ check = "host_drop_on_guest_ground", timeout = 30, cond = function()
         local v = nums(got["t.hz"])
@@ -114,11 +128,7 @@ return function(T)
     end })
     add({ run = function() sendHost("t.hok") end })
     add({ check = "guest_told_gstart", timeout = 120, cond = function() return has("t.gstart") end })
-    add({ run = function()
-        gp = T.myPawn():K2_GetActorLocation().Z
-        gx, gy, gz, gActor = drop(TAPE)
-        log("PT|info dropfall guest dropped at %.0f,%.0f,%.0f (pawn z %.0f)", gx, gy, gz, gp)
-    end })
+    add({ run = function() log("PT|info dropfall guest dropped before baseline at %.0f,%.0f,%.0f (pawn z %.0f)", gx, gy, gz, gp) end })
     add({ wait = 8 })
     -- the guest's own item stays (the host adopts it, loot.lua "K"): not deleted and replaced by the host's copy seconds later
     -- (scrapped resources vanished and came back, friend session 2026-11-01). Mutation nodropadopt fails it.

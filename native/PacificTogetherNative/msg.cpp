@@ -59,6 +59,7 @@ bool g_sending = false; // our own ProcessEvent calls pass through the pre-callb
 bool g_capture = true;
 bool g_pace = true;
 std::deque<Msg> g_inbox;
+long long g_coalesced = 0;
 long long g_sent = 0, g_recv = 0, g_chunks_out = 0, g_chunks_in = 0, g_dropped = 0, g_queued_max = 0, g_waits = 0;
 
 // One per PlayerController we talk through (the host's copy of a guest's controller, or the guest's own). Its RPC (out) is the
@@ -68,6 +69,8 @@ struct Link
     FWeakObjectPtr pc; // a guest that left takes its queue with it
     UFunction* out{};
     std::deque<std::wstring> chunks;
+    std::deque<std::wstring> control;
+    std::map<std::string, std::wstring> latest;
     std::map<std::string, std::string> partial;
     long long sent = 0, acked = 0;    // our chunks on this link, and how many the other side confirmed
     long long got = 0, confirmed = 0; // their chunks we received, and how many we confirmed
@@ -114,12 +117,37 @@ auto rpc(UObject* pc, UFunction* fn, const std::wstring& s) -> void
     str->~FString();
 }
 
+auto latest_kind(std::string_view kind) -> bool
+{
+    return kind.starts_with("g.motion.") || kind.starts_with("t.latest.");
+}
+
+auto control_kind(std::string_view kind) -> bool
+{
+    if (auto m = std::getenv("PT_MUTATE"); m && std::string(m) == "oldlanes") return false;
+    return kind.starts_with("g.net.") || kind == "g.car.seat" || kind == "g.car.out" || kind == "g.trans" || kind.starts_with("t.control.");
+}
+
 auto pump(Link& l, UObject* pc) -> void
 {
-    while (!l.chunks.empty() && (!g_pace || (l.sent - l.acked < WINDOW && l.this_frame < PER_FRAME)))
+    while ((!l.control.empty() || !l.latest.empty() || !l.chunks.empty()) && (!g_pace || (l.sent - l.acked < WINDOW && l.this_frame < PER_FRAME)))
     {
-        rpc(pc, l.out, l.chunks.front());
-        l.chunks.pop_front();
+        if (!l.control.empty())
+        {
+            rpc(pc, l.out, l.control.front());
+            l.control.pop_front();
+        }
+        else if (!l.latest.empty())
+        {
+            auto item = l.latest.begin();
+            rpc(pc, l.out, item->second);
+            l.latest.erase(item);
+        }
+        else
+        {
+            rpc(pc, l.out, l.chunks.front());
+            l.chunks.pop_front();
+        }
         ++l.sent;
         ++l.this_frame;
         ++g_chunks_out;
@@ -131,7 +159,7 @@ auto pump(Link& l, UObject* pc) -> void
 auto queued() -> long long
 {
     long long n = 0;
-    for (auto& [_, l] : g_links) n += static_cast<long long>(l.chunks.size());
+    for (auto& [_, l] : g_links) n += static_cast<long long>(l.chunks.size() + l.control.size() + l.latest.size());
     return n;
 }
 
@@ -159,6 +187,19 @@ auto send(UObject* pc, UFunction* fn, const std::string& kind, const std::string
     if (!pc || !fn || !valid_kind(kind) || data.size() > MAX_MSG || data.find('\0') != std::string::npos) return false;
     auto& l = link(pc);
     l.out = fn;
+    if (latest_kind(kind))
+    {
+        if (data.size() > CHUNK) return false; // one complete pose; never interleave fragments with a replacement
+        std::wstring packet = MAGIC;
+        packet.append(kind.begin(), kind.end());
+        packet += L"|e|";
+        for (unsigned char b : data) packet += static_cast<wchar_t>(b);
+        if (l.latest.contains(kind)) ++g_coalesced;
+        l.latest[kind] = std::move(packet);
+        ++g_sent;
+        g_queued_max = std::max(g_queued_max, queued());
+        return true; // tick sends only the newest snapshot, ahead of the bulk backlog
+    }
     size_t pos = 0;
     do
     {
@@ -168,7 +209,7 @@ auto send(UObject* pc, UFunction* fn, const std::string& kind, const std::string
         s.append(kind.begin(), kind.end());
         s += pos < data.size() ? L"|m|" : L"|e|";
         for (unsigned char b : part) s += static_cast<wchar_t>(b);
-        l.chunks.push_back(std::move(s));
+        (control_kind(kind) ? l.control : l.chunks).push_back(std::move(s));
     } while (pos < data.size());
     ++g_sent;
     g_queued_max = std::max(g_queued_max, queued());
@@ -186,7 +227,7 @@ auto on_pre(Hook::TCallbackIterationData<void>& it, UObject* context, UFunction*
     {
         it.PreventOriginalFunctionCall();
         auto& l = link(context);
-        l.acked = std::max(l.acked, static_cast<long long>(_wtoi64(s + 5)));
+        l.acked = std::clamp(static_cast<long long>(_wtoi64(s + 5)), l.acked, l.sent);
         return;
     }
     if (len < 8 || wcsncmp(s, MAGIC, 4) != 0) return;
@@ -209,6 +250,15 @@ auto on_pre(Hook::TCallbackIterationData<void>& it, UObject* context, UFunction*
     if (g_inbox.size() >= MAX_INBOX) { g_inbox.pop_front(); ++g_dropped; }
     Msg message{kind, std::move(buf), {}};
     message.from = context;
+    if (latest_kind(kind))
+    {
+        for (auto previous = g_inbox.begin(); previous != g_inbox.end();)
+        {
+            if (previous->kind == kind && previous->from.Get() == context)
+            { previous = g_inbox.erase(previous); ++g_coalesced; }
+            else ++previous;
+        }
+    }
     g_inbox.push_back(std::move(message));
     l.partial.erase(kind);
     ++g_recv;
@@ -243,6 +293,14 @@ auto pt_register_msg(const LuaMadeSimple::Lua& lua) -> void
     ensure_hook();
     lua.register_function("PTNative_MsgToHost", [](const LuaMadeSimple::Lua& l) -> int { return lua_send(l, true); });
     lua.register_function("PTNative_MsgToGuest", [](const LuaMadeSimple::Lua& l) -> int { return lua_send(l, false); });
+    lua.register_function("PTNative_MsgMotionToGuest", [](const LuaMadeSimple::Lua& l) -> int {
+        ensure_hook();
+        auto address = static_cast<uintptr_t>(l.get_integer());
+        auto kind = std::string(l.get_string());
+        auto data = std::string(l.get_string());
+        l.set_bool(latest_kind(kind) && send(reinterpret_cast<UObject*>(address), g_to_guest, kind, data));
+        return 1;
+    });
     lua.register_function("PTNative_MsgReset", [](const LuaMadeSimple::Lua&) -> int {
         g_inbox.clear();
         g_links.clear();
@@ -269,7 +327,7 @@ auto pt_register_msg(const LuaMadeSimple::Lua& lua) -> void
     lua.register_function("PTNative_MsgStats", [](const LuaMadeSimple::Lua& l) -> int {
         auto s = "sent=" + std::to_string(g_sent) + " recv=" + std::to_string(g_recv) + " chunks_out=" + std::to_string(g_chunks_out) +
                  " chunks_in=" + std::to_string(g_chunks_in) + " dropped=" + std::to_string(g_dropped) + " inbox=" + std::to_string(g_inbox.size()) +
-                 " queued=" + std::to_string(queued()) + " queued_max=" + std::to_string(g_queued_max) + " waits=" + std::to_string(g_waits);
+                 " queued=" + std::to_string(queued()) + " queued_max=" + std::to_string(g_queued_max) + " waits=" + std::to_string(g_waits) + " coalesced=" + std::to_string(g_coalesced);
         l.set_string(s);
         return 1;
     });

@@ -63,3 +63,5 @@ address. Uninstall removes the entire `ue4ss` folder, including other UE4SS mods
 
 Include: mod/protocol version, supported game build and exe hash, UE4SS pin/hash, changes, known issues, test summary,
 human-playtest results and artifact checksum. Do not label a preview as a public release or turn unrun checks into passes.
+
+Protocol 6 is set by the repository author (PLAN D26). Keep PT1/PT1A and protocol-6 payload compatibility; new capabilities must negotiate support. Ship the matching Lua plus native DLL and include `mod/PacificTogether/MULTIVOID-LICENSE.txt`. Integration evidence is in [PT10](spikes/PT10-cloud-local-integration.md); selected validation does not replace the full release suite.

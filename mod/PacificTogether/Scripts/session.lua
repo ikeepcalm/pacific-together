@@ -93,7 +93,7 @@ local function hello()
     if sid then s = s .. " sid=" .. sid .. " name=" .. persona:gsub("[^%w]", function(c) return string.format("%%%02X", c:byte()) end) end
     local pid = playerId()
     if pid then s = s .. " pid=" .. pid end
-    return s
+    return s .. " caps=mv" -- Optional; original protocol-5 peers ignore unknown hello fields.
 end
 local function parseHello(s)
     if not s:find("^PT|hello ") then return nil end
@@ -168,7 +168,10 @@ local greeted = {} -- remote PC full name -> true once its hello was accepted
 local guests = {} -- remote PC full name -> { login = name it came with, sid = SteamID or nil, pid = player_id.txt or nil }
 
 -- for backpack.lua: who a guest is as the host's hello learned it
-function M.guestInfo(pc) return guests[pc:GetFullName()] end
+function M.guestInfo(pc)
+    local info = guests[pc:GetFullName()]
+    return info and common.resolve(info.lease) and info or nil
+end
 
 local function refuse(pc, reason)
     log("PT|session refused %s: %s", fullName(pc), reason)
@@ -235,7 +238,7 @@ local function onHello(pc, s)
     local h = parseHello(s:get():ToString())
     if not h then return end
     local key = pc:GetFullName()
-    if greeted[key] then return end
+    if greeted[key] and M.guestInfo(pc) then return end
     -- the login name, before the engine applies the hello as the new name
     local name = valid(pc.PlayerState) and pc.PlayerState:GetPlayerName():ToString() or "Guest"
     local mine = { mod = common.MOD_VERSION, protocol = tostring(common.PROTOCOL_VERSION), game = gameVersion(), build = tostring(gameBuild()) }
@@ -250,17 +253,18 @@ local function onHello(pc, s)
     end
     greeted[key] = true
     -- S2: a guest with Steam is named by its persona and keyed by its SteamID; the login name stays as the backpack's old key
-    guests[key] = { login = name, sid = h.sid and h.sid:match("^%d+$"), pid = h.pid and h.pid:match("^%x+$") }
+    guests[key] = { lease = common.lease(pc), caps = h.caps, login = name, sid = h.sid and h.sid:match("^%d+$"), pid = h.pid and h.pid:match("^%x+$") }
     log("PT|session guest %s login=%s sid=%s pid=%s", key, name, tostring(guests[key].sid), tostring(guests[key].pid))
     if guests[key].sid and h.name then
         name = h.name:gsub("%%(%x%x)", function(x) return string.char(tonumber(x, 16)) end)
     end
     -- outside the RPC's hook, so the spawn's own hooks and Blueprint events do not run nested in it. A guest that
     -- connects while the host still loads a zone logs in before the host's own character exists: look again each second.
+    local controllerLease = common.lease(pc)
     local function try(n)
-        ExecuteInGameThreadWithDelay(n == 0 and 100 or 1000, function()
+        common.defer(n == 0 and 100 or 1000, function()
             local ok, err = pcall(function()
-                if not valid(pc) or not greeted[key] then return end
+                if not common.resolve(controllerLease) or not greeted[key] then return end
                 if n == 0 then UEHelpers.GetGameModeBase():ChangeName(pc, name, false) end
                 if not spawnFor(pc, n >= 60) then try(n + 1) end
             end)
@@ -401,6 +405,7 @@ local function hookAll()
 end
 
 RegisterLoadMapPreHook(function(engine, worldp, url, pending)
+    guests = {}
     local ok, err = pcall(function()
         local w = worldp:get()
         if not valid(pending:get()) and listening(w) then removeRemoteCharacters(w) end

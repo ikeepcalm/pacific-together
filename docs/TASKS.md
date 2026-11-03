@@ -17,6 +17,12 @@ Reviewed against 0.0.7 on 2026-10-24. This list tracks remaining work, not relea
 November 1 continuation: Healer/Charging visibility and host resource state are covered by the focused `boons`
 scenario. Current evidence and remaining anomaly limits: [W8-boons](spikes/W8-boons.md).
 
+Historical protocol-5 evidence and the MultiVoid architecture steps: [PT9](spikes/PT9-multivoid-protocol5.md).
+
+Wheel motion, passenger radio and Lucky Junk Heap follow-up: [PT8](spikes/PT8-wheel-radio-heap.md).
+
+Thrown items, garage part lockers, wheel visuals and passenger windshield: [PT7-motion-parts](spikes/PT7-motion-parts.md).
+
 Client notifications, damage feedback, passenger controls and item physics: [PT4-client-interactions](spikes/PT4-client-interactions.md).
 
 | Work | Starting points | Completion evidence |

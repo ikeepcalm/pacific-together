@@ -80,11 +80,10 @@ local function spawners()
     return r
 end
 local function installed(s, im, sm)
-    local a, t, r = {}, {}, {}
+    local a, r = {}, {}
     s:GetUpgradeArchetype(a)
-    s:GetInstallTag(t)
     if not (a.Archetype and a.Archetype:IsValid()) then return r end
-    local item = im:FindOrCreateGarageUpgradeSlot(a.Archetype, t.Station):GetItem(0)
+    local item = im:FindOrCreateGarageUpgradeSlot(a.Archetype, s.StationInstallTag):GetItem(0)
     if not (item and item:IsValid()) then return r end
     local list = sm:GetStatusEffects(item)
     for i = 1, #list do

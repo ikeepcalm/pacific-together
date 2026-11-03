@@ -146,7 +146,7 @@ RegisterLoadMapPostHook(function()
         local s = package.loaded["session"]
         if OFF or common.netMode() ~= "client" or not (s and s.wanted()) then return end
         -- a moment later: the engine takes its own copy down around here, ours must not sit in the viewport beside it
-        ExecuteInGameThreadWithDelay(1000, function()
+        common.defer(1000, function()
             pcall(function()
                 if common.netMode() ~= "client" then return end
                 if phase == "load" then showScreen() else setPhase("load", "map loaded, waiting for the host") end
@@ -184,7 +184,8 @@ LoopInGameThreadWithDelay(100, function()
     local p = client and UEHelpers.GetPlayerController().Pawn or nil
     local char = valid(p) and p:IsA(StaticFindObject("/Script/PenDriverPro.BaseCharacter"))
     charSince = char and (charSince or os.clock()) or nil
-    if phase == "load" and charSince and os.clock() - charSince > 3 then setPhase(nil, "own character, no go") end
+    if phase == "load" and charSince and os.clock() - charSince > 3
+        and (not net.hostSupports("intents") or net.lifecycle() == "active") then setPhase(nil, "own character, no go") end
 end)
 
 function M.state() return { phase = phase, holding = holdSince ~= nil } end

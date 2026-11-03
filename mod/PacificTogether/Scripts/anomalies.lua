@@ -94,7 +94,7 @@ local function pre(rec, p, intercepted)
     if guest and p:GetClass():GetFName():ToString():find("Physical_Impact", 1, true) then return end
     local sample, cap = lastHp, math.abs(dmg) * 1.5 + 1
     if sample and not intercepted then
-        ExecuteInGameThreadWithDelay(40, function() try("put back", function()
+        common.defer(40, function() try("put back", function()
             local rm = hostHealth()
             if not rm then return end
             local d = math.max(-cap, math.min(cap, sample - rm.PlayerHealth.Current))
