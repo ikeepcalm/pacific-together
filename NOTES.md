@@ -1102,3 +1102,62 @@ coils did not fire with both players next to it. Probe session `20261102-182743-
   origin not found). With both players next to it in the session, the cause is unknown; a host in the car would block it (state 1).
 - Next: a zone fixture saved next to a saw and a mimic wreck, then the live loop (both sides: blade visibility, SM config, prongs).
 
+
+## 2026-11-03: friend session (0.8.8 38fbaa0), friend hosted, owner was the guest
+
+Logs: `local/playtest-20261103-215129` (friend/host: run-01 20:50-21:24 ends in a crash, run-02 21:26-21:51; its saves are from
+21:51) and `local/playtest-20261103-225113` (owner/guest: run-02 21:52-22:51). The host's log for 21:52-22:51 is not in either zip.
+Owner reports: gateway still invisible to the guest; car radio still muffled for the guest; story stuck on "Return to Sierra" and
+F9 story tasks did not help; guest freezes "while the mod syncs"; 5k LIM gathered, 3.1k in the garage. Friend: one crash; the
+research machine showed a white screen the first time it was opened. Fixed per the owner: seat-on-door-press, scrapped loot flicker.
+
+Gateway
+- Observed: no `PT|world guest gateway ... shown` line in the guest's whole hour. Atlas: exit portals are spawned at runtime
+  (BFL_RuntimeSpawnHelpers.DynamicSpawnActor, class BP_LevelTransition_ExitPortal), so the guest's replicated copies have other
+  object names than the host's. world.lua matched the host's `gate` by name; guestact.lua's g.act.gate (guest summons) did the same.
+- Change: common.portalKey/findPortal: the portal is named by its location and found as the nearest portal within 5 m. A portal
+  not found logs `PT|world guest gateway at <pos>: no portal there` once.
+
+Radio muffle
+- Observed: the guest set radio_car_distance_exterior to 0 in the seat (`PT|radio guest exterior 0.00`, the 2026-11-02 fix) and
+  it still sounded muffled. Atlas AC_CarAudio: OnPlayerStartEnterCar sets RTPC veh_int 1, PlayerInsideCar, state veh_int_ext-veh_int
+  and UpdateClosedness; while PlayerInsideCar is false its tick runs UpdateDoorOcclusion (veh_door_closedness_exterior). The guest is
+  seated by car.lua, so its copy of the car's audio stayed "outside, doors shut". Guess: that occlusion is the muffle.
+- Change: carfeel.lua guestCabin: the guest calls AC_CarAudio.OnPlayerStartEnterCar(false) / OnPlayerStartExitCar(false) when its
+  pawn's attach parent becomes / stops being the car (`PT|feel cabin audio inside=...`). Not heard yet: needs the live loop.
+
+Story ("Return to Sierra")
+- Observed (fixture `local/fixtures/pt11-q03` = the host's odsave1.sav, MCP 20261103-2306..2310): QD_Q03_Mission_A2 task ReturnSierram
+  (BPMT_TagIsSet, route WB, WB.Missions.QD_Q03_Mission_A2.ReturnSierram.ReachSierramAgain). The tag WAS set; the mission state had
+  bInitTasks=false and ActiveTime 0 (UseLuckHeap's mission ticked). QD_Q03_Objective IsDormant=true: GSS_MainQuestsDormancy on
+  (states Fig_Mission_Chapter01/03/05/06, the DLC's chapters) while QO_Fig_Mission_Chapter01 is in CompletedObjectives and no Fig
+  objective is active. A dormant objective's mission never ticks, so ForceCompleteTask (F9) did nothing either.
+- Check: SetGlobalSwitch(GSS_MainQuestsDormancy, each state, DONTCARE) -> switch false, A2 initialised and completed at once.
+- Unknown: why the chapter's state stayed on (the host's log for the chapter's end is missing; guest saw Fig Chapter01 stop 22:06:42).
+- Change: rescue.lua: F9 > Story tasks shows "Wake the main story" when the switch is on, no QO_Fig objective is active and a main
+  objective is dormant; it releases every state of the switch on the host. Checked through the guest console (`ptrescue tasks`,
+  `ptrescue do 1`) on the fixture: host `PT|rescue host wakes the main story: dormancy switch now false`, A2 completed.
+
+Guest freezes
+- Observed: guest `PT|slow loot.lua:961` 109-244 ms every ~2 s from 21:53:17 to 21:54:07 (scanGuest 3890 ms in that minute), the
+  90 s after the join when the guest purges its own lootables (4 classes in one tick). Steady play: scanGuest ~320 ms/min, no other
+  Lua stalls over 100 ms except one `radio.lua:490 1002 ms` (22:20:34). Freezes outside the join minute are not explained by the log.
+- Change: loot.lua purges one class per 500 ms tick (each still every 2 s).
+
+Other
+- Host crash 21:24 (run-01, CrashContext 0D48E295...): access violation in TaskGraphThreadNP 8 (a worker thread, not the game
+  thread), shipping exe frames without symbols. One second before: two `act heal Attachments.HeadLightRight` from the guest. Unknown.
+- ARC energy: guest `WB.PrevRun.Currency.AnchorJuice.Stable 2.10 -> 5.60` on return; garage showed 3.1. Guess: the gateway's cost
+  (5.6 - 3.1 = 2.5); the ARC mirror (guestact.lua g.act.arc) writes on the guest only. Not checked.
+- Research machine white screen (host, first open): nothing in the logs. Unknown.
+- Guest crash markers in the owner's zip are old (0.8.5/0.8.7).
+- Checks on these changes (headless pairs): guestact 32/32 (`20261103-231404-guestact`; guest intent and host pick by position
+  `-47832,6942,-1548`, guest `gateway ... shown`; this fixture's portal has the same name on both sides, so the renamed-portal case
+  is not covered); carfeel 38/38 (`20261103-231630-carfeel`, guest `PT|feel cabin audio inside=true`); lootsync 34/34
+  (`20261103-231733-lootsync`); rescue 22/22 (`20261103-232142-rescue`). Radio muffle and gateway visuals not heard/seen: live loop.
+
+Fork commit 2c7b1d3 (Everelsu, "Protocol 6 motion and heap integration", 49 files, native msg/transport/find): not merged. Review
+(read only): a new-build guest is "active" only after loot+car+visual baselines (net.lua baselineComplete); the car part comes only
+from g.car.s, which the host sends only with a car, so with no car every protected guest action is dropped for the session.
+Also: loot.lua `known()` address reuse can wipe the new byName entry (duplicates); MULTIVOID-LICENSE.txt referenced but missing;
+needs a DLL rebuild; its validation runs are on the contributor's machine only.

@@ -92,7 +92,8 @@ local function snapshot()
     local sm = first("BP_StormManager_C")
     if sm then
         add("storm", table.concat({ sm.CurrentStormState, tostring(sm.RedWallActive), f(sm.TimeBeforeInstabilityStarts), f(sm.FinalInstabilityTollerance), f(sm.StormAudioVisualIntensity) }, "|"))
-        add("gate", short(sm.EvolvedGatewayExit))
+        local g = sm.EvolvedGatewayExit
+        add("gate", (g and g:IsValid()) and common.portalKey(g) or "none")
     end
     local names = {}
     for _, c in ipairs({ "BP_LevelTransition_ExitPortal_C", PROP }) do each(c, function(o) names[#names + 1] = short(o) end) end
@@ -277,6 +278,7 @@ local function applyTime(s)
     end
 end
 
+local gateMissing -- the last gateway position logged as not found, so the log line comes once
 local function applyStorm(s)
     local wb = whiteboard()
     if wb and s.instab then wb:SetTagFloat(INSTAB, tonumber(s.instab)) end
@@ -295,21 +297,23 @@ local function applyStorm(s)
         st.Vol_Rad_Main, st.Vol_Rad_Weak, st.Collapsed = tonumber(v[1]), tonumber(v[2]), v[3] == "true"
     end
     -- the gateway the host summoned: its portal is the picked exit here too
-    if sm and s.gate and s.gate ~= "none" and short(sm.EvolvedGatewayExit) ~= s.gate then
-        each("BP_LevelTransition_ExitPortal_C", function(p)
-            if short(p) == s.gate then
-                p.IsPickedExit = true
-                sm["Select Exit Portal Actor"](sm, p)
-                -- the beam, lights, sound and map icon: the visual part of the portal's Activate, which runs on the host only
-                -- (playtest 2026-11-01: summoned gateway invisible to the guest). Not Activate itself: it also turns on the
-                -- portal's collision, and a transition must not start in the guest's own game.
-                pcall(function() p:Portal_AnimStart() end)
-                pcall(function() p:SetExitPortalActive(true) end)
-                pcall(function() p.BP_AkComponent_Ambient:RequestPlay() end)
-                log("PT|world guest gateway %s shown", s.gate)
-                ov.post("Gateway summoned", "good")
-            end
-        end)
+    if sm and s.gate and s.gate ~= "none" then
+        local p = common.findPortal(s.gate)
+        local cur = sm.EvolvedGatewayExit
+        if not p then
+            if gateMissing ~= s.gate then gateMissing = s.gate log("PT|world guest gateway at %s: no portal there", s.gate) end
+        elseif not (cur and cur:IsValid() and short(cur) == short(p)) then
+            p.IsPickedExit = true
+            sm["Select Exit Portal Actor"](sm, p)
+            -- the beam, lights, sound and map icon: the visual part of the portal's Activate, which runs on the host only
+            -- (playtest 2026-11-01: summoned gateway invisible to the guest). Not Activate itself: it also turns on the
+            -- portal's collision, and a transition must not start in the guest's own game.
+            pcall(function() p:Portal_AnimStart() end)
+            pcall(function() p:SetExitPortalActive(true) end)
+            pcall(function() p.BP_AkComponent_Ambient:RequestPlay() end)
+            log("PT|world guest gateway %s shown (%s)", s.gate, short(p))
+            ov.post("Gateway summoned", "good")
+        end
     end
 end
 

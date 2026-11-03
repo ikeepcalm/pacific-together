@@ -122,10 +122,43 @@ end
 -- shortcut: only Q01 -> Q015 is listed (the softlock seen); add a pair when another quest is found stuck between objectives.
 local NEXT = { QD_Q01_Objective = "/Game/Gameplay/Quests/Q015/QD_Q015_Objective.QD_Q015_Objective" }
 
+-- The DLC chapters (Fig) put the main story to sleep through this switch, one state per chapter. A finished chapter whose
+-- state stayed on keeps every main objective dormant: its missions never tick, tasks never complete and force-completing
+-- does nothing (friend's save 2026-11-03: Fig Chapter01 done, Q03 "Return to Sierra" stuck; local/fixtures/pt11-q03).
+local DORMANCY = "/Game/Systems/GlobalStateSwitches/GSS_MainQuestsDormancy.GSS_MainQuestsDormancy"
+local function dormancySwitch()
+    local sw = StaticFindObject(DORMANCY)
+    if not sw:IsValid() then pcall(LoadAsset, DORMANCY); sw = StaticFindObject(DORMANCY) end
+    local gi = FindFirstOf("DrivingGameInstance")
+    if valid(sw) and valid(gi) then return sw, gi end
+end
+-- stuck = the switch is on while no DLC chapter objective runs and a main objective is dormant
+local function storyAsleep(q)
+    local sw, gi = dormancySwitch()
+    if not (sw and gi:GetGlobalSwitch(sw)) then return false end
+    local w, dormant = UEHelpers.GetWorld(), false
+    for i = 1, q.ActiveObjectives:GetArrayNum() do
+        local o = q.ActiveObjectives[i].Objective
+        if valid(o) then
+            if o:GetFName():ToString():find("^QO_Fig") then return false end
+            if o:IsDormant(w) then dormant = true end
+        end
+    end
+    return dormant
+end
+local function wakeStory()
+    local sw, gi = dormancySwitch()
+    if not sw then return false end
+    for i = 1, sw.States:GetArrayNum() do gi:SetGlobalSwitch(sw, sw.States[i], 0) end -- 0 = DONTCARE: the chapter lets go
+    log("PT|rescue host wakes the main story: dormancy switch now %s", tostring(gi:GetGlobalSwitch(sw)))
+    return not gi:GetGlobalSwitch(sw)
+end
+
 local function openTasks()
     local q = FindFirstOf("BP_QuestManager_C")
     if not valid(q) then return {} end
     local rows, a = {}, q.ActiveObjectives
+    if storyAsleep(q) then rows[1] = table.concat({ "wake", "main story", 0, "Wake the main story", "asleep after a DLC chapter" }, "\t") end
     for i = 1, a:GetArrayNum() do
         local s = a[i]
         local ms = s.ActiveMissionState
@@ -161,6 +194,7 @@ end
 
 local function complete(obj, mis, idx)
     local q = FindFirstOf("BP_QuestManager_C")
+    if obj == "wake" then return wakeStory() end
     if obj == "next" then
         local o = StaticFindObject(mis)
         local ok = valid(q) and valid(o) and q:StartObjective(o, false, true)

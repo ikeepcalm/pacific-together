@@ -612,6 +612,7 @@ local function purge()
         made.claimed, made.spawned)
 end
 
+local PURGE = { "BP_Lootable_Base_C", "LootableTemplatePart", "LootableTemplate", "BP_Spawn_ResourceBase_C" }
 local function scanGuest()
     for id, e in pairs(ents) do
         if e.kind == "W" and not alive(e.actor) then
@@ -642,14 +643,12 @@ local function scanGuest()
     -- its own random lootables keep appearing for a while after the join; every 2 s: these scans took 300-400 ms of each
     -- 500 ms tick in a zone and the guest could not even turn its camera (local playtest 2026-10-22, PT|slow loot.lua)
     -- still 330 ms every 2 s in play, and the game stops spawning its own loot soon after the join: the first 90 s only
-    if tickN % 4 == 0 and os.clock() - fullAt < 90 then
-        for _, a in ipairs(FindAllOf("BP_Lootable_Base_C") or {}) do
+    -- one class per tick, each every 2 s: all four in one tick held 150-240 ms frames for the whole 90 s (friend session
+    -- 2026-11-03, guest PT|slow loot.lua:961 every 2 s after the join)
+    if os.clock() - fullAt < 90 then
+        local c = PURGE[tickN % #PURGE + 1]
+        for _, a in ipairs(FindAllOf(c) or {}) do
             if alive(a) and not claimed[a:GetFullName()] then a:K2_DestroyActor() end
-        end
-        for _, c in ipairs({ "LootableTemplatePart", "LootableTemplate", "BP_Spawn_ResourceBase_C" }) do
-            for _, a in ipairs(FindAllOf(c) or {}) do
-                if alive(a) and not claimed[a:GetFullName()] then a:K2_DestroyActor() end
-            end
         end
     end
     -- once a second: each pass reads every loose item's name (~0.3 s of each minute at 2 a second; FPS hunt 2026-11-01)

@@ -153,6 +153,26 @@ function M.defer(ms, fn)
     end)
 end
 
+-- Exit portals are spawned at runtime (BFL_RuntimeSpawnHelpers.DynamicSpawnActor), so their object names differ between the
+-- host's and the guest's game (playtest 2026-11-03: gateway never shown on the guest). They are named by where they stand.
+function M.portalKey(p)
+    local l = p:K2_GetActorLocation()
+    return string.format("%.0f,%.0f,%.0f", l.X, l.Y, l.Z)
+end
+function M.findPortal(key)
+    local x, y, z = key:match("^(%-?[%d%.]+),(%-?[%d%.]+),(%-?[%d%.]+)$")
+    if not x then return nil end
+    local best, bestD = nil, 500 * 500 -- within 5 m
+    for _, p in ipairs(FindAllOf("BP_LevelTransition_ExitPortal_C") or {}) do
+        if live(p) then
+            local l = p:K2_GetActorLocation()
+            local d = (l.X - x) ^ 2 + (l.Y - y) ^ 2 + (l.Z - z) ^ 2
+            if d < bestD then best, bestD = p, d end
+        end
+    end
+    return best
+end
+
 function M.netMode()
     local ksl, wco = UEHelpers.GetKismetSystemLibrary(), UEHelpers.GetWorldContextObject()
     if not wco:IsValid() then return "none" end
