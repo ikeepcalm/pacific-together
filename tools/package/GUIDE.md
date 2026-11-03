@@ -20,6 +20,17 @@ precedence over Steam joining; reinstall in Host mode to clear it.
 Without the launcher (in `%LOCALAPPDATA%\PacificTogether\app\<version>`): `install.cmd` for host/Steam, `install.cmd -Join <host IP>` for direct IP, then start `PenDriverPro\Binaries\Win64\PenDriverPro-Win64-Shipping.exe` (or through Steam).
 A game or mod version mismatch refuses the join; a different build number is only logged, and such a pair is untested. See `README.txt` for features and known issues.
 
+## Custom music
+
+Both players need the updated Lua mod and native DLL for automatic music sharing. Select custom music on the host as
+usual: its currently selected MP3, WAV or OGG is sent to the guest when needed. Wait for **Shared music ready** on the
+first download; then the song restarts for both players. The host chooses the music for the session.
+
+Identical local files are reused. Different files with the same name stay separate; the guest's own music is preserved.
+The received-song cache keeps at most 256 MB / 64 songs and accepts individual files up to 64 MB. Older peers need the song in
+their own music folder, as before. Song timing is approximate; this is file sharing and coordinated playback, not live
+audio streaming.
+
 ## Controls and playtest
 
 - Host drives; the guest opens the **passenger** door with **E** and gets in, and rides in the passenger seat. **X** exits (on the passenger side). From the seat, look at the ignition key or the shifter and press **E** to start/stop the engine or switch P/D.

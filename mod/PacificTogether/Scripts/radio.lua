@@ -6,10 +6,9 @@
 --                 when a guest arrives, after a map load and as a 5 s heartbeat (a rejected intent is corrected by it)
 --   g.radio.have  guest -> host: the custom music files the guest has (lower-case file names, "|" separated)
 -- Track key: "B:<object name>" for the game's own tracks, "L:<lower-case file name>" for the player's custom files (MusicTrack with an
--- ExternalUrl). A custom file is matched by name only: hashing needs the file read on both sides and the game names tracks by file.
--- A custom track the guest does not have is skipped by the host (SkipTrack) until it plays one both have; the host never plays
--- one the guest lacks, the guest never keeps one the host lacks (the host's track overrides it). The game's own tracks are in every
--- copy, so a shared track exists unless a playlist holds nothing but custom files (then the guest has nothing to apply: silent).
+-- ExternalUrl). Track keys retain filenames; negotiated file offers additionally verify the song's SHA-256.
+-- Updated peers transfer the current custom file to a verified cache. With older peers a missing file is skipped until both have it.
+-- With older peers the host skips an unavailable custom song; the guest follows the host's selection.
 -- Playing a chosen track: the game's SkipTrack picks a random entry of RadioPlaylist (not the last, which is the current track),
 -- moves it to the end and drops every copy of it. So the front entries are all set to the wanted track for one SkipTrack, then the list
 -- is restored from DefaultRadioPlaylist with the wanted track last (docs/spikes/PT6-radio.md).
@@ -20,6 +19,7 @@ local UEHelpers = require("UEHelpers")
 local common = require("common")
 local net = require("net")
 local log = common.log
+local music = require("radiomusic")
 
 local M = {}
 local MUT = os.getenv("PT_MUTATE")
@@ -220,6 +220,10 @@ end
 -- Guest: every half second, bring the radio to the host's track and fix only what differs (live tests 2026-11-01: reacting to
 -- messages lost the host's song whenever the guest's game moved on or reopened its own file by itself).
 local followAt, actAt, holdUntil, openAt, openKey, restartNext = 0, 0, 0, 0, nil, false
+local function stopBuiltin(mm)
+    local tp = mm.MusicTrackPlayer
+    if tp and valid(tp.AudioEvent) and valid(tp.PlaybackSource) then tp.AudioEvent:ExecuteAction(0, tp.PlaybackSource:GetOwner(), 0, 300, 4) end
+end
 local function guestFollow(mm)
     local want = hostKey
     if not want or playing or now() < holdUntil or now() - followAt < 0.5 then return end
@@ -241,11 +245,22 @@ local function guestFollow(mm)
     end
     if now() - (failed[want] or -math.huge) < 50 then return end -- cannot play it here: the host skips it
     local d = musicDir()
-    if not d then return end
     local name = want:sub(3) -- "L:<file>": lower case, Windows does not mind
-    local url = d .. name
+    local shared = music.enabled and net.hostSupports("music-files")
+    local url
+    if shared then url = music.url(want, d and (d .. name))
+    elseif d then url = d .. name end
+    if not url then
+        if shared then
+            -- Keep the previous song from playing over the host's new selection while its file arrives.
+            local mp = mm.ExternalMediaPlayer
+            if valid(mp) then mp:Pause() end
+            stopBuiltin(mm)
+        end
+        return
+    end
     -- Lua's io.open takes the ANSI code page: a name with accents never opens, so those are left to the IsPlaying check below
-    if not name:find("[\128-\255]") then
+    if not shared and not name:find("[\128-\255]") then
         local f = io.open((d:gsub("^file:/*", "")) .. name, "rb")
         if not f then failed[want] = now(); reportMiss(want); return end
         f:close()
@@ -259,8 +274,7 @@ local function guestFollow(mm)
     -- a lent built-in still starts its own Wwise music next to the file (live test 2026-11-01, "1964" under the host's song):
     -- stopped, also after the game starts it again (radio off and on)
     if carrier and cur:GetAddress() == carrier:GetAddress() then
-        local tp = mm.MusicTrackPlayer
-        if valid(tp.AudioEvent) and valid(tp.PlaybackSource) then tp.AudioEvent:ExecuteAction(0, tp.PlaybackSource:GetOwner(), 0, 300, 4) end
+        stopBuiltin(mm)
     end
     -- the carrier is the host's file from now on, so whatever the game reopens later (radio off and on, garage and car) is right too
     -- shortcut: the guest's library entry for the carrier file points at the host's file until the game makes it again
@@ -280,6 +294,11 @@ local denied = {}      -- host: custom keys a guest said it cannot play
 local skipAt, skipN = 0, 0
 local lastGuests, hbAt, resyncAt = 0, 0, nil
 local haveSent, haveAt = "", 0
+if music.enabled then
+    music.ready = function() resyncAt = now() + 0.5 end
+    music.offered = function(key) failed[key], missed[key] = nil, nil end
+    music.failed = function(key) failed[key] = now(); reportMiss(key) end
+end
 
 -- a custom track the guest lacks: the host skips it (rate limited) until a shared one plays
 local function lacking(k)
@@ -354,6 +373,7 @@ net.on("g.radio.s", function(_, data)
     local s2 = radioState()
     for _, k in ipairs({ "gs", "cr", "vol" }) do if t[k] then last[k] = s2[k] end end
     if t.trk then
+        if music.enabled then music.discard(t.trk) end
         if t.trk ~= hostKey or t.r == "1" then followAt, holdUntil = 0, 0 end -- a new track: at once, not after a guest skip's wait
         hostKey = t.trk
         if t.r == "1" then
@@ -458,6 +478,10 @@ local function tick()
     local arrived = n > lastGuests
     lastGuests = n
     local k = curKey(mm)
+    if music.enabled then
+        local track = mm:CurrentRadioTrack()
+        music.host(isCustom(k) and k or nil, valid(track) and track.ExternalUrl:ToString() or nil)
+    end
     -- a custom track a guest cannot play
     if lacking(k) and not playing and now() - skipAt > 1.5 and skipN < 12 then
         skipAt, skipN = now(), skipN + 1

@@ -13,6 +13,7 @@ local M = {}
 local handlers = {}
 -- Extensions ride the author's PT1/PT1A contract, only after both peers opt in.
 local offered = "motion,drop-velocity,intents,heap" .. (PTNative_TunnelMotionSend and ",datagrams" or "")
+if PTNative_MusicFinish then offered = offered .. ",music-files" end
 local hostFeatures, hostEpoch, hostTicket, serial, baselineComplete = {}, nil, nil, 0, false
 local peers = {}
 local baselineParts, motionSeen = {}, {}
@@ -79,6 +80,7 @@ end
 
 function M.toHost(kind, data)
     local pc = localPC()
+    if kind:sub(1, 13) == "g.radio.file." and not M.hostSupports("music-files") then return false end
     if kind == "g.heap.intent" and not M.hostSupports("heap") then return false end
     if protected(kind) and M.hostSupports("intents") then
         serial = serial + 1
@@ -146,6 +148,7 @@ end
 local byKind, byAt = {}, os.clock()
 function M.toGuest(pc, kind, data)
     if not (pc:IsValid() and PTNative_MsgToGuest ~= nil) then return false end
+    if kind:sub(1, 13) == "g.radio.file." and not M.peerSupports(pc, "music-files") then return false end
     if kind == "g.heap.fx" and not M.peerSupports(pc, "heap") then return false end
     data = data or ""
     byKind[kind] = (byKind[kind] or 0) + #data

@@ -5,6 +5,12 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+### Added
+
+- Share the host's current custom radio song automatically with an updated guest. Missing MP3/WAV/OGG files use a
+  SHA-256-verified cache; matching local files need no download, and different files with the same name stay distinct.
+  A newly available track restarts together on both sides. Protocol remains 6; older peers retain the previous behavior.
+
 ### Fixed
 
 - Preserve author protocol 6 and keyed drop adoption; optional motion, heap and intent extensions activate only after negotiation.
