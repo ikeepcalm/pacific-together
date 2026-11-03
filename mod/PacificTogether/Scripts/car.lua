@@ -14,6 +14,10 @@ local log = common.log
 local ov = require("overlay")
 
 local M = {}
+local proxyInput
+function M.physicalProxyActive()
+    return common.netMode() == "client" and net.hostSupports("physical-car") and proxyInput ~= nil and os.clock() - proxyInput.at < 1
+end
 if os.getenv("PT_MUTATE") == "nocarsync" then
     log("PT|car disabled (mutation nocarsync)")
     return M
@@ -408,6 +412,7 @@ LoopInGameThreadWithDelay(50, function()
 end)
 LoopInGameThreadWithDelay(16, function()
     if common.netMode() ~= "client" or not valid(wheelCar) then return end
+    if M.physicalProxyActive() then return end
     local a, b, u, extrapolate = wheelMotion.sample(wheelBuffer, os.clock())
     if not a then return end
     local ct = wheelCar:GetTransform()
@@ -853,6 +858,27 @@ local function sway(car, t)
     cam:K2_SetRelativeLocation(kml():InverseTransformDirection(cam:GetAttachParent():K2_GetComponentToWorld(), w), false, {}, false)
 end
 
+-- Experimental proxy: the host remains authoritative; controls are presentation input on the guest.
+RegisterLoadMapPreHook(function() proxyInput = nil end)
+net.on("g.motion.physicalcar", function(_, data)
+    if common.netMode() ~= "client" or not net.hostSupports("physical-car") then return end
+    local epoch, th, brake, steer = data:match("^([^|]+)|([^|]+)|([^|]+)|([^|]+)$")
+    th, brake, steer = tonumber(th), tonumber(brake), tonumber(steer)
+    if epoch ~= net.worldToken() or not th or not brake or not steer or th ~= th or brake ~= brake or steer ~= steer
+        or math.abs(th) > 1 or math.abs(brake) > 1 or math.abs(steer) > 1 then return end
+    proxyInput = {th=th, brake=brake, steer=steer, at=os.clock()}
+end)
+LoopInGameThreadWithDelay(50, function()
+    if common.netMode() ~= "listen" then return end
+    local guests, car = net.guests(), theCar(true)
+    if #guests == 0 or not car then return end
+    local ok, data = pcall(function()
+        local v = car.VehicleController
+        return string.format("%s|%.3f|%.3f|%.3f", net.worldToken(), v.ThrottleInput, v.BrakeInput, v.SteerInput)
+    end)
+    if ok then for _, pc in ipairs(guests) do if net.peerSupports(pc, "physical-car") then net.toGuest(pc, "g.motion.physicalcar", data) end end end
+end)
+
 local function follow(car)
     if followLoop then CancelDelayedAction(followLoop) end
     pcall(function() car.Chassis:SetSimulatePhysics(false) end)
@@ -865,12 +891,25 @@ local function follow(car)
     local name = car:GetFullName()
     log("PT|car follow %s", name)
     followed = name
+    local physical, previousAt = false, os.clock()
     local function step()
         local ok, err = pcall(function()
             local t, rm = os.clock(), car.ReplicatedMovement -- os.clock: wall time on Windows, no engine call each frame
+            local dt = math.min(0.1, math.max(0, t - previousAt)); previousAt = t
+            local enabled = M.physicalProxyActive()
+            if enabled ~= physical then
+                physical = enabled
+                car.Chassis:SetSimulatePhysics(physical)
+                car.VehicleController:SetComponentTickEnabled(physical)
+                log("PT|car experimental physical proxy=%s", tostring(physical))
+            end
+            if physical then
+                local vc = car.VehicleController
+                vc.ThrottleInput, vc.BrakeInput, vc.SteerInput = proxyInput.th, proxyInput.brake, proxyInput.steer
+            end
             local p = rm.Location
             local fresh = not last or p.X ~= last.x or p.Y ~= last.y or p.Z ~= last.z
-            if not fresh and settled then return end
+            if not fresh and settled and not physical then return end
             if fresh then
                 settled = false
                 local r, v = rm.Rotation, rm.LinearVelocity
@@ -892,6 +931,10 @@ local function follow(car)
             delay = delay + (target - delay) * 0.01
             local to, rot = sample_at(buf, t - delay, "tm")
             if to then
+                if physical then
+                    to = kml():VInterpTo(car:K2_GetActorLocation(), to, dt, 10)
+                    rot = kml():RInterpTo(car:K2_GetActorRotation(), rot, dt, 10)
+                end
                 car:K2_SetActorLocationAndRotation(to, rot, false, {}, true)
                 local turn = wrap(rot.Yaw - lookYaw)
                 lookYaw = rot.Yaw

@@ -18,6 +18,23 @@ return function(T)
     local FUEL, BAT, HP = 7.5, 12.5, 11.0
     local GONE = { "Body.DoorsRR", "Essentials.WheelFL" }
     local DRIVE_S = 24
+    local function motionStats()
+        local last, at, speed, deltas, frames = nil, nil, nil, {}, 0
+        return function(p, t, report)
+            if report then
+                table.sort(deltas)
+                log("PT|info drive motion %s frames=%d speed_delta_p95=%.1f uu/s", ROLE, frames,
+                    #deltas > 0 and deltas[math.ceil(#deltas * 0.95)] or -1)
+                return
+            end
+            if last and t > at then
+                local v = L.d(p, last) / (t - at)
+                if speed then deltas[#deltas + 1] = math.abs(v - speed) end
+                speed, frames = v, frames + 1
+            end
+            last, at = p, t
+        end
+    end
 
     local function cm() return T.first("BP_CarManager_C") end
     local function manif(name)
@@ -88,7 +105,7 @@ return function(T)
         local function add(s) steps[#steps + 1] = s end
         local guestPC = function() return S.remotePCs()[1] end
         local function send(kind, data) PTNative_MsgToGuest(guestPC():GetAddress(), kind, data or "") end
-        local moved, start, saved = 0, nil, {}
+        local moved, start, saved, measureMotion = 0, nil, {}, motionStats()
         for _, s in ipairs(T.loadFixture("garage")) do add(s) end
         add({ check = "host_listen_garage", timeout = 30, cond = function() return T.netMode() == "listen" and T.listening() end })
         add({ check = "host_guest_in_garage", timeout = 240, cond = function() return S.guestChar() ~= nil end })
@@ -120,11 +137,13 @@ return function(T)
                 if not L.driving then return end
                 pcall(function()
                     local p = car:K2_GetActorLocation()
+                    measureMotion(p, L.now())
                     if last then moved = moved + L.d(p, last) end
                     last = p
                     -- against a wall the car sleeps: put it back where it started (as in carride)
                     if L.d(p, still.p) > 100 then still = { t = L.now(), p = p }
                     elseif L.now() - still.t > 3 then
+                        log("PT|info drive reset after wall distance=%.1f", L.d(p, start))
                         car:K2_SetActorLocationAndRotation(start, startRot, false, {}, true)
                         still = { t = L.now(), p = start }
                     end
@@ -132,7 +151,7 @@ return function(T)
             end)
         end })
         add({ wait = DRIVE_S })
-        add({ run = function() L.driving = false; send("t.stop") end })
+        add({ run = function() L.driving = false; measureMotion(nil, nil, true); send("t.stop") end })
         add({ wait = 5 })
         add({ run = function()
             local p = L.car():K2_GetActorLocation()
@@ -191,14 +210,24 @@ return function(T)
     local function add(s) steps[#steps + 1] = s end
     local KML = StaticFindObject("/Script/Engine.Default__KismetMathLibrary")
     local met = { frames = 0, stalls = 0, maxJump = 0, dist = 0, camMax = 0, lags = {}, swayMax = 0 }
+    local measureMotion = motionStats()
     local function toHost(kind, data) PTNative_MsgToHost(T.localPC():GetAddress(), kind, data or "") end
     local function measure()
         local car, me = L.car(), T.myPawn()
         if not car then return end
         local t = L.now()
         local p = car:K2_GetActorLocation()
+        measureMotion(p, t)
         local rm = car.ReplicatedMovement.LinearVelocity
         local speed = math.sqrt(rm.X ^ 2 + rm.Y ^ 2)
+        local rp = car.ReplicatedMovement.Location
+        if not met.raw or rp.X ~= met.raw.X or rp.Y ~= met.raw.Y or rp.Z ~= met.raw.Z then
+            if met.rawAt and speed > 150 then
+                if L.d(rp, met.raw) < 200 then met.rawGap = math.max(met.rawGap or 0, t - met.rawAt)
+                else met.rawJumps = (met.rawJumps or 0) + 1 end
+            end
+            met.raw, met.rawAt = {X=rp.X,Y=rp.Y,Z=rp.Z}, t
+        end
         local cam = T.localPC().PlayerCameraManager:GetCameraLocation()
         local cl = L.toLocal(car, cam)
         if not met.fp then
@@ -218,6 +247,7 @@ return function(T)
         met.prevXf = xf
         if met.last then
             local dt = t - met.t
+            met.sampleGap = math.max(met.sampleGap or 0, dt)
             local d = L.d(p, met.last)
             met.frames = met.frames + 1
             met.dist = met.dist + d
@@ -249,7 +279,7 @@ return function(T)
     end })
     add({ wait = 2 })
     add({ run = function()
-        if os.getenv("PT_VARIANT") == "nodoor" then toHost("g.car.enter") return end
+        if os.getenv("PT_VARIANT") == "nodoor" then T.intent("g.car.enter", "") return end
         L.car().SLOT_FrontLeftDoor:GetItemActor({}):StartEntry(false)
     end })
     add({ check = "guest_seated", timeout = 60, cond = function()
@@ -268,10 +298,18 @@ return function(T)
     add({ check = "guest_drive_started", timeout = 120, cond = function() return got("t.drive") ~= nil end })
     add({ run = function() met = { frames = 0, stalls = 0, maxJump = 0, dist = 0, camMax = 0, lags = {}, swayMax = 0 }; L.measuring = true
         LoopInGameThreadWithDelay(1, function() if L.measuring then pcall(measure) end end) end })
+    add({ check = "guest_physical_proxy_active", timeout = T.MUTATE == "nophysicalcar" and 1 or 15, cond = function()
+        local c = L.car()
+        return c and c.Chassis:IsSimulatingPhysics(FName("None")) and c.VehicleController:IsComponentTickEnabled()
+    end })
+    add({ check = "guest_proxy_receives_controls", timeout = T.MUTATE == "nophysicalcar" and 1 or 15, cond = function()
+        local c = L.car()
+        return c and c.Chassis:IsSimulatingPhysics(FName("None")) and math.abs(c.VehicleController.ThrottleInput) > 0.1
+    end })
     add({ check = "guest_drive_stopped", timeout = DRIVE_S + 60, cond = function() return got("t.stop") ~= nil end })
-    add({ run = function() L.measuring = false end })
+    add({ run = function() L.measuring = false; measureMotion(nil, nil, true) end })
     add({ check = "guest_car_follows", timeout = 1, cond = function()
-        log("PT|info follow frames=%d dist=%.0f maxJump=%.1f stalls=%d", met.frames, met.dist, met.maxJump, met.stalls)
+        log("PT|info follow frames=%d dist=%.0f maxJump=%.1f stalls=%d maxRawGap=%.3fs maxSampleGap=%.3fs excludedRawJumps=%d", met.frames, met.dist, met.maxJump, met.stalls, met.rawGap or 0, met.sampleGap or 0, met.rawJumps or 0)
         return met.dist > 3000 and met.maxJump < 200 and met.stalls <= met.frames * 0.03
     end })
     add({ check = "guest_camera_rides", timeout = 1, cond = function()
@@ -319,7 +357,7 @@ return function(T)
     end })
     -- leaving: the key (X) and this send the same intent
     add({ check = "guest_exit_asked", timeout = 60, cond = function() return got("t.exit") ~= nil end })
-    add({ run = function() toHost("g.car.exit") end })
+    add({ run = function() T.intent("g.car.exit", "") end })
     add({ check = "guest_left_car", timeout = 30, cond = function()
         local car, me = L.car(), T.myPawn()
         return car ~= nil and me ~= nil and not attached(me, car) and T.cls(me) == T.CHAR

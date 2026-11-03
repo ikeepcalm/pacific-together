@@ -13,6 +13,7 @@ local M = {}
 local handlers = {}
 -- Extensions ride the author's PT1/PT1A contract, only after both peers opt in.
 local offered = "motion,drop-velocity,intents,heap" .. (PTNative_TunnelMotionSend and ",datagrams" or "")
+if os.getenv("PT_MUTATE") ~= "nophysicalcar" then offered = offered .. ",physical-car" end
 if PTNative_MusicFinish then offered = offered .. ",music-files" end
 local hostFeatures, hostEpoch, hostTicket, serial, baselineComplete = {}, nil, nil, 0, false
 local peers = {}
