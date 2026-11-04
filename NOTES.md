@@ -1212,3 +1212,10 @@ Logs: `local/playtest-20261104-live1` (first session; the second one is in the t
   shortcut "upgrades do not travel"), so the guest's kit had no IP_ItemUpgrade UpgradeNode: ToolManifestation.GetUpgrade invalid,
   no install spots shown. The guest's drop spawned a kit on the host that lacks it too. Open: carry the node in the spec and
   rebuild kits with BFL_ItemPropertyUtilityFns.CreateUpgradeItem(node); reading the node from a real kit not tried yet.
+  Kit follow-up (same session): a host kit's node is readable from Lua by calling GetUpgrade on the
+  BP_BaseGarageUpgrade_ToolManifestation_C CDO with CDO.Instance set to the item instance for that call (then cleared): Upgrade
+  Asset UP_Garage_InventoryExpansion_Install_4th_C, UpgradeNode /Game/Gameplay/Inventory/Items/RecipeResearchGraph.RecipeResearchGraph
+  :GenericGraphUpgradeNode_27 (an asset path, same on both sides). InventoryBlueprintLibrary.GetItemProperties from Lua returns
+  false (wildcard out); GetDataBlockDump shows IP_ItemUpgrade as {} even on a working kit. A guest probe
+  BFL_ItemPropertyUtilityFns.CreateUpgradeItem(node, 0, pc, out) crashed the guest (access violation 0x10; the crash marker's last
+  calls do not show it, so the cause is unproven). Next: try that build in a headless pair, not with the owner waiting.
