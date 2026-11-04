@@ -1194,3 +1194,9 @@ Logs: `local/playtest-20261104-live1` (first session; the second one is in the t
   Crash on the way: host access violation in ActorComponent:GetOwner on map icons (some owners freed); the code no longer calls it.
   Layered icons: base and layer both draw (a junction: grey square + black glyph at 0.67); a copy without layers drew a house
   black on black until the layers were sent as their own copies.
+- Guest radio in the seat (owner, same session): volume and track changes already reached the host (`PT|radio intent`,
+  `skip 1@cr sent`), but the guest had no outline and no radio panel, and X (the radio's next track) also exited the car.
+  Cause: car.lua sets ExtraData.IsInside=false on the seated guest's dashboard highlights (ignition, shifter) so a character
+  passes the highlight filter; the radio was left out (fork commit cfc2b6b, no reason given). A live IsInside=false on the radio
+  showed both. Change: the radio is included; the X exit key and the guestui seat hint are removed at the owner's request
+  (the passenger door is the exit). Owner: works end to end. guestui scenario updated (hint checks dropped), not run.

@@ -5,6 +5,24 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+### Changed
+
+- The guest's map is the host's: closed junctions, buildings, the gateway and quest markers look the same on both screens,
+  and the map is turned the same way (each side used to pick its own north).
+- The guest leaves the car through the passenger door; the X key and the "X Exit car" / "E Radio on/off" text are gone.
+- The guest gets the radio's own outline and panel from the passenger seat (station, track, volume, power).
+- The intro movies are skipped while the mod is installed (they come back on uninstall).
+
+### Fixed
+
+- "Wake the main story" (F9) now also starts the next mission, with its task and map marker.
+- An old mission's green marker no longer stays on the guest's map.
+- The car radio no longer sounds muffled to the guest in the seat.
+- The guest finds the zone's gateway by its place instead of its name, which differs between the two games (not yet seen in
+  a real zone).
+- After joining, the guest clears its own lootables a few at a time instead of all at once (aimed at the join stutter; not yet
+  checked by hand).
+
 ## [0.8.8] - 2026-11-02
 
 Network protocol **6**: both players need 0.8.8. Includes the Everelsu fork's three commits (garage systems, passenger sway

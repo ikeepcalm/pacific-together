@@ -22,7 +22,7 @@ A game or mod version mismatch refuses the join; a different build number is onl
 
 ## Controls and playtest
 
-- Host drives; the guest opens the **passenger** door with **E** and gets in, and rides in the passenger seat. **X** exits (on the passenger side). From the seat, look at the ignition key or the shifter and press **E** to start/stop the engine or switch P/D.
+- Host drives; the guest opens the **passenger** door with **E** and gets in, and rides in the passenger seat. Open the passenger door from the seat to get out. From the seat, look at the ignition key, the shifter or the radio and press **E** to start/stop the engine, switch P/D or turn the radio on/off; the radio's panel works as the driver's does.
 - New game: **E** skips the opening for both players.
 - **Middle mouse** pings; **End** or **F8** resets stuck guest controls.
 - **F9** opens the rescue menu when something breaks: **1** teleport to the other player, **2** resync with the host,

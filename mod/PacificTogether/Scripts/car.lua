@@ -1093,7 +1093,7 @@ local function sendExit()
     log("PT|car exit intent sent=%s", tostring(net.toHost("g.car.exit")))
 end
 
-local hooked, exitWanted, ctlWanted, aimed = false, false, false, nil
+local hooked, ctlWanted, aimed = false, false, nil
 local function hookAll()
     if hooked then return end
     local ok, err = pcall(RegisterHook, "/Game/Gameplay/Inventory/Items/Car/Doors/BP_CarPart_Door_Base.BP_CarPart_Door_Base_C:EnterCar", function(self)
@@ -1136,8 +1136,8 @@ local function hookAll()
         if not okd then log("PT|error car hook %s %s", fn, tostring(errd)) end
     end
     hooked = true
-    -- leaving: key X while seated; the key only raises a flag (an ExecuteInGameThread per press crashed UE4SS when spammed, ping.lua)
-    common.onKey("X", function() exitWanted = true end)
+    -- leaving: the passenger door (owner 2026-11-04: X went, it is also the radio's next track). E only raises a flag (an
+    -- ExecuteInGameThread per press crashed UE4SS when spammed, ping.lua)
     common.onKey("E", function() ctlWanted = true end)
 end
 
@@ -1220,10 +1220,6 @@ local function guestTick()
         local ok, err = pcall(applyState, held)
         if not ok then log("PT|error car apply %s", tostring(err)) end
     end
-    if exitWanted then
-        exitWanted = false
-        if common.netMode() == "client" and riding then sendExit() end
-    end
     if unstickWanted then
         unstickWanted = false
         local ok, err = pcall(unstick)
@@ -1297,7 +1293,8 @@ LoopInGameThreadWithDelay(16, function()
         for what, h in pairs(controlHighlights) do
             if valid(h) then
                 local saved = {}
-                if what ~= "radio" and valid(h.ExtraData) and os.getenv("PT_MUTATE") ~= "nopasshighlight" then
+                -- the radio too: left inside, the guest got no outline and no radio panel (live 2026-11-04)
+                if valid(h.ExtraData) and os.getenv("PT_MUTATE") ~= "nopasshighlight" then
                     saved.inside = h.ExtraData.IsInside
                     h.ExtraData.IsInside = false -- the passenger remains a character, outside the native driver state
                 end
@@ -1350,7 +1347,6 @@ LoopInGameThreadWithDelay(50, function()
 end)
 
 M.exit = sendExit
-M.aimed = function() return aimed end -- guestui.lua's seat hint: "ign", "gear" or nil
 M.unstick = function() unstickWanted = true end -- guestui.lua: second key and console command
 -- for guestact.lua (the guest's car work and ARC)
 M.theCar, M.carManager, M.equipped, M.itemOf, M.slotName = theCar, carManager, equipped, itemOf, slotName

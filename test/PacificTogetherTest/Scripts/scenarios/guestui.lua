@@ -3,8 +3,7 @@
 --   pause menu   Esc on the guest (the controller's PauseMenu input event, as pausemenu.lua does) opens the game's pause menu; the
 --                host's world is not paused and keeps ticking; the menu closes again through its own action
 --   F8 path      the console command "ptunstick" runs the same request as F8/End: the overlay says "Controls reset"
---   seat         seated by a real door press: the hint "X  Exit car" shows, a camera fade ran; after the exit the hint is gone and
---                a second fade ran
+--   seat         seated by a real door press: a camera fade ran; after the exit a second fade ran (no seat hint since 2026-11-04)
 -- Run: tools/run-test.ps1 -Scenario guestui -Fixture garage -Headless      Mutation noguestui: guestui.lua does nothing: the checks FAIL.
 return function(T)
     local L = require("scenarios.sessionlib")(T)
@@ -146,12 +145,11 @@ return function(T)
     add({ run = function() fadesBefore = fades; id = T.act_begin("door_press", {}) end })
     add({ check = "guest_door_press", timeout = 90, cond = function() local d, _, ok = T.act_done(id); return d and ok end })
     add({ check = "guest_seated", timeout = 60, cond = function() return attached(T.myPawn()) end })
-    add({ check = "guest_seat_hint_shown", timeout = 10, cond = function() return text("PTGuestUiHint") == "X  Exit car" end })
     add({ check = "guest_fade_on_seating", timeout = 10, cond = function() log("PT|info guestui fades %d -> %d", fadesBefore, fades); return fades > fadesBefore end })
     add({ run = function() sendHost("t.seatok") end })
     add({ check = "guest_told_exit", timeout = 120, cond = function() return has("t.exit") end })
     add({ run = function() fadesBefore = fades; sendHost("g.car.exit") end })
-    add({ check = "guest_seat_hint_gone", timeout = 30, cond = function() return not attached(T.myPawn()) and text("PTGuestUiHint") == "" end })
+    add({ check = "guest_left_seat", timeout = 30, cond = function() return not attached(T.myPawn()) end })
     add({ check = "guest_fade_on_leaving", timeout = 10, cond = function() return fades > fadesBefore end })
     add({ run = function() sendHost("t.exitok") end })
     add({ wait = 3 })
