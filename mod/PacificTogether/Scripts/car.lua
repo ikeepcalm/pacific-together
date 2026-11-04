@@ -198,14 +198,15 @@ end
 -- Opening only unlatches one; its mesh then swings on physics. The guest's copy stayed shut (no physics there), and the
 -- host's door-state sync closed the guest's own opening 1-2 s later (hand playtest 2026-10-23).
 local DOOR = "BP_CarPart_Door_Base_C"
+local HOOD = "BP_Panel_Base_C"
 local function doorParts(car)
     local r, list = {}, {}
     pcall(function() car:GetAttachedActors(list, true) end)
     for _, e in ipairs(list) do
         local a = e:get()
-        if valid(a) and a:GetClass():GetFName():ToString() == DOOR then
+        if valid(a) and (a:GetClass():GetFName():ToString() == DOOR or a:GetClass():GetFName():ToString() == HOOD) then
             local ok, slot = pcall(function() return a.RootComponent.AttachParent:GetFName():ToString() end)
-            if ok then r[slot] = a end
+            if ok and (a:GetClass():GetFName():ToString() == DOOR or slot == "SLOT_Hood") then r[slot] = a end
         end
     end
     return r
@@ -290,6 +291,7 @@ end
 -- host hooks (listen only): a door verb or knock starts the swing watcher, a changed car loadout rebuilds the part lines.
 -- Each keeps its slow timer fallback (the 2 s swing pass, the 1 s part lines); first fires are logged as PT|probe.
 local DOORBP = "/Game/Gameplay/Inventory/Items/Car/Doors/BP_CarPart_Door_Base.BP_CarPart_Door_Base_C:"
+local HOODBP = "/Game/Gameplay/Inventory/Items/Car/Panels/BP_Panel_Base.BP_Panel_Base_C:"
 local hostHooked, probeN = false, {}
 local probeOk, probeLogged = {}, {} -- hook name -> registered; -> failure logged once
 local function probe(name, fn)
@@ -313,6 +315,9 @@ local function hostHooks()
     local all = true
     for _, fn in ipairs({ "AttemptOpen", "AttemptShut", "ObjectKicked", "OnConstraintBroken_Event_0" }) do
         all = probe(DOORBP .. fn, function() swingFor() end) and all
+    end
+    for _, fn in ipairs({ "AttemptOpen", "AttemptShut", "OnConstraintBroken_Event_0" }) do
+        all = probe(HOODBP .. fn, function() swingFor() end) and all
     end
     all = probe("/Game/Systems/Managers/BP_CarManager.BP_CarManager_C:UpdatedCarEquip", function() partsAt = -1 end) and all
     hostHooked = all
@@ -1227,7 +1232,7 @@ net.on("g.car.door", function(_, data)
     local part = car and doorParts(car)[slot]
     if not valid(part) then log("PT|car door intent: no door at %s", tostring(slot)); return end
     pcall(function() if shut then part:AttemptShut() else part:AttemptOpen() end end)
-    entryDoor = not shut and { part = part, at = now() } or nil
+    entryDoor = not shut and slot == "SLOT_FrontRightDoor" and { part = part, at = now() } or nil
     log("PT|car door intent %s %s applied", slot, shut and "shut" or "open")
 end)
 
@@ -1265,12 +1270,14 @@ local function hookAll()
     if not ok then log("PT|error car hook EnterCar %s", tostring(err)); return end
     -- shutting too: a door the host opened is posed on the guest with its physics off, so a local shut did nothing (2026-10-23)
     for fn, suffix in pairs({ AttemptOpen = "", AttemptShut = "|shut" }) do
-        local okd, errd = pcall(RegisterHook, "/Game/Gameplay/Inventory/Items/Car/Doors/BP_CarPart_Door_Base.BP_CarPart_Door_Base_C:" .. fn, function(self)
+        for _, path in ipairs({DOORBP, HOODBP}) do
+        local okd, errd = pcall(RegisterHook, path .. fn, function(self)
             pcall(function()
                 if common.netMode() ~= "client" then return end
                 local part, car = self:get(), theCar(false)
                 if not (valid(part) and car and same(part:GetAttachParentActor(), car)) then return end
                 local slot = part.RootComponent.AttachParent:GetFName():ToString()
+                if path == HOODBP and slot ~= "SLOT_Hood" then return end
                 -- only our own physics swing needs protecting; a door the host opened is posed here, its shut animates from the host
                 if suffix == "" or part.MainMesh:IsSimulatingPhysics(FName("None")) then doorHold = now() + 1.5 end
                 log("PT|car door intent %s%s sent=%s", slot, suffix, tostring(net.toHost("g.car.door", slot .. suffix)))
@@ -1289,6 +1296,7 @@ local function hookAll()
             end)
         end)
         if not okd then log("PT|error car hook %s %s", fn, tostring(errd)) end
+        end
     end
     hooked = true
     -- leaving: the passenger door (owner 2026-11-04: X went, it is also the radio's next track). E only raises a flag (an

@@ -5,6 +5,15 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+### Fixed in the vehicle experiment
+
+- Guest hood open/close follows the host using the panel's own interaction path.
+- Loose items retain durability, health, fuel and battery when copied, picked up and dropped by an updated guest.
+- Shared custom music pauses its built-in carrier without repeatedly finishing and restarting the song.
+- Loose-item presentation uses a delayed snapshot buffer for movement between network updates.
+
+Validation and remaining limits: [client sync report](docs/spikes/client-sync-fixes-20261104.md).
+
 ### Added
 
 - Share the host's current custom radio song automatically with an updated guest. Missing MP3/WAV/OGG files use a

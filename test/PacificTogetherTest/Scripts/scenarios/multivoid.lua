@@ -1,6 +1,7 @@
 -- Execute production ordering/negotiation logic with deterministic loss, duplication and object reuse.
 return function(T)
     local R=assert(loadfile("ue4ss/Mods/PacificTogether/Scripts/replica.lua"))()
+    assert(loadfile("ue4ss/Mods/PacificTogether/Scripts/itemmotion.lua"))
     local rawTestWorld,post=nil,{}
     local U={GetWorld=function()return rawTestWorld end,GetWorldContextObject=function()end,GetKismetSystemLibrary=function()return {}end}
     local env=setmetatable({require=function()return U end,

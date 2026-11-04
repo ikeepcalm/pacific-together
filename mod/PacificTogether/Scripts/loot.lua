@@ -33,6 +33,7 @@ local NOCAR = os.getenv("PT_MUTATE") == "nocarloot"
 -- tests only: the host sends no positions of moving world items
 local NOFALL = os.getenv("PT_MUTATE") == "nofall"
 local NOROTATE = os.getenv("PT_MUTATE") == "norotationsync"
+local NOITEMSTATE = os.getenv("PT_MUTATE") == "noitemstate"
 
 local INV = { "Inventory_Trunk", "Inventory_LargeTrunk", "Inventory_Garage", "Inventory_GarageLarge", "Inventory_GarageExpansion1",
               "Inventory_GarageExpansion1_Large", "Inventory_Garage_BackRoom", "Inventory_Tubes_In", "Inventory_Tubes_Out", "Inventory_GarageTransfer" }
@@ -43,6 +44,7 @@ local DROP = 500 -- uu: an unknown pickup this close to the guest is its own dro
 local MATCH = 60 -- uu: a local actor this close to the host's, same class, is the same thing
 
 local replica = require("replica")
+local itemMotion = require("itemmotion")
 local replicas = replica.new(nil)
 local M = {}
 local ents, byName, nextId = {}, {}, 1 -- id -> entity; actor full name -> id (host)
@@ -329,6 +331,21 @@ local function xform(x, y, z, yaw, pitch, roll)
              Translation = { X = x, Y = y, Z = z }, Scale3D = { X = 1, Y = 1, Z = 1 } }
 end
 
+local function validItemSpec(spec, path)
+    if type(spec) ~= "string" or #spec > 2048 or spec:sub(1, #path) ~= path then return false end
+    local rest, seen = spec:sub(#path + 1), {}
+    while rest ~= "" do
+        local field, tail = rest:match("^:([^:]+)(.*)$")
+        if not field then return false end
+        local key, raw = field:match("^([dfbh])([%d%.%+%-eE]+)$")
+        local value = raw and tonumber(raw)
+        if not key or seen[key] or not value or value ~= value or math.abs(value) > 10000000
+            or (key == "d" and value % 1 ~= 0) then return false end
+        seen[key], rest = true, tail
+    end
+    return true
+end
+
 local function line(e)
     local a = e.actor
     local l, r = a:K2_GetActorLocation(), a:K2_GetActorRotation()
@@ -337,7 +354,7 @@ local function line(e)
     elseif e.kind == "R" then what, state = ids.path2(a:GetClass()), brokenOf(a) and "br" or "-"
     elseif e.kind == "B" then what, state = ids.path2(a:GetClass()), "-"
     elseif e.kind == "P" then what, state = ids.path2(a:GetClass()), partState(a)
-    else what, state = ids.path(a.Instance.Archetype), "-;" end
+    else what, state = ids.path(a.Instance.Archetype), ids.spec(a.Instance) end
     local add = string.format("A|%s|%s|%.0f|%.0f|%.0f|%.0f|%s", e.id, what, l.X, l.Y, l.Z, r.Yaw, state)
     if e.kind == "W" and not NOROTATE and not NOFALL then
         add = add .. string.format("\nM|%s|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f", e.id, l.X, l.Y, l.Z, r.Yaw, r.Pitch, r.Roll)
@@ -609,7 +626,10 @@ local function onAdd(id, what, x, y, z, yaw, state)
     end
     if not a then log("PT|loot could not make %s %s", id, what); return end
     e = register(id, kind, a)
-    if kind == "W" then freezeItem(a) end
+    if kind == "W" then
+        if not NOITEMSTATE and alive(a.Instance) and validItemSpec(state, what) then ids.setProps(a.Instance, state) end
+        freezeItem(a)
+    end
     if kind == "L" then applyState(e, state) end
 end
 
@@ -706,6 +726,7 @@ local function scanDrops()
                     dropKey = dropKey + 1
                     pendingDrops[tostring(dropKey)] = common.lease(a)
                     drop = drop .. "|" .. dropKey
+                    if not NOITEMSTATE and net.hostSupports("drop-velocity") and net.hostSupports("item-state") then drop = drop .. "|" .. ids.spec(a.Instance) end
                 end
                 say(drop)
                 log("PT|loot guest drop %s told the host", ids.path(a.Instance.Archetype):match("[^/]+$"))
@@ -927,10 +948,16 @@ local function handle(l, guest, pc)
             if ents[id].kind == "W" then freezeItem(ents[id].actor) end
             local e = ents[id]
             local p, r = { X = tonumber(f[3]), Y = tonumber(f[4]), Z = tonumber(f[5]) }, { Pitch = tonumber(f[7]) or 0, Yaw = tonumber(f[6]), Roll = tonumber(f[8]) or 0 }
-            e.motion = { p = p, r = r, fromP = e.actor:K2_GetActorLocation(), fromR = e.actor:K2_GetActorRotation(), at = os.clock() }
+            e.motion = e.motion or {}
+            itemMotion.push(e.motion, p, r, os.clock(), e.actor:K2_GetActorLocation(), e.actor:K2_GetActorRotation())
         end)
     elseif op == "N" and not guest then
         local count = #f
+        local itemSpec
+        if count == 16 then
+            if not pc or not net.peerSupports(pc, "item-state") or not validItemSpec(f[16], f[2]) then return end
+            itemSpec, count = f[16], 15
+        end
         local key = (count == 7 or count == 15) and f[count] or nil
         if key then
             if not key:match("^%d+$") then return end
@@ -943,6 +970,7 @@ local function handle(l, guest, pc)
             if not v or v ~= v or math.abs(v) > (i <= 5 and 1e8 or 100000) then return end
         end
         local w = spawnItem(f[2], tonumber(f[3]), tonumber(f[4]), tonumber(f[5]), tonumber(f[6]))
+        if w and itemSpec and alive(w.Instance) then ids.setProps(w.Instance, itemSpec) end
         if w and count == 14 then
             w:K2_SetActorRotation({ Pitch = tonumber(f[7]), Yaw = tonumber(f[6]), Roll = tonumber(f[8]) }, true)
             local v, av = { X = tonumber(f[9]), Y = tonumber(f[10]), Z = tonumber(f[11]) }, { X = tonumber(f[12]), Y = tonumber(f[13]), Z = tonumber(f[14]) }
@@ -1091,18 +1119,19 @@ LoopInGameThreadWithDelay(16, function()
         local pose = replica.take(replicas, id)
         if pose and entityAlive(e) then
             freezeItem(e.actor)
-            e.motion = { p = { X = pose[3], Y = pose[4], Z = pose[5] },
-                r = { Pitch = pose[7], Yaw = pose[6], Roll = pose[8] },
-                fromP = e.actor:K2_GetActorLocation(), fromR = e.actor:K2_GetActorRotation(), at = os.clock() }
+            e.motion = e.motion or {}
+            itemMotion.push(e.motion, { X = pose[3], Y = pose[4], Z = pose[5] },
+                { Pitch = pose[7], Yaw = pose[6], Roll = pose[8] }, os.clock(),
+                e.actor:K2_GetActorLocation(), e.actor:K2_GetActorRotation())
         end
         local m = e.motion
         if m and entityAlive(e) then
-            local u = math.min((os.clock() - m.at) / 0.05, 1)
+            local a, b, u = itemMotion.sample(m, os.clock())
             local p = {}
-            for _, k in ipairs({"X", "Y", "Z"}) do p[k] = m.fromP[k] + (m.p[k] - m.fromP[k]) * u end
-            local r = KML:RLerp(m.fromR, m.r, u, true)
+            for _, k in ipairs({"X", "Y", "Z"}) do p[k] = a.p[k] + (b.p[k] - a.p[k]) * u end
+            local r = KML:RLerp(a.r, b.r, u, true)
             e.actor:K2_SetActorLocationAndRotation(p, r, false, {}, true)
-            if u >= 1 then e.motion = nil end
+            if #m == 1 or (u >= 1 and b == m[#m]) then e.motion = nil end
         end
     end
 end)

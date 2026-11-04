@@ -220,12 +220,24 @@ end
 -- Guest: every half second, bring the radio to the host's track and fix only what differs (live tests 2026-11-01: reacting to
 -- messages lost the host's song whenever the guest's game moved on or reopened its own file by itself).
 local followAt, actAt, holdUntil, openAt, openKey, restartNext = 0, 0, 0, 0, nil, false
+local mutedManager
+local function holdSongFinished(mm, enabled)
+    if mutedManager and (not enabled or not valid(mm) or mutedManager:GetAddress() ~= mm:GetAddress()) then
+        if valid(mutedManager) and PTNative_Unmute then PTNative_Unmute(mutedManager:GetAddress()) end
+        mutedManager = nil
+    end
+    if enabled and not mutedManager and valid(mm) and PTNative_Mute then
+        if PTNative_Mute(mm:GetAddress(), "OnSongFinished") then mutedManager = mm end
+    end
+end
 local function stopBuiltin(mm)
+    -- Stop fires OnSongFinished and replaces the carrier; Pause keeps the host's file selected.
     local tp = mm.MusicTrackPlayer
-    if tp and valid(tp.AudioEvent) and valid(tp.PlaybackSource) then tp.AudioEvent:ExecuteAction(0, tp.PlaybackSource:GetOwner(), 0, 300, 4) end
+    if tp and valid(tp.AudioEvent) and valid(tp.PlaybackSource) then tp.AudioEvent:ExecuteAction(1, tp.PlaybackSource:GetOwner(), 0, 300, 4) end
 end
 local function guestFollow(mm)
     local want = hostKey
+    holdSongFinished(mm, isCustom(want))
     if not want or playing or now() < holdUntil or now() - followAt < 0.5 then return end
     followAt = now()
     if carrier and now() - actAt > 3 then
@@ -405,6 +417,7 @@ end
 RegisterLoadMapPostHook(function()
     if mode() == "client" then resyncAt = now() + 6 else hbAt = -1; resyncAt = now() + 6 end
 end)
+RegisterLoadMapPreHook(function() holdSongFinished(nil, false) end)
 
 -- The car radio's muffle: the game sets this global RTPC only when the radio part switches on, from the player's distance to
 -- the car (0 = in the car). The guest's copy took it while away from the car and kept the outside sound in its seat (playtest
@@ -512,7 +525,7 @@ end
 
 LoopInGameThreadWithDelay(200, function()
     local m = mode()
-    if m == "standalone" or m == "none" then last, lastTrk, hostKey, lastGuests, playing = {}, nil, nil, 0, nil; return end
+    if m == "standalone" or m == "none" then holdSongFinished(nil, false); last, lastTrk, hostKey, lastGuests, playing = {}, nil, nil, 0, nil; return end
     local ok, err = pcall(tick)
     if not ok then log("PT|error radio tick %s", tostring(err)) end
 end)
