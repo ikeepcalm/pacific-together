@@ -215,6 +215,8 @@ local doorHold = 0 -- guest: until then its own door move (sent to the host) is 
 local entryDoor -- host: the door a guest opened last { part, at }; shut once they are seated (the game's entry does it itself)
 local doorHeld -- guest: the host's last state during the hold, applied when it ends (else a shut showed only 3 s later)
 local doorRest, doorSwung = {}, {} -- guest: part address -> the mesh's shut pose on its part; parts we posed open
+local doorTargets = {}
+RegisterLoadMapPreHook(function() doorTargets = {} end)
 
 -- host -------------------------------------------------------------------------------------------------------------------
 
@@ -1207,6 +1209,7 @@ local function applyState(data)
             end
             local want = swing[slot]
             if want then
+                if net.hostSupports("door-motion") then return end
                 if m:IsSimulatingPhysics(FName("None")) then m:SetSimulatePhysics(false) end
                 m:K2_SetWorldLocationAndRotation(kml():TransformLocation(ct, want[1]), kml():TransformRotation(ct, want[2]), false, {}, true)
                 doorSwung[key] = true
@@ -1514,6 +1517,40 @@ end)
 -- The loop read every door's physics 20 times a second; it now works while swingUntil is ahead (set by the door hooks and by
 -- a door bit change in the 4 Hz sample) and, in case a hook did not fire, once every 2 s.
 local swingFallbackAt = 0
+net.on("g.motion.doors", function(_, data)
+    if common.netMode() ~= "client" or not net.hostSupports("door-motion") then return end
+    local epoch, identity, rows = data:match("^([^\n]+)\n([^\n]+)\n(.*)$")
+    if epoch ~= net.worldToken() or identity ~= wheelHostKey then return end
+    local targets = {}
+    for row in rows:gmatch("[^\n]+") do
+        local f={};for v in row:gmatch("[^|]+") do f[#f+1]=v end
+        if #f~=7 then return end
+        for i=2,7 do local n=tonumber(f[i]);if not n or n~=n or math.abs(n)>1e7 then return end;f[i]=n end
+        targets[f[1]]={p=vec(f[2],f[3],f[4]),r={Pitch=f[5],Yaw=f[6],Roll=f[7]}}
+    end
+    local t=os.clock()
+    for slot, target in pairs(targets) do
+        local old=doorTargets[slot]
+        target.fromP,target.fromR,target.at=old and old.shownP or target.p,old and old.shownR or target.r,t
+    end
+    doorTargets=targets
+end)
+LoopInGameThreadWithDelay(16,function()
+    if common.netMode()~="client" or os.clock()<doorHold then return end
+    local car=theCar(false);if not car then return end
+    local ct=car:GetTransform()
+    for slot,part in pairs(doorsOf(car)) do
+        local m=doorTargets[slot]
+        if m and valid(part.MainMesh) then
+            local u=math.min(1,(os.clock()-m.at)/0.075)
+            m.shownP=kml():VLerp(m.fromP,m.p,u);m.shownR=kml():RLerp(m.fromR,m.r,u,true)
+            local mesh=part.MainMesh
+            mesh:SetSimulatePhysics(false)
+            mesh:K2_SetWorldLocationAndRotation(kml():TransformLocation(ct,m.shownP),kml():TransformRotation(ct,m.shownR),false,{},true)
+            doorSwung[part:GetAddress()]=true
+        end
+    end
+end)
 M.swingWork = 0 -- debug counter for scenarios: passes that read door physics
 LoopInGameThreadWithDelay(50, function()
     if os.clock() >= swingUntil then
@@ -1525,6 +1562,18 @@ LoopInGameThreadWithDelay(50, function()
         local car = theCar(true)
         if not car then return end
         M.swingWork = M.swingWork + 1
+        local rows,ct={},car:GetTransform()
+        for slot,d in pairs(doorsOf(car)) do
+            local mesh=d.MainMesh
+            if valid(mesh) and mesh:IsSimulatingPhysics(FName("None")) then
+                local p=kml():InverseTransformLocation(ct,mesh:K2_GetComponentLocation())
+                local r=kml():InverseTransformRotation(ct,mesh:K2_GetComponentRotation())
+                rows[#rows+1]=string.format("%s|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f",slot,p.X,p.Y,p.Z,r.Pitch,r.Yaw,r.Roll)
+            end
+        end
+        for _,pc in ipairs(net.guests()) do
+            if net.peerSupports(pc,"door-motion") then net.toGuest(pc,"g.motion.doors",net.worldToken().."\n"..car:GetFName():ToString().."\n"..table.concat(rows,"\n")) end
+        end
         for _, d in pairs(doorsOf(car)) do
             local m = valid(d) and d.MainMesh
             if m and m:IsSimulatingPhysics(FName("None")) then

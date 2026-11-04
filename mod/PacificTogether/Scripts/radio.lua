@@ -107,13 +107,16 @@ end
 -- built-in most of the time; live test 2026-11-01): one of the game's built-in tracks is lent instead. Pointed at a file, it plays
 -- that file through the media player and not its Wwise music (live test 2026-11-01, owner heard only the file). It gets its own
 -- music back as soon as the game moves on from it (guestFollow).
-local carrier
-local function toCustom(mm, url)
+local carrier, carrierText
+local hostTitle, hostArtist
+local function toCustom(mm, url, key)
     local cur = mm:CurrentRadioTrack()
     local pl = mm.DefaultRadioPlaylist
     local t = pl[1]
     if valid(cur) and t:GetAddress() == cur:GetAddress() then t = pl[2] end
     carrier = t
+    carrierText = {title=t.Title:ToString(),artist=t.Artist:ToString()}
+    t.Title=FText(hostTitle or key:sub(3));t.Artist=FText(hostArtist or "")
     t.ExternalUrl = url
     mm.RadioPlaylist = mm.DefaultRadioPlaylist
     local p = mm.RadioPlaylist
@@ -244,7 +247,9 @@ local function guestFollow(mm)
         local cur = mm:CurrentRadioTrack()
         if not (valid(cur) and cur:GetAddress() == carrier:GetAddress()) then
             pcall(function() carrier.ExternalUrl = "" end)
+            if carrierText then carrier.Title=FText(carrierText.title);carrier.Artist=FText(carrierText.artist) end
             carrier = nil
+            carrierText = nil
         end
     end
     if not isCustom(want) then
@@ -280,7 +285,7 @@ local function guestFollow(mm)
     local cur = mm:CurrentRadioTrack()
     if not valid(cur) or cur.ExternalUrl:ToString() == "" then
         -- a built-in track plays through Wwise and the media player stays silent under it: first onto a custom carrier
-        if now() - actAt > 2 then actAt = now(); toCustom(mm, url) end
+        if now() - actAt > 2 then actAt = now(); toCustom(mm, url, want) end
         return
     end
     -- a lent built-in still starts its own Wwise music next to the file (live test 2026-11-01, "1964" under the host's song):
@@ -291,6 +296,9 @@ local function guestFollow(mm)
     -- the carrier is the host's file from now on, so whatever the game reopens later (radio off and on, garage and car) is right too
     -- shortcut: the guest's library entry for the carrier file points at the host's file until the game makes it again
     if not sameUrl(cur.ExternalUrl:ToString(), url) then cur.ExternalUrl = url end
+    local title=hostTitle or want:sub(3)
+    if cur.Title:ToString()~=title then cur.Title=FText(title) end
+    if cur.Artist:ToString()~=(hostArtist or "") then cur.Artist=FText(hostArtist or "") end
     local mp = mm.ExternalMediaPlayer
     if restartNext or not sameUrl(mp:GetUrl():ToString(), url) then
         mp:OpenUrl(url)
@@ -330,7 +338,14 @@ local function sendState(s, mm, restartKey, all)
     for k, v in pairs(s) do if all or last[k] ~= v then t[k] = v end end
     for k, v in pairs(s) do last[k] = v end
     local k = restartKey or curKey(mm)
-    if k and not lacking(k) then t.trk = k; lastTrk = k end -- a custom file the guest lacks is never announced
+    if k and not lacking(k) then
+        t.trk = k; lastTrk = k
+        local track=mm:CurrentRadioTrack()
+        if valid(track) then
+            t.title=track.Title:ToString():gsub("%c"," "):sub(1,1024)
+            t.artist=track.Artist:ToString():gsub("%c"," "):sub(1,1024)
+        end
+    end -- a custom file the guest lacks is never announced
     if restartKey then t.r = 1 end
     if next(t) then
         net.toGuests("g.radio.s", pack(t))
@@ -385,6 +400,8 @@ net.on("g.radio.s", function(_, data)
     local s2 = radioState()
     for _, k in ipairs({ "gs", "cr", "vol" }) do if t[k] then last[k] = s2[k] end end
     if t.trk then
+        hostTitle=(t.title and t.title~="") and t.title or nil
+        hostArtist=t.artist
         if music.enabled then music.discard(t.trk) end
         if t.trk ~= hostKey or t.r == "1" then followAt, holdUntil = 0, 0 end -- a new track: at once, not after a guest skip's wait
         hostKey = t.trk

@@ -176,6 +176,7 @@ return function(T)
         add({ check = "host_drove", timeout = 1, cond = function() log("PT|info host drove %.0f uu", moved); return moved > 3000 end })
         add({ wait = 4 })
         -- C3/C4: fuel, battery, part health through the game's own setters
+        if os.getenv("PT_VARIANT")~="motion" then
         add({ run = function()
             local f = comp(manif(FUEL_SLOT), "BP_FuelableComponent.BP_FuelableComponent_C")
             f["Set Fuel"](f, FUEL)
@@ -211,6 +212,7 @@ return function(T)
         end })
         add({ check = "host_parts_back", timeout = 5, cond = function() return manif(GONE[1]) ~= nil and manif(GONE[2]) ~= nil end })
         add({ wait = 8 })
+        end
         add({ run = function() send("t.exit") end })
         add({ check = "host_guest_left_car", timeout = 30, cond = function()
             local g, car = S.guestChar(), L.car()
@@ -300,7 +302,7 @@ return function(T)
     end })
     add({ wait = 2 })
     add({ run = function()
-        if os.getenv("PT_VARIANT") == "nodoor" then T.intent("g.car.enter", "") return end
+        if os.getenv("PT_VARIANT") == "nodoor" or os.getenv("PT_VARIANT")=="motion" then T.intent("g.car.enter", "") return end
         L.car().SLOT_FrontLeftDoor:GetItemActor({}):StartEntry(false)
     end })
     add({ check = "guest_seated", timeout = 60, cond = function()
@@ -319,13 +321,13 @@ return function(T)
     add({ check = "guest_drive_started", timeout = 120, cond = function() return got("t.drive") ~= nil end })
     add({ run = function() met = { frames = 0, stalls = 0, maxJump = 0, dist = 0, camMax = 0, lags = {}, tilts = {}, swayMax = 0 }; L.measuring = true
         LoopInGameThreadWithDelay(1, function() if L.measuring then pcall(measure) end end) end })
-    add({ check = "guest_physical_proxy_active", timeout = T.MUTATE == "nophysicalcar" and 1 or 15, cond = function()
+    add({ check = "guest_chassis_not_simulating", timeout = 5, cond = function()
         local c = L.car()
-        return c and c.Chassis:IsSimulatingPhysics(FName("None")) and c.VehicleController:IsComponentTickEnabled()
+        return c and not c.Chassis:IsSimulatingPhysics(FName("None"))
     end })
-    add({ check = "guest_proxy_receives_controls", timeout = T.MUTATE == "nophysicalcar" and 1 or 15, cond = function()
+    add({ check = "guest_vehicle_controller_not_driving", timeout = 5, cond = function()
         local c = L.car()
-        return c and c.Chassis:IsSimulatingPhysics(FName("None")) and math.abs(c.VehicleController.ThrottleInput) > 0.1
+        return c and not c.VehicleController:IsComponentTickEnabled()
     end })
     add({ check = "guest_drive_stopped", timeout = DRIVE_S + 60, cond = function() return got("t.stop") ~= nil end })
     add({ run = function() L.measuring = false; measureMotion(nil, nil, true) end })
@@ -381,6 +383,7 @@ return function(T)
         return true
     end })
     -- C3/C4: the host's fuel, battery and part health, on the guest's car and dashboard values
+    if os.getenv("PT_VARIANT")~="motion" then
     add({ check = "guest_state_matches", timeout = 60, cond = function()
         local m = got("t.state")
         if not m then return false end
@@ -401,6 +404,7 @@ return function(T)
         return manif(GONE[1]) ~= nil and manif(GONE[2]) ~= nil
     end })
     -- leaving: the key (X) and this send the same intent
+    end
     add({ check = "guest_exit_asked", timeout = 60, cond = function() return got("t.exit") ~= nil end })
     add({ run = function() T.intent("g.car.exit", "") end })
     add({ check = "guest_left_car", timeout = 30, cond = function()

@@ -18,6 +18,10 @@ return function(T)
         end
     end
     local function cabinet(suffix) local s=spawner(suffix);if not s then return end; local o={};s:GetUpgradeActor(o);return o["Upgrade Actor"] end
+    local function lockerBox(suffix)
+        local boxes={};cabinet(suffix).BP_InventoryContainerComponent:GetContainers(boxes)
+        return boxes[1]:get()
+    end
     local function bodies(a,fn)
         for _,v in ipairs(a:K2_GetComponentsByClass(StaticFindObject("/Script/Engine.PrimitiveComponent"))) do fn(v:get()) end
     end
@@ -63,6 +67,19 @@ return function(T)
             end},
             {check="both_host_lockers_spawned",timeout=20,cond=function() return alive(cabinet("BackYard")) and alive(cabinet("Fence")) end},
             {check="both_guest_lockers_spawned",timeout=60,cond=report("lockers")},
+            {check="guest_baseline_applied_before_locker_transfer",timeout=180,cond=function()
+                local f=io.open("ue4ss/UE4SS.log","rb");if not f then return false end
+                local text=f:read("a");f:close();return text:find("PT|net baseline applied",1,true)~=nil
+            end},
+            {run=function()
+                local ids=assert(loadfile("ue4ss/Mods/PacificTogether/Scripts/ids.lua"))()
+                local arch=ids.archetype("/Game/Gameplay/Inventory/Items/Car/Wheels/Wheel_Spare_01/IA_Attach_Wheel_Spare")
+                local inst=StaticFindObject("/Script/PenDriverInventory.Default__InventoryBlueprintLibrary"):CreateItemInstance(T.world(),arch,0)
+                assert(lockerBox("BackYard"):AddItem(inst,true),"locker rejected wheel")
+                send("locker_item")
+            end},
+            {check="guest_locker_contents_received",timeout=30,cond=report("locker_item_ok")},
+            {check="guest_locker_removal_reaches_host",timeout=30,cond=function() return lockerBox("BackYard"):GetNumItems()==0 end},
             {run=function()
                 local c=car();c:ManualSetIgnition_NoAnim(2);c:ManualActivate_Gearbox(0,true);c.VehicleController:SetParkingBrakeActive(false)
                 drive=LoopInGameThreadWithDelay(16,function() c:AccelerateBrake(0.2);c:SteerLeftRight(0.7) end)
@@ -139,6 +156,10 @@ return function(T)
     local function tick()
         poll()
         if alive(cabinet("BackYard")) and alive(cabinet("Fence")) then send("lockers") end
+        if got["t.motion.locker_item"] and not sent.locker_item_ok and alive(cabinet("BackYard")) then
+            local c=lockerBox("BackYard")
+            if c:GetNumItems()>0 then send("locker_item_ok");c:RemoveAllItems() end
+        end
         if got["t.motion.wheels"] then
             local r=K:InverseTransformRotation(car():GetTransform(),wheelMesh():K2_GetComponentRotation())
             if wheelStart then

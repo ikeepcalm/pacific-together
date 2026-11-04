@@ -296,6 +296,28 @@ local function carBoxes()
     return r
 end
 
+local function partLockers()
+    local boxes={}
+    for _,s in ipairs(FindAllOf("BP_GarageInstallation_Spawner_C") or {}) do
+        if alive(s) and not s:GetFullName():find("/Engine/Transient",1,true) then
+            local name=s:GetFName():ToString()
+            if name:find("^BP_GarageStation_PartStorage_") then
+                local o={};s:GetUpgradeActor(o);local actor=o["Upgrade Actor"]
+                if alive(actor) then
+                    local c=actor.BP_InventoryContainerComponent
+                    if alive(c) then
+                        local containers={};c:GetContainers(containers)
+                        for i,v in ipairs(containers) do
+                            local box=v.get and v:get() or v
+                            if alive(box) then boxes["PartsLocker."..name.."."..i]=box end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return boxes
+end
 local function register(id, kind, actor, invName)
     local e = { id = id, kind = kind, actor = actor, lease = common.lease(actor), name = actor and actor:GetFullName(), addr = actor and actor:GetAddress() }
     if kind == "L" then e.get = function() return entityAlive(e) and e.actor.InventoryContainer or nil end
@@ -308,6 +330,8 @@ local function register(id, kind, actor, invName)
             pcall(function() m.Inventories_Garage:ForEach(function(k, v) if k:get().TagName:ToString() == invName then e.cache = v:get(); e.cacheLease = common.lease(e.cache) end end) end)
             return alive(e.cache) and e.cache or nil
         end
+    elseif kind == "I" and invName:find("^PartsLocker%.") then
+        e.get=function() return partLockers()[invName] end
     elseif kind == "I" and invName:find("^Car%.") then
         e.get = function()
             if common.resolve(e.cacheLease) then return e.cache end
@@ -440,6 +464,7 @@ local function scanHost()
         end
     end
     local names = { table.unpack(INV) }
+    for name in pairs(partLockers()) do names[#names+1]=name end
     local m = inventoryManager()
     if m then
         pcall(function()

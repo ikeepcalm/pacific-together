@@ -27,6 +27,7 @@ return function(T)
             local f=assert(io.open("ue4ss/pt-radio-test.wav","wb"))
             f:write("RIFF",string.pack("<I4",36+#audio),"WAVEfmt ",string.pack("<I4I2I2I4I4I2I2",16,1,1,8000,8000,1,8),"data",string.pack("<I4",#audio),audio);f:close()
             track=StaticConstructObject(StaticFindObject("/Script/PenDriverPro.MusicTrack"),m)
+            track.Title=FText("PT shared test");track.Artist=FText("PT fixture")
             track.ExternalUrl="file://D:/PTLanes/vehicle-proxy/client1/PenDriverPro/Binaries/Win64/ue4ss/pt-radio-test.wav"
             m.DefaultRadioPlaylist[1]=track;m.RadioPlaylist=m.DefaultRadioPlaylist
             for i=1,m.RadioPlaylist:GetArrayNum()-1 do m.RadioPlaylist[i]=track end
@@ -46,7 +47,9 @@ return function(T)
     add({check="guest_playing_without_restart_loop",timeout=3,cond=function()
         local n=count("PT|radio opened L:pt-radio-test.wav");local p=mm().ExternalMediaPlayer
         T.log("PT|info shared radio opened=%d playing=%s url=%s",n,tostring(p:IsPlaying()),p:GetUrl():ToString())
+        local track=mm():CurrentRadioTrack()
         return n<=2 and p:IsPlaying() and p:GetUrl():ToString():find("pt_music",1,true)~=nil
+            and track:IsValid() and track.Title:ToString()=="PT shared test" and track.Artist:ToString()=="PT fixture"
     end})
     add({run=function() send("stable") end})
     add({check="host_done",timeout=60,cond=function() return has("done") end})

@@ -19,6 +19,14 @@ return function(T)
         end
     end
     local function opened() local o={};T.first("BP_CarManager_C"):GetDoorState(4,o);return o.Open end
+    local function trunk()
+        local car=T.first("BP_CarManager_C").NewCarActor
+        for _,a in ipairs(FindAllOf("BP_CarPart_Door_Base_C") or {}) do
+            if alive(a) and alive(a:GetAttachParentActor()) and a:GetAttachParentActor():GetAddress()==car:GetAddress()
+                and a.RootComponent.AttachParent:GetFName():ToString()=="Slot_Trunk" then return a end
+        end
+    end
+    local function trunkOpened() local o={};T.first("BP_CarManager_C"):GetDoorState(5,o);return o.Open end
     local function findNear(p)
         for _,a in ipairs(FindAllOf("BP_WorldItem_C") or {}) do
             if alive(a) and alive(a.Instance) and ids.path(a.Instance.Archetype)==path then local q=a:K2_GetActorLocation()
@@ -36,10 +44,22 @@ return function(T)
             local f=io.open("ue4ss/UE4SS.log","rb");if not f then return false end
             local s=f:read("a");f:close();return s:find("PT|net baseline applied",1,true)~=nil
         end})
+        add({run=function() send("watch") end})
+        add({wait=1})
+        add({run=function() hood():AttemptOpen() end})
+        add({wait=3})
+        add({run=function() send("watch_end") end})
+        add({check="host_hood_swing_smooth_on_guest",timeout=15,cond=function() return has("smooth") end})
+        add({run=function() hood():AttemptShut() end})
+        add({wait=3})
         add({run=function() send("open") end})
         add({check="guest_opens_host_hood",timeout=30,cond=opened})
         add({run=function() send("close") end})
         add({check="guest_closes_host_hood",timeout=30,cond=function() return not opened() end})
+        add({run=function() send("trunk_open") end})
+        add({check="guest_opens_host_trunk",timeout=30,cond=trunkOpened})
+        add({run=function() send("trunk_close") end})
+        add({check="guest_closes_host_trunk",timeout=30,cond=function() return not trunkOpened() end})
         add({run=function()
             local p=L.guestChar():K2_GetActorLocation();pos={X=p.X+120,Y=p.Y,Z=p.Z+100}
             item=ids.system():SpawnItemActor(T.world(),{Rotation={X=0,Y=0,Z=0,W=1},Translation=pos,Scale3D={X=1,Y=1,Z=1}},ids.archetype(path),0,0)
@@ -51,13 +71,31 @@ return function(T)
         add({check="guest_drop_preserves_host_durability",timeout=60,cond=function() poll();return got["t.itemhood.drop"] and damaged(findNear(pos)) end})
         add({run=function() send("done") end});add({wait=2});return steps
     end
-    local item,pos
+    local item,pos,observer,lastAngle,samples,reported
+    samples=0
     add(T.onMap("RB_MainMenu",90))
     add({check="guest_in_garage",timeout=240,cond=function() return T.netMode()=="client" and T.map()=="RB_Garage" end})
+    add({run=function()
+        observer=LoopInGameThreadWithDelay(16,function()
+            poll()
+            if got["t.itemhood.watch"] and not got["t.itemhood.watch_end"] and alive(hood()) then
+                local r=hood().MainMesh:K2_GetComponentRotation()
+                if lastAngle and math.abs((r.Pitch-lastAngle+180)%360-180)>.1 then samples=samples+1 end
+                lastAngle=r.Pitch
+            elseif got["t.itemhood.watch_end"] and not reported then
+                reported=true;T.log("PT|info guest hood moving samples=%d",samples)
+                if samples>=5 then send("smooth") end
+            end
+        end)
+    end})
     add({check="open_requested",timeout=180,cond=function() return has("open") and alive(hood()) end})
     add({run=function() hood():AttemptOpen() end})
     add({check="close_requested",timeout=60,cond=function() return has("close") end})
     add({run=function() hood():AttemptShut() end})
+    add({check="trunk_open_requested",timeout=60,cond=function() return has("trunk_open") end})
+    add({run=function() assert(alive(trunk()));trunk():AttemptOpen() end})
+    add({check="trunk_close_requested",timeout=60,cond=function() return has("trunk_close") end})
+    add({run=function() trunk():AttemptShut() end})
     add({check="damaged_item_arrived",timeout=90,cond=function()
         if not has("item") then return false end
         if not pos then local x,y,z=got["t.itemhood.item"]:match("([^,]+),([^,]+),([^,]+)");pos={X=tonumber(x),Y=tonumber(y),Z=tonumber(z)} end
@@ -77,5 +115,6 @@ return function(T)
         local a,b={},{};m:PlayerDropHandItem(a,b);assert(a["Drop Success"] and damaged(b["World Actor"]));send("drop")
     end})
     add({check="host_confirmed",timeout=100,cond=function() return has("done") end})
+    add({run=function() CancelDelayedAction(observer) end})
     return steps
 end
