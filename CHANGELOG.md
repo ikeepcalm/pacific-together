@@ -5,6 +5,8 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+- Broken host foliage is removed on the guest even when represented by a mesh instance instead of a separate shrub actor.
+
 ### Fixed in the vehicle experiment
 
 - Guest hood open/close follows the host using the panel's own interaction path.
