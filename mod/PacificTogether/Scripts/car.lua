@@ -1289,7 +1289,7 @@ LoopInGameThreadWithDelay(16, function()
             end
         end
         local radio = carRadio(car)
-        controlHighlights.radio = radio and radio.Highlight1
+        controlHighlights.radio = radio and radio.Highlight1 or nil -- a car without a radio (DLC zone, 2026-11-04): not false
         for what, h in pairs(controlHighlights) do
             if valid(h) then
                 local saved = {}
