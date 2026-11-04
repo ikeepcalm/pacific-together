@@ -891,7 +891,7 @@ local function follow(car)
     local name = car:GetFullName()
     log("PT|car follow %s", name)
     followed = name
-    local physical, previousAt = false, os.clock()
+    local physical, previousAt, stoppedAt = false, os.clock(), nil
     local function step()
         local ok, err = pcall(function()
             local t, rm = os.clock(), car.ReplicatedMovement -- os.clock: wall time on Windows, no engine call each frame
@@ -906,6 +906,16 @@ local function follow(car)
             if physical then
                 local vc = car.VehicleController
                 vc.ThrottleInput, vc.BrakeInput, vc.SteerInput = proxyInput.th, proxyInput.brake, proxyInput.steer
+                local v = rm.LinearVelocity
+                if math.abs(proxyInput.th) < 0.01 and v.X^2 + v.Y^2 + v.Z^2 < 25 then
+                    stoppedAt = stoppedAt or t
+                    if t - stoppedAt >= 1 and os.getenv("PT_MUTATE") ~= "nostationaryguard" then
+                        car.Chassis:SetPhysicsLinearVelocity(vec(0, 0, 0), false, NONE)
+                        car.Chassis:SetPhysicsAngularVelocityInDegrees(vec(0, 0, 0), false, NONE)
+                    end
+                else stoppedAt = nil end
+            else
+                stoppedAt = nil
             end
             local p = rm.Location
             local fresh = not last or p.X ~= last.x or p.Y ~= last.y or p.Z ~= last.z

@@ -105,7 +105,7 @@ return function(T)
         local function add(s) steps[#steps + 1] = s end
         local guestPC = function() return S.remotePCs()[1] end
         local function send(kind, data) PTNative_MsgToGuest(guestPC():GetAddress(), kind, data or "") end
-        local moved, start, saved, measureMotion = 0, nil, {}, motionStats()
+        local moved, start, saved, measureMotion, stoppedAt = 0, nil, {}, motionStats(), nil
         for _, s in ipairs(T.loadFixture("garage")) do add(s) end
         add({ check = "host_listen_garage", timeout = 30, cond = function() return T.netMode() == "listen" and T.listening() end })
         add({ check = "host_guest_in_garage", timeout = 240, cond = function() return S.guestChar() ~= nil end })
@@ -151,13 +151,28 @@ return function(T)
             end)
         end })
         add({ wait = DRIVE_S })
-        add({ run = function() L.driving = false; measureMotion(nil, nil, true); send("t.stop") end })
-        add({ wait = 5 })
         add({ run = function()
-            local p = L.car():K2_GetActorLocation()
-            send("t.settled", string.format("%.2f,%.2f,%.2f", p.X, p.Y, p.Z))
+            L.driving = false; measureMotion(nil, nil, true); send("t.stop")
+            local car = L.car()
+            car:AccelerateBrake(0); car:DriveControl(0)
+            car.VehicleController.ThrottleInput = 0
+            car:ManualActivate_Gearbox(1, true)
+            car.VehicleController:SetParkingBrakeActive(true)
+        end })
+        add({ check = "host_car_stopped", timeout = 30, cond = function()
+            local v = L.car():GetVelocity()
+            local speed = math.sqrt(v.X^2 + v.Y^2 + v.Z^2)
+            log("PT|info host stop speed %.1f uu/s", speed)
+            if speed >= 5 then stoppedAt = nil; return false end
+            stoppedAt = stoppedAt or L.now()
+            return L.now() - stoppedAt >= 1
+        end })
+        add({ run = function()
+            local p, r = L.car():K2_GetActorLocation(), L.car():K2_GetActorRotation()
+            send("t.settled", string.format("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f", p.X, p.Y, p.Z, r.Pitch, r.Yaw, r.Roll))
             L.car():K2_SetActorLocationAndRotation(L.car():K2_GetActorLocation(), L.car():K2_GetActorRotation(), false, {}, true)
         end })
+        add({ check = "host_guest_settled", timeout = 40, cond = function() return got("t.settled.ok") ~= nil end })
         add({ check = "host_drove", timeout = 1, cond = function() log("PT|info host drove %.0f uu", moved); return moved > 3000 end })
         add({ wait = 4 })
         -- C3/C4: fuel, battery, part health through the game's own setters
@@ -210,6 +225,7 @@ return function(T)
     local function add(s) steps[#steps + 1] = s end
     local KML = StaticFindObject("/Script/Engine.Default__KismetMathLibrary")
     local met = { frames = 0, stalls = 0, maxJump = 0, dist = 0, camMax = 0, lags = {}, swayMax = 0 }
+    local guestSettledAt
     local measureMotion = motionStats()
     local function toHost(kind, data) PTNative_MsgToHost(T.localPC():GetAddress(), kind, data or "") end
     local function measure()
@@ -220,6 +236,11 @@ return function(T)
         measureMotion(p, t)
         local rm = car.ReplicatedMovement.LinearVelocity
         local speed = math.sqrt(rm.X ^ 2 + rm.Y ^ 2)
+        if speed > 150 then
+            local a, b = car:K2_GetActorRotation(), car.ReplicatedMovement.Rotation
+            local function diff(x, y) return math.abs((x - y + 180) % 360 - 180) end
+            met.tilts[#met.tilts + 1] = math.max(diff(a.Pitch, b.Pitch), diff(a.Roll, b.Roll))
+        end
         local rp = car.ReplicatedMovement.Location
         if not met.raw or rp.X ~= met.raw.X or rp.Y ~= met.raw.Y or rp.Z ~= met.raw.Z then
             if met.rawAt and speed > 150 then
@@ -296,7 +317,7 @@ return function(T)
     end })
     -- the host drives
     add({ check = "guest_drive_started", timeout = 120, cond = function() return got("t.drive") ~= nil end })
-    add({ run = function() met = { frames = 0, stalls = 0, maxJump = 0, dist = 0, camMax = 0, lags = {}, swayMax = 0 }; L.measuring = true
+    add({ run = function() met = { frames = 0, stalls = 0, maxJump = 0, dist = 0, camMax = 0, lags = {}, tilts = {}, swayMax = 0 }; L.measuring = true
         LoopInGameThreadWithDelay(1, function() if L.measuring then pcall(measure) end end) end })
     add({ check = "guest_physical_proxy_active", timeout = T.MUTATE == "nophysicalcar" and 1 or 15, cond = function()
         local c = L.car()
@@ -309,8 +330,13 @@ return function(T)
     add({ check = "guest_drive_stopped", timeout = DRIVE_S + 60, cond = function() return got("t.stop") ~= nil end })
     add({ run = function() L.measuring = false; measureMotion(nil, nil, true) end })
     add({ check = "guest_car_follows", timeout = 1, cond = function()
+        table.sort(met.tilts)
+        log("PT|info guest tilt difference p95=%.1f deg samples=%d", #met.tilts > 0 and met.tilts[math.ceil(#met.tilts * 0.95)] or -1, #met.tilts)
         log("PT|info follow frames=%d dist=%.0f maxJump=%.1f stalls=%d maxRawGap=%.3fs maxSampleGap=%.3fs excludedRawJumps=%d", met.frames, met.dist, met.maxJump, met.stalls, met.rawGap or 0, met.sampleGap or 0, met.rawJumps or 0)
         return met.dist > 3000 and met.maxJump < 200 and met.stalls <= met.frames * 0.03
+    end })
+    add({ check = "guest_tilt_tracks_host", timeout = 1, cond = function()
+        return #met.tilts >= 30 and met.tilts[math.ceil(#met.tilts * 0.95)] < 25
     end })
     add({ check = "guest_camera_rides", timeout = 1, cond = function()
         log("PT|info camera deviation in the car %.1f uu (against the previous frame's car %.1f uu)", met.camMax, met.camPrevMax or -1)
@@ -330,10 +356,29 @@ return function(T)
     add({ check = "guest_car_settled", timeout = 20, cond = function()
         local m = got("t.settled")
         if not m then return false end
-        local x, y, z = m.data:match("([^,]+),([^,]+),([^,]+)")
-        local d = L.d(L.car():K2_GetActorLocation(), L.v(tonumber(x), tonumber(y), tonumber(z)))
-        log("PT|info settled distance %.1f", d)
-        return d < 30
+        local x, y, z = m.data:match("([^,]+),([^,]+),([^,]+),")
+        local car = L.car()
+        local d = L.d(car:K2_GetActorLocation(), L.v(tonumber(x), tonumber(y), tonumber(z)))
+        local v = car:GetVelocity()
+        local speed = math.sqrt(v.X^2 + v.Y^2 + v.Z^2)
+        log("PT|info settled distance %.1f speed %.1f", d, speed)
+        if d >= 30 or speed >= 20 then guestSettledAt = nil; return false end
+        guestSettledAt = guestSettledAt or L.now()
+        if L.now() - guestSettledAt < 1 then return false end
+        return true
+    end })
+    add({ check = "guest_car_orientation", timeout = 10, cond = function()
+        local m = got("t.settled")
+        if not m then return false end
+        local pitch, yaw, roll = m.data:match("^[^,]+,[^,]+,[^,]+,([^,]+),([^,]+),([^,]+)$")
+        if not pitch then return false end
+        local r = L.car():K2_GetActorRotation()
+        local function angle(a, b) return math.abs((a - tonumber(b) + 180) % 360 - 180) end
+        local p, y, z = angle(r.Pitch, pitch), angle(r.Yaw, yaw), angle(r.Roll, roll)
+        log("PT|info stopped car angle error pitch=%.1f yaw=%.1f roll=%.1f", p, y, z)
+        if math.max(p, y, z) >= 5 then return false end
+        toHost("t.settled.ok")
+        return true
     end })
     -- C3/C4: the host's fuel, battery and part health, on the guest's car and dashboard values
     add({ check = "guest_state_matches", timeout = 60, cond = function()
