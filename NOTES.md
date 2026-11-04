@@ -1183,3 +1183,14 @@ Logs: `local/playtest-20261104-live1` (first session; the second one is in the t
 - Intro movies: install.ps1 moves Content\Movies\Intro_Segment_* (MoviePlayerSettings.StartupMovies) into
   Movies\PacificTogether-skipped, uninstall moves them back. Test copy client1 only: owner saw the left window start faster. Both logs
   still show 15 s from movie player start to the main menu. The install.ps1 code itself has not run yet (I ran the same lines by hand).
+- Guest ARC map icons (owner, same session): the guest showed every junction open and doubled building icons. Observed: each
+  junction has Icon_Entrance/Exit/Closed/DeadEndWarn at one spot and the host shows one (guest 15 visible, host 5); the host's
+  building icons are mostly runtime components (MapIconComponent_<n>) on its own clump buildings, which the guest does not have;
+  the gateway's PulseIcon/Range icons stay off on the guest's portal copies. Change: mapmark.lua, the host sends every visible
+  icon (base + each layer: texture, materials, place, size, unit, zorder, color, rotation, fog), skipping players/car/pin and
+  /Engine/Transient orphans (at 0,0, not drawn on the host); the guest hides all of its own and draws the list on components
+  of its own on BP_GobblerMapBounds (`PT|mapmark guest map draws N host icons`). world.lua: the guest removes its own
+  GenericObjective markers (a live one re-shows its icon every tick). Owner: "fully identical now".
+  Crash on the way: host access violation in ActorComponent:GetOwner on map icons (some owners freed); the code no longer calls it.
+  Layered icons: base and layer both draw (a junction: grey square + black glyph at 0.67); a copy without layers drew a house
+  black on black until the layers were sent as their own copies.

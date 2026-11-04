@@ -42,8 +42,7 @@ local PROP = "BP_Resource_Narrative_Q01_RadioBitsGrabbable_C" -- story.lua repli
 -- names of the host's portals and story props: the guest's level-placed copy of one is what the host's channel binds to
 -- (destroyed, the bunch fails: "SerializeNewActor failed to find/spawn actor")
 local keep = {}
-local miss = {} -- objective marker name -> states in a row the host did not list it
-RegisterLoadMapPostHook(function() keep, miss = {}, {} end) -- placed names repeat across maps (BP_LevelTransition_ExitPortal_C_1)
+RegisterLoadMapPostHook(function() keep = {} end) -- placed names repeat across maps (BP_LevelTransition_ExitPortal_C_1)
 local ID = 8
 local INSTAB = { TagName = FName("WB.WorldState.Instability.Current") }
 
@@ -99,7 +98,7 @@ local function snapshot()
         add("gate", (g and g:IsValid()) and common.portalKey(g) or "none")
     end
     local names = {}
-    for _, c in ipairs({ "BP_LevelTransition_ExitPortal_C", PROP, OBJMARK }) do each(c, function(o) names[#names + 1] = short(o) end) end
+    for _, c in ipairs({ "BP_LevelTransition_ExitPortal_C", PROP }) do each(c, function(o) names[#names + 1] = short(o) end) end
     add("keep", table.concat(names, ","))
     local st = firstLive("BP_ZoneStorm_Base_C")
     if st then add("wall", table.concat({ f(st.Vol_Rad_Main), f(st.Vol_Rad_Weak), tostring(st.Collapsed) }, "|")) end
@@ -349,14 +348,9 @@ local function cleanGuest()
             o:K2_DestroyActor()
         end)
     end
-    -- map objective markers the host's game removed (disabled ones destroy themselves at BeginPlay there; the guest's copy of an
-    -- old mission's marker stayed on its ARC map: Q03 A "Broadcast" next to B's tower, live 2026-11-04)
-    -- missing from 10 states in a row: the host's sublevels stream in at their own pace after a load
-    each(OBJMARK, function(o)
-        local n = short(o)
-        miss[n] = not keep[n] and (miss[n] or 0) + 1 or 0
-        if miss[n] >= 10 then o:K2_DestroyActor(); miss[n] = nil; log("PT|world guest objective marker %s removed (not on the host)", n) end
-    end)
+    -- the guest's own map objective markers: its copy of an old mission's marker stayed on its map (live 2026-11-04) and a live
+    -- one turns its icon back on every tick; the guest's map draws the host's icons instead (mapmark.lua)
+    each(OBJMARK, function(o) o:K2_DestroyActor(); log("PT|world guest objective marker %s removed (the map shows the host's)", short(o)) end)
     -- G3: story drivers of the guest's own game
     each("NarrativeBeatActor", function(o) if o.Role ~= 1 then o:K2_DestroyActor() end end)
 end
