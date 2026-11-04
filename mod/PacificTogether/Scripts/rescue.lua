@@ -146,9 +146,27 @@ local function storyAsleep(q)
     end
     return dormant
 end
+local wokeAt -- os.clock() of the last wake on the host
+-- a woken mission completes on its first tick but the manager never moves on (Q03 A2 stayed the active mission, no Oppy line and
+-- no waypoint; live 2026-11-04): for 10 s after a wake, advance each active objective whose mission is complete
+local function advanceWoken()
+    local q = FindFirstOf("BP_QuestManager_C")
+    if not valid(q) then return end
+    for i = 1, q.ActiveObjectives:GetArrayNum() do
+        local s = q.ActiveObjectives[i]
+        local ms = s.ActiveMissionState
+        if valid(s.Objective) and valid(ms) and valid(ms.Data) and ms:IsCompleted() then
+            local was = path(ms.Data)
+            q:AdvanceObjective(s.Objective, nil)
+            log("PT|rescue host moves %s on from the woken %s", path(s.Objective), was)
+            return -- the array changed
+        end
+    end
+end
 local function wakeStory()
     local sw, gi = dormancySwitch()
     if not sw then return false end
+    wokeAt = os.clock()
     for i = 1, sw.States:GetArrayNum() do gi:SetGlobalSwitch(sw, sw.States[i], 0) end -- 0 = DONTCARE: the chapter lets go
     log("PT|rescue host wakes the main story: dormancy switch now %s", tostring(gi:GetGlobalSwitch(sw)))
     return not gi:GetGlobalSwitch(sw)
@@ -337,6 +355,10 @@ LoopInGameThreadWithDelay(100, function()
         refreshAt = os.clock()
         local ok, err = pcall(function() askTasks(); if not safety.guest() then show() end end)
         if not ok then log("PT|error rescue refresh %s", tostring(err)) end
+    end
+    if wokeAt and os.clock() - wokeAt < 10 and M.enabled and safety.active() then
+        local ok, err = pcall(advanceWoken)
+        if not ok then log("PT|error rescue advance %s", tostring(err)) end
     end
     if #wanted == 0 then return end
     local list = wanted

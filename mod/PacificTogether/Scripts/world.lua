@@ -42,7 +42,8 @@ local PROP = "BP_Resource_Narrative_Q01_RadioBitsGrabbable_C" -- story.lua repli
 -- names of the host's portals and story props: the guest's level-placed copy of one is what the host's channel binds to
 -- (destroyed, the bunch fails: "SerializeNewActor failed to find/spawn actor")
 local keep = {}
-RegisterLoadMapPostHook(function() keep = {} end) -- placed names repeat across maps (BP_LevelTransition_ExitPortal_C_1)
+local miss = {} -- objective marker name -> states in a row the host did not list it
+RegisterLoadMapPostHook(function() keep, miss = {}, {} end) -- placed names repeat across maps (BP_LevelTransition_ExitPortal_C_1)
 local ID = 8
 local INSTAB = { TagName = FName("WB.WorldState.Instability.Current") }
 
@@ -63,6 +64,7 @@ local function replicate()
     end
 end
 
+local OBJMARK = "BP_ScriptKit_GobblerMap_GenericObjective_C"
 local function f(v) return string.format("%.4f", v) end
 
 local function snapshot()
@@ -75,6 +77,7 @@ local function snapshot()
         add("tod", f(r["Returned Time Of Day"] or 0))
         local p = tod["Target TOD Preset"]
         add("preset", (p and p:IsValid()) and p:GetFullName():gsub("^%S+ ", "") or "")
+        add("north", f(tod["Current North As Rotator"].Yaw))
         add("cur", table.concat({ f(tod.TOD_Override_Rain_Current), f(tod.TOD_Override_Fog_Current), f(tod.TOD_Override_Wind_Current),
             f(tod.TOD_Override_Darkness_Current), f(tod["TOD Override Zone Storm Current"]), f(tod["TOD Override Acid Current"]), f(tod.TOD_Override_SpeedMult) }, "|"))
         local a = tod.TargetWeatherOverrideArray
@@ -96,7 +99,7 @@ local function snapshot()
         add("gate", (g and g:IsValid()) and common.portalKey(g) or "none")
     end
     local names = {}
-    for _, c in ipairs({ "BP_LevelTransition_ExitPortal_C", PROP }) do each(c, function(o) names[#names + 1] = short(o) end) end
+    for _, c in ipairs({ "BP_LevelTransition_ExitPortal_C", PROP, OBJMARK }) do each(c, function(o) names[#names + 1] = short(o) end) end
     add("keep", table.concat(names, ","))
     local st = firstLive("BP_ZoneStorm_Base_C")
     if st then add("wall", table.concat({ f(st.Vol_Rad_Main), f(st.Vol_Rad_Weak), tostring(st.Collapsed) }, "|")) end
@@ -233,6 +236,15 @@ end
 local function applyTime(s)
     local tod = first("BP_ToDManager_C")
     if not tod then return end
+    -- each side rolls its own random north per map (RandomizeNorth): the guest's ARC map was turned 90 degrees (live 2026-11-04)
+    local n = tonumber(s.north)
+    if n and math.abs((tod["Current North As Rotator"].Yaw - n + 180) % 360 - 180) > 0.5 then
+        local y = math.rad(n)
+        tod:SetTrueNorth({ X = math.cos(y), Y = math.sin(y), Z = 0 }, { Pitch = 0, Yaw = n, Roll = 0 })
+        local b = firstLive("BP_GobblerMapBounds_C")
+        if b then b["Capture Configure"](b, true) end -- turns the bounds and renders the map picture again
+        log("PT|world guest north %.1f (map %s)", n, b and "turned" or "not loaded")
+    end
     if s.tod then
         local r = {}
         tod["Get Current Time Of Day"](tod, r)
@@ -337,6 +349,14 @@ local function cleanGuest()
             o:K2_DestroyActor()
         end)
     end
+    -- map objective markers the host's game removed (disabled ones destroy themselves at BeginPlay there; the guest's copy of an
+    -- old mission's marker stayed on its ARC map: Q03 A "Broadcast" next to B's tower, live 2026-11-04)
+    -- missing from 10 states in a row: the host's sublevels stream in at their own pace after a load
+    each(OBJMARK, function(o)
+        local n = short(o)
+        miss[n] = not keep[n] and (miss[n] or 0) + 1 or 0
+        if miss[n] >= 10 then o:K2_DestroyActor(); miss[n] = nil; log("PT|world guest objective marker %s removed (not on the host)", n) end
+    end)
     -- G3: story drivers of the guest's own game
     each("NarrativeBeatActor", function(o) if o.Role ~= 1 then o:K2_DestroyActor() end end)
 end

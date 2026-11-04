@@ -32,7 +32,13 @@ if (-not (Test-Path $exe)) { throw "not a Pacific Drive folder: $GameDir" }
 if (Get-Process PenDriverPro* -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$GameDir*" }) { throw "close Pacific Drive first" }
 Write-Host "Game: $GameDir"
 
+# the startup movies (Ironwood, Kepler, Unreal, Wwise, disclaimer) play for a while at every start. The engine plays only the ones
+# it finds in Content\Movies itself (MoviePlayerSettings.StartupMovies, matched by name), so they wait in a subfolder while the mod is in
+$movies = Join-Path $GameDir "PenDriverPro\Content\Movies"
+$skipped = Join-Path $movies "PacificTogether-skipped"
+
 if ($Uninstall) {
+    if (Test-Path $skipped) { Move-Item (Join-Path $skipped "*") $movies -Force; Remove-Item $skipped -Force }
     Remove-Item (Join-Path $bin "dwmapi.dll") -Force -ErrorAction SilentlyContinue
     Remove-Item (Join-Path $bin "steam_appid.txt") -Force -ErrorAction SilentlyContinue
     Remove-Item (Join-Path $bin "ue4ss") -Recurse -Force -ErrorAction SilentlyContinue
@@ -57,6 +63,10 @@ if ($installed -ne (Get-Content (Join-Path $PSScriptRoot "game\$stamp"))) {
     # older builds kept main.dll in the Lua mod's folder; left there it would load twice
     Remove-Item (Join-Path $bin "ue4ss\Mods\PacificTogether\dlls") -Recurse -Force -ErrorAction SilentlyContinue
     Copy-Item (Join-Path $PSScriptRoot "game\*") $bin -Recurse -Force
+}
+if (Test-Path $movies) {
+    $intro = Get-ChildItem $movies -File -Filter "Intro_Segment_*"
+    if ($intro) { New-Item -ItemType Directory $skipped -Force | Out-Null; $intro | Move-Item -Destination $skipped -Force; Write-Host "Intro movies skipped." }
 }
 # lets the exe start directly (launcher, shortcut) instead of restarting itself through Steam, as in the test copies
 [IO.File]::WriteAllText((Join-Path $bin "steam_appid.txt"), "1458140")

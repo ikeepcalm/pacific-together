@@ -1161,3 +1161,25 @@ Fork commit 2c7b1d3 (Everelsu, "Protocol 6 motion and heap integration", 49 file
 from g.car.s, which the host sends only with a car, so with no car every protected guest action is dropped for the session.
 Also: loot.lua `known()` address reuse can wipe the new byName entry (duplicates); MULTIVOID-LICENSE.txt referenced but missing;
 needs a DLL rebuild; its validation runs are on the contributor's machine only.
+
+## 2026-11-04: live loop on the 2026-11-03 fixes (902f0ae), fixture pt11-q03, two rendered clients
+
+Logs: `local/playtest-20261104-live1` (first session; the second one is in the test copies).
+- Cabin radio (carfeel guestCabin): owner heard it right as the guest in the seat. Confirmed by hand.
+- Wake the main story: the switch went off, but QD_Q03_Mission_A2 stayed the active mission with IsCompleted()=true (its one task
+  done, ActiveTime 0.0187, never advanced): no new task, no waypoint. A live `AdvanceObjective(QD_Q03_Objective, nil)` started
+  Mission B ("Locate stabilizer records"). Change: rescue.lua, for 10 s after a wake the host advances each active objective whose
+  mission is complete (`PT|rescue host moves ... on from the woken ...`). Owner, second session: F9 wake -> task and green marker
+  appeared by themselves; still on B afterwards (no double advance).
+- Oppy is silent after the wake. Atlas: BP_QuestDirector MissionBind_QD_Q03_Mission_A2_Finished waits for the player in the car
+  (OnPlayerStartEnterCar), DelayBetweenMissions, then dialogue. Whether it ran: unknown (Lua probes on it and on AdvanceObjective
+  printed nothing, not even for the rescue's own call, so the probe itself is suspect). Open.
+- Extra green waypoint on the guest: BP_ScriptKit_GobblerMap_GenericObjective_C actors with Enabled=false destroy themselves at
+  BeginPlay on the host; the guest kept 5 of them, one visible (QD_Q03_Mission_A.Broadcast). Change: world.lua lists them in "keep";
+  the guest removes a marker the host has not listed in 10 states in a row. Seen: guest removed all 5 15 s after the join.
+- Map turned 90 degrees on the guest: BP_ToDManager RandomizeNorth picks a north per side (host 270, guest 0); BP_GobblerMapBounds
+  UpdateRotation turns the map by it. Change: world.lua sends `north`; the guest calls SetTrueNorth and the bounds' Capture Configure
+  (Recapture) to render the map again. Owner: guest map wrong for 5-10 s after the join, then matches the host.
+- Intro movies: install.ps1 moves Content\Movies\Intro_Segment_* (MoviePlayerSettings.StartupMovies) into
+  Movies\PacificTogether-skipped, uninstall moves them back. Test copy client1 only: owner saw the left window start faster. Both logs
+  still show 15 s from movie player start to the main menu. The install.ps1 code itself has not run yet (I ran the same lines by hand).
