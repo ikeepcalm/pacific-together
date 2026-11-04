@@ -1,6 +1,6 @@
 # Playtester guide
 
-Developer/friend preview **0.8.8**, development protocol **6**. Both players need the same download and Pacific Drive on Steam,
+Developer/friend preview **0.8.9**, development protocol **7**. Both players need the same download and Pacific Drive on Steam,
 v1.15.0 (build 21896301). The host owns the world and saves. Mixed DLC ownership is not yet verified.
 
 ## Install and connect

@@ -1219,3 +1219,9 @@ Logs: `local/playtest-20261104-live1` (first session; the second one is in the t
   false (wildcard out); GetDataBlockDump shows IP_ItemUpgrade as {} even on a working kit. A guest probe
   BFL_ItemPropertyUtilityFns.CreateUpgradeItem(node, 0, pc, out) crashed the guest (access violation 0x10; the crash marker's last
   calls do not show it, so the cause is unproven). Next: try that build in a headless pair, not with the owner waiting.
+- Code review of 38fbaa0..HEAD (high, unverified findings), fixed: F8/End seated also exits (door is the only other exit);
+  the post-wake advance only touches objectives that were dormant at the wake and only once, and the wake re-checks
+  storyAsleep (stale menu row); the guest shows a gateway once per position per map; cabin audio retries 10 s after an error
+  instead of off for the run; a currency the host no longer lists is 0 on the guest; map icons: default materials not sent,
+  sizes/colors rounded, missing assets cached, the guest's own icons come back and the copies go when the session ends;
+  README controls. Not changed: the icon list's size beyond that (measure in a session first).

@@ -289,7 +289,8 @@ local function applyTime(s)
     end
 end
 
-local gateMissing -- the last gateway position logged as not found, so the log line comes once
+local gateMissing, gateShown -- the last gateway position logged as not found / shown, so each happens once
+RegisterLoadMapPostHook(function() gateMissing, gateShown = nil, nil end)
 local function applyStorm(s)
     local wb = whiteboard()
     if wb and s.instab then wb:SetTagFloat(INSTAB, tonumber(s.instab)) end
@@ -313,7 +314,8 @@ local function applyStorm(s)
         local cur = sm.EvolvedGatewayExit
         if not p then
             if gateMissing ~= s.gate then gateMissing = s.gate log("PT|world guest gateway at %s: no portal there", s.gate) end
-        elseif not (cur and cur:IsValid() and short(cur) == short(p)) then
+        elseif gateShown ~= s.gate and not (cur and cur:IsValid() and short(cur) == short(p)) then
+            gateShown = s.gate -- once: if the pick does not stick here, the state would replay the beam and sound every second
             p.IsPickedExit = true
             sm["Select Exit Portal Actor"](sm, p)
             -- the beam, lights, sound and map icon: the visual part of the portal's Activate, which runs on the host only

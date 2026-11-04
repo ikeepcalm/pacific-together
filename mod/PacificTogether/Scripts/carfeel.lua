@@ -123,7 +123,7 @@ end
 -- Cabin sound: the game's own entry runs AC_CarAudio.OnPlayerStartEnterCar (veh_int, PlayerInsideCar, state veh_int); the
 -- guest is seated by car.lua, so its car audio stayed "outside, doors shut" and muffled the radio and engine (playtests
 -- 2026-11-01 and 2026-11-03). Only the audio events run here, not the game's enter or exit.
-local cabinBroken = false
+local cabinRetryAt = 0 -- after an error (a pawn or controller gone during a load), try again 10 s later
 local function guestCabin()
     if not valid(gaudio) then return end
     local pawn = UEHelpers.GetPlayerController().Pawn
@@ -139,9 +139,9 @@ local function refreshGuest()
     gcar = carCar()
     gaudio = gcar and ownedBy("AC_CarAudio_C", gcar) or nil
     gsp = gcar and ownedBy("BP_CarPart_Internal_Speedometer_C", gcar) or nil
-    if cabinBroken then return end
+    if os.clock() < cabinRetryAt then return end
     local ok, err = pcall(guestCabin)
-    if not ok then cabinBroken = true log("PT|error feel cabin %s (off for this run)", tostring(err)) end
+    if not ok then cabinRetryAt = os.clock() + 10 log("PT|error feel cabin %s (again in 10 s)", tostring(err)) end
 end
 
 local hornApplied, wiperAt = nil, -10

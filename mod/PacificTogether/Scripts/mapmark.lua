@@ -169,7 +169,10 @@ end
 -- shortcut: no tooltips, layer offsets or per-layer rotation on the copies; send them if hover text or odd icons turn out to matter.
 local SKIP = { ["Car_-_Key"] = true, ["Map-Pin"] = true }
 local hostIcons, applied, sentIcons, sentAt, proxies, proxyOf, holder = nil, nil, nil, nil, {}, {}, nil
+local hid, missing = {}, {} -- guest: its own icons it turned off (full name -> component); asset paths that did not load
+local DEFAULT_MAT = { ["/MinimapPlugin/Materials/Icons/M_UMG_MapIcon.M_UMG_MapIcon"] = true, ["/MinimapPlugin/Materials/Icons/M_Canvas_MapIcon.M_Canvas_MapIcon"] = true }
 local function path(o) return valid(o) and (o:GetFullName():gsub("^%S+ ", "")) or "" end
+local function mat(o) local p = path(o); return DEFAULT_MAT[p] and "" or p end -- the default (nearly every icon) is not sent
 local function eachIcon(fn)
     for _, c in ipairs(FindAllOf("MapIconComponent") or {}) do
         if valid(c) and not proxyOf[c:GetFullName()] then
@@ -185,8 +188,8 @@ local function hostList()
         if c:IsIconVisible() and not c:GetFullName():find("/Engine/Transient", 1, true) then
             local l = c:K2_GetComponentLocation()
             local function add(tex, col, size, z)
-                L[#L + 1] = table.concat({ path(tex), path(c.IconMaterial_UMG), path(c.IconMaterial_Canvas),
-                    string.format("%.0f|%.0f|%.0f|%.1f|%d|%d|%.3f|%.3f|%.3f|%.3f|%s|%.0f|%d", l.X, l.Y, l.Z, size, c.IconSizeUnit,
+                L[#L + 1] = table.concat({ path(tex), mat(c.IconMaterial_UMG), mat(c.IconMaterial_Canvas),
+                    string.format("%.0f|%.0f|%.0f|%.0f|%d|%d|%.2f|%.2f|%.2f|%.2f|%s|%.0f|%d", l.X, l.Y, l.Z, size, c.IconSizeUnit,
                         z, col.R, col.G, col.B, col.A, tostring(c.bIconRotates), c:K2_GetComponentRotation().Yaw, c.IconFogInteraction) }, "|")
             end
             add(c.IconTexture, c.IconDrawColor, c.IconSize, c.IconZOrder)
@@ -203,10 +206,11 @@ local function hostList()
     return table.concat(L, "\n")
 end
 local function asset(p)
-    if p == "" then return nil end
+    if p == "" or missing[p] then return nil end
     local o = StaticFindObject(p)
     if not o:IsValid() then pcall(LoadAsset, p); o = StaticFindObject(p) end
-    return o:IsValid() and o or nil
+    if not o:IsValid() then missing[p] = true; return nil end -- a runtime material (/Engine/Transient): no retry per apply
+    return o
 end
 local function proxy(i)
     if valid(proxies[i]) then return proxies[i] end
@@ -227,8 +231,8 @@ local function applyIcons()
             i = i + 1
             local tex, mu, mc = asset(f[1]), asset(f[2]), asset(f[3])
             if tex then c:SetIconTexture(tex) end
-            if mu then c:SetIconMaterialForUMG(mu) end
-            if mc then c:SetIconMaterialForCanvas(mc) end
+            if mu then c:SetIconMaterialForUMG(mu) else c:ResetIconMaterialForUMG() end
+            if mc then c:SetIconMaterialForCanvas(mc) else c:ResetIconMaterialForCanvas() end
             c:K2_SetWorldLocationAndRotation({ X = tonumber(f[4]), Y = tonumber(f[5]), Z = tonumber(f[6]) }, { Pitch = 0, Yaw = tonumber(f[15]), Roll = 0 }, false, {}, true)
             c:SetIconSize(tonumber(f[7]), tonumber(f[8]))
             c:SetIconZOrder(tonumber(f[9]))
@@ -242,8 +246,18 @@ local function applyIcons()
     log("PT|mapmark guest map draws %d host icons", i)
     return true
 end
+-- the session ended with the guest still in the map: its own icons back, the host's copies off
+local function restoreIcons()
+    for _, c in pairs(hid) do if valid(c) then c:SetIconVisible(true) end end
+    for _, c in ipairs(proxies) do if valid(c) then c:SetIconVisible(false) end end
+    hid = {}
+end
 local function iconTick()
-    if not safety.active() then hostIcons, applied, sentIcons = nil, nil, nil; return end
+    if not safety.active() then
+        if next(hid) then restoreIcons() end
+        hostIcons, applied, sentIcons = nil, nil, nil
+        return
+    end
     if not safety.guest() then
         local msg = hostList()
         -- again every 10 s: one sent before the guest was ready is gone (seen: none arrived after a join)
@@ -251,7 +265,7 @@ local function iconTick()
         return
     end
     if not hostIcons then return end
-    eachIcon(function(c) if c:IsIconVisible() then c:SetIconVisible(false) end end)
+    eachIcon(function(c) if c:IsIconVisible() then c:SetIconVisible(false); hid[c:GetFullName()] = c end end)
     if hostIcons ~= applied and applyIcons() then applied = hostIcons end
 end
 net.on("g.map.icons", function(_, msg) if safety.guest() then hostIcons = msg end end)
@@ -263,7 +277,7 @@ if os.getenv("PT_MUTATE") ~= "noicons" then
 end
 
 -- a map change frees every object we hold: forget them before it happens
-RegisterLoadMapPreHook(function() marks, captureSeen, captureDone = {}, nil, 0; wp.sent, wp.got = nil, nil; hostIcons, applied, sentIcons, proxies, proxyOf, holder = nil, nil, nil, {}, {}, nil end)
+RegisterLoadMapPreHook(function() marks, captureSeen, captureDone = {}, nil, 0; wp.sent, wp.got = nil, nil; hostIcons, applied, sentIcons, proxies, proxyOf, holder, hid = nil, nil, nil, {}, {}, nil, {} end)
 
 LoopInGameThreadWithDelay(250, function()
     local ok, err = pcall(update)

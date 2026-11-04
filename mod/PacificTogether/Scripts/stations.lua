@@ -159,11 +159,14 @@ net.on("g.st.cur", function(_, data)
     if not guest() then return end
     local im = FindFirstOf("BP_InventoryManager_C")
     if not valid(im) then return end
+    local listed, stale = {}, {}
     for path, v in data:gmatch("([^=\n]+)=(%-?%d+)") do
         local ca = StaticFindObject(path)
         if not ca:IsValid() then pcall(LoadAsset, path); ca = StaticFindObject(path) end
-        if ca:IsValid() then im.CurrencyTable:Add(ca, tonumber(v)) end
+        if ca:IsValid() then im.CurrencyTable:Add(ca, tonumber(v)); listed[path] = true end
     end
+    im.CurrencyTable:ForEach(function(k) local ca = k:get(); if valid(ca) and not listed[fullpath(ca)] then stale[#stale + 1] = ca end end)
+    for _, ca in ipairs(stale) do im.CurrencyTable:Add(ca, 0) end -- one the host no longer has
     -- the energy board beside the research machine is set by the bench on OnCurrencyAdjusted, which a direct write skips
     local bench = first("BP_Garage_InventingBench_C")
     if bench then bench:UpdateAnchorCounts() end

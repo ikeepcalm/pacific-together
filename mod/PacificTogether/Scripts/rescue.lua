@@ -146,7 +146,7 @@ local function storyAsleep(q)
     end
     return dormant
 end
-local wokeAt -- os.clock() of the last wake on the host
+local wokeAt, woken = nil, {} -- os.clock() of the last wake on the host; objective paths that were dormant then
 -- a woken mission completes on its first tick but the manager never moves on (Q03 A2 stayed the active mission, no Oppy line and
 -- no waypoint; live 2026-11-04): for 10 s after a wake, advance each active objective whose mission is complete
 local function advanceWoken()
@@ -155,7 +155,8 @@ local function advanceWoken()
     for i = 1, q.ActiveObjectives:GetArrayNum() do
         local s = q.ActiveObjectives[i]
         local ms = s.ActiveMissionState
-        if valid(s.Objective) and valid(ms) and valid(ms.Data) and ms:IsCompleted() then
+        if valid(s.Objective) and woken[path(s.Objective)] and valid(ms) and valid(ms.Data) and ms:IsCompleted() then
+            woken[path(s.Objective)] = nil -- once: the game's own director may still move it on later
             local was = path(ms.Data)
             q:AdvanceObjective(s.Objective, nil)
             log("PT|rescue host moves %s on from the woken %s", path(s.Objective), was)
@@ -166,6 +167,14 @@ end
 local function wakeStory()
     local sw, gi = dormancySwitch()
     if not sw then return false end
+    local q = FindFirstOf("BP_QuestManager_C")
+    if not (valid(q) and storyAsleep(q)) then return false end -- a stale menu row: a DLC chapter may have started since
+    woken = {}
+    local w = UEHelpers.GetWorld()
+    for i = 1, q.ActiveObjectives:GetArrayNum() do
+        local o = q.ActiveObjectives[i].Objective
+        if valid(o) and o:IsDormant(w) then woken[path(o)] = true end
+    end
     wokeAt = os.clock()
     for i = 1, sw.States:GetArrayNum() do gi:SetGlobalSwitch(sw, sw.States[i], 0) end -- 0 = DONTCARE: the chapter lets go
     log("PT|rescue host wakes the main story: dormancy switch now %s", tostring(gi:GetGlobalSwitch(sw)))

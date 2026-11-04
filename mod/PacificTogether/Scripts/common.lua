@@ -1,8 +1,8 @@
 local UEHelpers = require("UEHelpers")
 
 local M = {
-    MOD_VERSION = "0.8.8",
-    PROTOCOL_VERSION = 6, -- 6: loot drop adoption ("K"), keypad and anchor-take messages; 5: msg.cpp chunks are confirmed ("PT1A|"); a 4 peer never confirms and a 5 sender would stall
+    MOD_VERSION = "0.8.9",
+    PROTOCOL_VERSION = 7, -- 7: map icons (g.map.icons), currencies (g.st.cur), map north; 6: loot drop adoption ("K"), keypad and anchor-take messages; 5: msg.cpp chunks are confirmed ("PT1A|"); a 4 peer never confirms and a 5 sender would stall
 }
 
 -- Each run also keeps its own copy of our lines (run-01.log .. run-10.log in the mod folder, runs.txt = the last one used): UE4SS.log

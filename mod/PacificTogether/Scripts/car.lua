@@ -1179,6 +1179,8 @@ local function unstick()
     probe("parent", function() local p = me:GetAttachParentActor(); return p:IsValid() and p:GetFName():ToString() or "none" end)
     probe("riding", function() return riding ~= nil end)
     log("PT|car unstick %s", table.concat(s, " "))
+    -- seated, it also gets out: the passenger door is the only other way since X went, and a door can be removed or broken off
+    if riding and common.netMode() == "client" then sendExit() end
     -- the controller looked normal when stuck (2026-10-22): dump the game's own car/seat/input state on the character and its manager
     local function dump(tag, o)
         if not valid(o) then return end
