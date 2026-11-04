@@ -1102,3 +1102,126 @@ coils did not fire with both players next to it. Probe session `20261102-182743-
   origin not found). With both players next to it in the session, the cause is unknown; a host in the car would block it (state 1).
 - Next: a zone fixture saved next to a saw and a mimic wreck, then the live loop (both sides: blade visibility, SM config, prongs).
 
+
+## 2026-11-03: friend session (0.8.8 38fbaa0), friend hosted, owner was the guest
+
+Logs: `local/playtest-20261103-215129` (friend/host: run-01 20:50-21:24 ends in a crash, run-02 21:26-21:51; its saves are from
+21:51) and `local/playtest-20261103-225113` (owner/guest: run-02 21:52-22:51). The host's log for 21:52-22:51 is not in either zip.
+Owner reports: gateway still invisible to the guest; car radio still muffled for the guest; story stuck on "Return to Sierra" and
+F9 story tasks did not help; guest freezes "while the mod syncs"; 5k LIM gathered, 3.1k in the garage. Friend: one crash; the
+research machine showed a white screen the first time it was opened. Fixed per the owner: seat-on-door-press, scrapped loot flicker.
+
+Gateway
+- Observed: no `PT|world guest gateway ... shown` line in the guest's whole hour. Atlas: exit portals are spawned at runtime
+  (BFL_RuntimeSpawnHelpers.DynamicSpawnActor, class BP_LevelTransition_ExitPortal), so the guest's replicated copies have other
+  object names than the host's. world.lua matched the host's `gate` by name; guestact.lua's g.act.gate (guest summons) did the same.
+- Change: common.portalKey/findPortal: the portal is named by its location and found as the nearest portal within 5 m. A portal
+  not found logs `PT|world guest gateway at <pos>: no portal there` once.
+
+Radio muffle
+- Observed: the guest set radio_car_distance_exterior to 0 in the seat (`PT|radio guest exterior 0.00`, the 2026-11-02 fix) and
+  it still sounded muffled. Atlas AC_CarAudio: OnPlayerStartEnterCar sets RTPC veh_int 1, PlayerInsideCar, state veh_int_ext-veh_int
+  and UpdateClosedness; while PlayerInsideCar is false its tick runs UpdateDoorOcclusion (veh_door_closedness_exterior). The guest is
+  seated by car.lua, so its copy of the car's audio stayed "outside, doors shut". Guess: that occlusion is the muffle.
+- Change: carfeel.lua guestCabin: the guest calls AC_CarAudio.OnPlayerStartEnterCar(false) / OnPlayerStartExitCar(false) when its
+  pawn's attach parent becomes / stops being the car (`PT|feel cabin audio inside=...`). Not heard yet: needs the live loop.
+
+Story ("Return to Sierra")
+- Observed (fixture `local/fixtures/pt11-q03` = the host's odsave1.sav, MCP 20261103-2306..2310): QD_Q03_Mission_A2 task ReturnSierram
+  (BPMT_TagIsSet, route WB, WB.Missions.QD_Q03_Mission_A2.ReturnSierram.ReachSierramAgain). The tag WAS set; the mission state had
+  bInitTasks=false and ActiveTime 0 (UseLuckHeap's mission ticked). QD_Q03_Objective IsDormant=true: GSS_MainQuestsDormancy on
+  (states Fig_Mission_Chapter01/03/05/06, the DLC's chapters) while QO_Fig_Mission_Chapter01 is in CompletedObjectives and no Fig
+  objective is active. A dormant objective's mission never ticks, so ForceCompleteTask (F9) did nothing either.
+- Check: SetGlobalSwitch(GSS_MainQuestsDormancy, each state, DONTCARE) -> switch false, A2 initialised and completed at once.
+- Unknown: why the chapter's state stayed on (the host's log for the chapter's end is missing; guest saw Fig Chapter01 stop 22:06:42).
+- Change: rescue.lua: F9 > Story tasks shows "Wake the main story" when the switch is on, no QO_Fig objective is active and a main
+  objective is dormant; it releases every state of the switch on the host. Checked through the guest console (`ptrescue tasks`,
+  `ptrescue do 1`) on the fixture: host `PT|rescue host wakes the main story: dormancy switch now false`, A2 completed.
+
+Guest freezes
+- Observed: guest `PT|slow loot.lua:961` 109-244 ms every ~2 s from 21:53:17 to 21:54:07 (scanGuest 3890 ms in that minute), the
+  90 s after the join when the guest purges its own lootables (4 classes in one tick). Steady play: scanGuest ~320 ms/min, no other
+  Lua stalls over 100 ms except one `radio.lua:490 1002 ms` (22:20:34). Freezes outside the join minute are not explained by the log.
+- Change: loot.lua purges one class per 500 ms tick (each still every 2 s).
+
+Other
+- Host crash 21:24 (run-01, CrashContext 0D48E295...): access violation in TaskGraphThreadNP 8 (a worker thread, not the game
+  thread), shipping exe frames without symbols. One second before: two `act heal Attachments.HeadLightRight` from the guest. Unknown.
+- ARC energy: guest `WB.PrevRun.Currency.AnchorJuice.Stable 2.10 -> 5.60` on return; garage showed 3.1. Guess: the gateway's cost
+  (5.6 - 3.1 = 2.5); the ARC mirror (guestact.lua g.act.arc) writes on the guest only. Not checked.
+- Research machine white screen (host, first open): nothing in the logs. Unknown.
+- Guest crash markers in the owner's zip are old (0.8.5/0.8.7).
+- Checks on these changes (headless pairs): guestact 32/32 (`20261103-231404-guestact`; guest intent and host pick by position
+  `-47832,6942,-1548`, guest `gateway ... shown`; this fixture's portal has the same name on both sides, so the renamed-portal case
+  is not covered); carfeel 38/38 (`20261103-231630-carfeel`, guest `PT|feel cabin audio inside=true`); lootsync 34/34
+  (`20261103-231733-lootsync`); rescue 22/22 (`20261103-232142-rescue`). Radio muffle and gateway visuals not heard/seen: live loop.
+
+Fork commit 2c7b1d3 (Everelsu, "Protocol 6 motion and heap integration", 49 files, native msg/transport/find): not merged. Review
+(read only): a new-build guest is "active" only after loot+car+visual baselines (net.lua baselineComplete); the car part comes only
+from g.car.s, which the host sends only with a car, so with no car every protected guest action is dropped for the session.
+Also: loot.lua `known()` address reuse can wipe the new byName entry (duplicates); MULTIVOID-LICENSE.txt referenced but missing;
+needs a DLL rebuild; its validation runs are on the contributor's machine only.
+
+## 2026-11-04: live loop on the 2026-11-03 fixes (902f0ae), fixture pt11-q03, two rendered clients
+
+Logs: `local/playtest-20261104-live1` (first session; the second one is in the test copies).
+- Cabin radio (carfeel guestCabin): owner heard it right as the guest in the seat. Confirmed by hand.
+- Wake the main story: the switch went off, but QD_Q03_Mission_A2 stayed the active mission with IsCompleted()=true (its one task
+  done, ActiveTime 0.0187, never advanced): no new task, no waypoint. A live `AdvanceObjective(QD_Q03_Objective, nil)` started
+  Mission B ("Locate stabilizer records"). Change: rescue.lua, for 10 s after a wake the host advances each active objective whose
+  mission is complete (`PT|rescue host moves ... on from the woken ...`). Owner, second session: F9 wake -> task and green marker
+  appeared by themselves; still on B afterwards (no double advance).
+- Oppy is silent after the wake. Atlas: BP_QuestDirector MissionBind_QD_Q03_Mission_A2_Finished waits for the player in the car
+  (OnPlayerStartEnterCar), DelayBetweenMissions, then dialogue. Whether it ran: unknown (Lua probes on it and on AdvanceObjective
+  printed nothing, not even for the rescue's own call, so the probe itself is suspect). Open.
+- Extra green waypoint on the guest: BP_ScriptKit_GobblerMap_GenericObjective_C actors with Enabled=false destroy themselves at
+  BeginPlay on the host; the guest kept 5 of them, one visible (QD_Q03_Mission_A.Broadcast). Change: world.lua lists them in "keep";
+  the guest removes a marker the host has not listed in 10 states in a row. Seen: guest removed all 5 15 s after the join.
+- Map turned 90 degrees on the guest: BP_ToDManager RandomizeNorth picks a north per side (host 270, guest 0); BP_GobblerMapBounds
+  UpdateRotation turns the map by it. Change: world.lua sends `north`; the guest calls SetTrueNorth and the bounds' Capture Configure
+  (Recapture) to render the map again. Owner: guest map wrong for 5-10 s after the join, then matches the host.
+- Intro movies: install.ps1 moves Content\Movies\Intro_Segment_* (MoviePlayerSettings.StartupMovies) into
+  Movies\PacificTogether-skipped, uninstall moves them back. Test copy client1 only: owner saw the left window start faster. Both logs
+  still show 15 s from movie player start to the main menu. The install.ps1 code itself has not run yet (I ran the same lines by hand).
+- Guest ARC map icons (owner, same session): the guest showed every junction open and doubled building icons. Observed: each
+  junction has Icon_Entrance/Exit/Closed/DeadEndWarn at one spot and the host shows one (guest 15 visible, host 5); the host's
+  building icons are mostly runtime components (MapIconComponent_<n>) on its own clump buildings, which the guest does not have;
+  the gateway's PulseIcon/Range icons stay off on the guest's portal copies. Change: mapmark.lua, the host sends every visible
+  icon (base + each layer: texture, materials, place, size, unit, zorder, color, rotation, fog), skipping players/car/pin and
+  /Engine/Transient orphans (at 0,0, not drawn on the host); the guest hides all of its own and draws the list on components
+  of its own on BP_GobblerMapBounds (`PT|mapmark guest map draws N host icons`). world.lua: the guest removes its own
+  GenericObjective markers (a live one re-shows its icon every tick). Owner: "fully identical now".
+  Crash on the way: host access violation in ActorComponent:GetOwner on map icons (some owners freed); the code no longer calls it.
+  Layered icons: base and layer both draw (a junction: grey square + black glyph at 0.67); a copy without layers drew a house
+  black on black until the layers were sent as their own copies.
+- Guest radio in the seat (owner, same session): volume and track changes already reached the host (`PT|radio intent`,
+  `skip 1@cr sent`), but the guest had no outline and no radio panel, and X (the radio's next track) also exited the car.
+  Cause: car.lua sets ExtraData.IsInside=false on the seated guest's dashboard highlights (ignition, shifter) so a character
+  passes the highlight filter; the radio was left out (fork commit cfc2b6b, no reason given). A live IsInside=false on the radio
+  showed both. Change: the radio is included; the X exit key and the guestui seat hint are removed at the owner's request
+  (the passenger door is the exit). Owner: works end to end. guestui scenario updated (hint checks dropped), not run.
+- Research machine (fixture own1, garage): white screen on the first open on both sides. Cause: BP_Garage_InventingBench
+  ActivateScreen calls Widget.SetWidget and at once ScreenMID.SetTextureParameterValue(SlateUI, Widget.GetRenderTarget()), but the
+  widget component makes its render target only when it first draws: SlateUI stayed none (seen live; setting it by hand showed the
+  screen). Change: stations.lua, after ActivateScreen the render target is put on ScreenMID once it exists (owner: a short flash).
+- Guest research energy 0 0 0: amounts live in BaseInventoryManager.CurrencyTable (archetype -> hundredths; host 260/740/960 +
+  MechXP 116850), the guest's was empty. Change: stations.lua g.st.cur, host table down on change / every 10 s, guest writes it
+  (TMap Add, no CurrencyAdjust) and calls the bench's UpdateAnchorCounts (the energy board). Owner: guest researched a blueprint.
+- Upgrade kit from a guest's research: host bench OnNodePurchased turns its highlight off and spawns the kit; the guest picked the
+  kit up through the loot sync (host's actor destroyed, highlight back), but loot items travel as archetype + state only (ids.lua
+  shortcut "upgrades do not travel"), so the guest's kit had no IP_ItemUpgrade UpgradeNode: ToolManifestation.GetUpgrade invalid,
+  no install spots shown. The guest's drop spawned a kit on the host that lacks it too. Open: carry the node in the spec and
+  rebuild kits with BFL_ItemPropertyUtilityFns.CreateUpgradeItem(node); reading the node from a real kit not tried yet.
+  Kit follow-up (same session): a host kit's node is readable from Lua by calling GetUpgrade on the
+  BP_BaseGarageUpgrade_ToolManifestation_C CDO with CDO.Instance set to the item instance for that call (then cleared): Upgrade
+  Asset UP_Garage_InventoryExpansion_Install_4th_C, UpgradeNode /Game/Gameplay/Inventory/Items/RecipeResearchGraph.RecipeResearchGraph
+  :GenericGraphUpgradeNode_27 (an asset path, same on both sides). InventoryBlueprintLibrary.GetItemProperties from Lua returns
+  false (wildcard out); GetDataBlockDump shows IP_ItemUpgrade as {} even on a working kit. A guest probe
+  BFL_ItemPropertyUtilityFns.CreateUpgradeItem(node, 0, pc, out) crashed the guest (access violation 0x10; the crash marker's last
+  calls do not show it, so the cause is unproven). Next: try that build in a headless pair, not with the owner waiting.
+- Code review of 38fbaa0..HEAD (high, unverified findings), fixed: F8/End seated also exits (door is the only other exit);
+  the post-wake advance only touches objectives that were dormant at the wake and only once, and the wake re-checks
+  storyAsleep (stale menu row); the guest shows a gateway once per position per map; cabin audio retries 10 s after an error
+  instead of off for the run; a currency the host no longer lists is 0 on the guest; map icons: default materials not sent,
+  sizes/colors rounded, missing assets cached, the guest's own icons come back and the copies go when the session ends;
+  README controls. Not changed: the icon list's size beyond that (measure in a session first).

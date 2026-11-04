@@ -122,10 +122,70 @@ end
 -- shortcut: only Q01 -> Q015 is listed (the softlock seen); add a pair when another quest is found stuck between objectives.
 local NEXT = { QD_Q01_Objective = "/Game/Gameplay/Quests/Q015/QD_Q015_Objective.QD_Q015_Objective" }
 
+-- The DLC chapters (Fig) put the main story to sleep through this switch, one state per chapter. A finished chapter whose
+-- state stayed on keeps every main objective dormant: its missions never tick, tasks never complete and force-completing
+-- does nothing (friend's save 2026-11-03: Fig Chapter01 done, Q03 "Return to Sierra" stuck; local/fixtures/pt11-q03).
+local DORMANCY = "/Game/Systems/GlobalStateSwitches/GSS_MainQuestsDormancy.GSS_MainQuestsDormancy"
+local function dormancySwitch()
+    local sw = StaticFindObject(DORMANCY)
+    if not sw:IsValid() then pcall(LoadAsset, DORMANCY); sw = StaticFindObject(DORMANCY) end
+    local gi = FindFirstOf("DrivingGameInstance")
+    if valid(sw) and valid(gi) then return sw, gi end
+end
+-- stuck = the switch is on while no DLC chapter objective runs and a main objective is dormant
+local function storyAsleep(q)
+    local sw, gi = dormancySwitch()
+    if not (sw and gi:GetGlobalSwitch(sw)) then return false end
+    local w, dormant = UEHelpers.GetWorld(), false
+    for i = 1, q.ActiveObjectives:GetArrayNum() do
+        local o = q.ActiveObjectives[i].Objective
+        if valid(o) then
+            if o:GetFName():ToString():find("^QO_Fig") then return false end
+            if o:IsDormant(w) then dormant = true end
+        end
+    end
+    return dormant
+end
+local wokeAt, woken = nil, {} -- os.clock() of the last wake on the host; objective paths that were dormant then
+-- a woken mission completes on its first tick but the manager never moves on (Q03 A2 stayed the active mission, no Oppy line and
+-- no waypoint; live 2026-11-04): for 10 s after a wake, advance each active objective whose mission is complete
+local function advanceWoken()
+    local q = FindFirstOf("BP_QuestManager_C")
+    if not valid(q) then return end
+    for i = 1, q.ActiveObjectives:GetArrayNum() do
+        local s = q.ActiveObjectives[i]
+        local ms = s.ActiveMissionState
+        if valid(s.Objective) and woken[path(s.Objective)] and valid(ms) and valid(ms.Data) and ms:IsCompleted() then
+            woken[path(s.Objective)] = nil -- once: the game's own director may still move it on later
+            local was = path(ms.Data)
+            q:AdvanceObjective(s.Objective, nil)
+            log("PT|rescue host moves %s on from the woken %s", path(s.Objective), was)
+            return -- the array changed
+        end
+    end
+end
+local function wakeStory()
+    local sw, gi = dormancySwitch()
+    if not sw then return false end
+    local q = FindFirstOf("BP_QuestManager_C")
+    if not (valid(q) and storyAsleep(q)) then return false end -- a stale menu row: a DLC chapter may have started since
+    woken = {}
+    local w = UEHelpers.GetWorld()
+    for i = 1, q.ActiveObjectives:GetArrayNum() do
+        local o = q.ActiveObjectives[i].Objective
+        if valid(o) and o:IsDormant(w) then woken[path(o)] = true end
+    end
+    wokeAt = os.clock()
+    for i = 1, sw.States:GetArrayNum() do gi:SetGlobalSwitch(sw, sw.States[i], 0) end -- 0 = DONTCARE: the chapter lets go
+    log("PT|rescue host wakes the main story: dormancy switch now %s", tostring(gi:GetGlobalSwitch(sw)))
+    return not gi:GetGlobalSwitch(sw)
+end
+
 local function openTasks()
     local q = FindFirstOf("BP_QuestManager_C")
     if not valid(q) then return {} end
     local rows, a = {}, q.ActiveObjectives
+    if storyAsleep(q) then rows[1] = table.concat({ "wake", "main story", 0, "Wake the main story", "asleep after a DLC chapter" }, "\t") end
     for i = 1, a:GetArrayNum() do
         local s = a[i]
         local ms = s.ActiveMissionState
@@ -161,6 +221,7 @@ end
 
 local function complete(obj, mis, idx)
     local q = FindFirstOf("BP_QuestManager_C")
+    if obj == "wake" then return wakeStory() end
     if obj == "next" then
         local o = StaticFindObject(mis)
         local ok = valid(q) and valid(o) and q:StartObjective(o, false, true)
@@ -303,6 +364,10 @@ LoopInGameThreadWithDelay(100, function()
         refreshAt = os.clock()
         local ok, err = pcall(function() askTasks(); if not safety.guest() then show() end end)
         if not ok then log("PT|error rescue refresh %s", tostring(err)) end
+    end
+    if wokeAt and os.clock() - wokeAt < 10 and M.enabled and safety.active() then
+        local ok, err = pcall(advanceWoken)
+        if not ok then log("PT|error rescue advance %s", tostring(err)) end
     end
     if #wanted == 0 then return end
     local list = wanted

@@ -63,6 +63,7 @@ local function replicate()
     end
 end
 
+local OBJMARK = "BP_ScriptKit_GobblerMap_GenericObjective_C"
 local function f(v) return string.format("%.4f", v) end
 
 local function snapshot()
@@ -75,6 +76,7 @@ local function snapshot()
         add("tod", f(r["Returned Time Of Day"] or 0))
         local p = tod["Target TOD Preset"]
         add("preset", (p and p:IsValid()) and p:GetFullName():gsub("^%S+ ", "") or "")
+        add("north", f(tod["Current North As Rotator"].Yaw))
         add("cur", table.concat({ f(tod.TOD_Override_Rain_Current), f(tod.TOD_Override_Fog_Current), f(tod.TOD_Override_Wind_Current),
             f(tod.TOD_Override_Darkness_Current), f(tod["TOD Override Zone Storm Current"]), f(tod["TOD Override Acid Current"]), f(tod.TOD_Override_SpeedMult) }, "|"))
         local a = tod.TargetWeatherOverrideArray
@@ -92,7 +94,8 @@ local function snapshot()
     local sm = first("BP_StormManager_C")
     if sm then
         add("storm", table.concat({ sm.CurrentStormState, tostring(sm.RedWallActive), f(sm.TimeBeforeInstabilityStarts), f(sm.FinalInstabilityTollerance), f(sm.StormAudioVisualIntensity) }, "|"))
-        add("gate", short(sm.EvolvedGatewayExit))
+        local g = sm.EvolvedGatewayExit
+        add("gate", (g and g:IsValid()) and common.portalKey(g) or "none")
     end
     local names = {}
     for _, c in ipairs({ "BP_LevelTransition_ExitPortal_C", PROP }) do each(c, function(o) names[#names + 1] = short(o) end) end
@@ -232,6 +235,15 @@ end
 local function applyTime(s)
     local tod = first("BP_ToDManager_C")
     if not tod then return end
+    -- each side rolls its own random north per map (RandomizeNorth): the guest's ARC map was turned 90 degrees (live 2026-11-04)
+    local n = tonumber(s.north)
+    if n and math.abs((tod["Current North As Rotator"].Yaw - n + 180) % 360 - 180) > 0.5 then
+        local y = math.rad(n)
+        tod:SetTrueNorth({ X = math.cos(y), Y = math.sin(y), Z = 0 }, { Pitch = 0, Yaw = n, Roll = 0 })
+        local b = firstLive("BP_GobblerMapBounds_C")
+        if b then b["Capture Configure"](b, true) end -- turns the bounds and renders the map picture again
+        log("PT|world guest north %.1f (map %s)", n, b and "turned" or "not loaded")
+    end
     if s.tod then
         local r = {}
         tod["Get Current Time Of Day"](tod, r)
@@ -277,6 +289,8 @@ local function applyTime(s)
     end
 end
 
+local gateMissing, gateShown -- the last gateway position logged as not found / shown, so each happens once
+RegisterLoadMapPostHook(function() gateMissing, gateShown = nil, nil end)
 local function applyStorm(s)
     local wb = whiteboard()
     if wb and s.instab then wb:SetTagFloat(INSTAB, tonumber(s.instab)) end
@@ -295,21 +309,24 @@ local function applyStorm(s)
         st.Vol_Rad_Main, st.Vol_Rad_Weak, st.Collapsed = tonumber(v[1]), tonumber(v[2]), v[3] == "true"
     end
     -- the gateway the host summoned: its portal is the picked exit here too
-    if sm and s.gate and s.gate ~= "none" and short(sm.EvolvedGatewayExit) ~= s.gate then
-        each("BP_LevelTransition_ExitPortal_C", function(p)
-            if short(p) == s.gate then
-                p.IsPickedExit = true
-                sm["Select Exit Portal Actor"](sm, p)
-                -- the beam, lights, sound and map icon: the visual part of the portal's Activate, which runs on the host only
-                -- (playtest 2026-11-01: summoned gateway invisible to the guest). Not Activate itself: it also turns on the
-                -- portal's collision, and a transition must not start in the guest's own game.
-                pcall(function() p:Portal_AnimStart() end)
-                pcall(function() p:SetExitPortalActive(true) end)
-                pcall(function() p.BP_AkComponent_Ambient:RequestPlay() end)
-                log("PT|world guest gateway %s shown", s.gate)
-                ov.post("Gateway summoned", "good")
-            end
-        end)
+    if sm and s.gate and s.gate ~= "none" then
+        local p = common.findPortal(s.gate)
+        local cur = sm.EvolvedGatewayExit
+        if not p then
+            if gateMissing ~= s.gate then gateMissing = s.gate log("PT|world guest gateway at %s: no portal there", s.gate) end
+        elseif gateShown ~= s.gate and not (cur and cur:IsValid() and short(cur) == short(p)) then
+            gateShown = s.gate -- once: if the pick does not stick here, the state would replay the beam and sound every second
+            p.IsPickedExit = true
+            sm["Select Exit Portal Actor"](sm, p)
+            -- the beam, lights, sound and map icon: the visual part of the portal's Activate, which runs on the host only
+            -- (playtest 2026-11-01: summoned gateway invisible to the guest). Not Activate itself: it also turns on the
+            -- portal's collision, and a transition must not start in the guest's own game.
+            pcall(function() p:Portal_AnimStart() end)
+            pcall(function() p:SetExitPortalActive(true) end)
+            pcall(function() p.BP_AkComponent_Ambient:RequestPlay() end)
+            log("PT|world guest gateway %s shown (%s)", s.gate, short(p))
+            ov.post("Gateway summoned", "good")
+        end
     end
 end
 
@@ -333,6 +350,9 @@ local function cleanGuest()
             o:K2_DestroyActor()
         end)
     end
+    -- the guest's own map objective markers: its copy of an old mission's marker stayed on its map (live 2026-11-04) and a live
+    -- one turns its icon back on every tick; the guest's map draws the host's icons instead (mapmark.lua)
+    each(OBJMARK, function(o) o:K2_DestroyActor(); log("PT|world guest objective marker %s removed (the map shows the host's)", short(o)) end)
     -- G3: story drivers of the guest's own game
     each("NarrativeBeatActor", function(o) if o.Role ~= 1 then o:K2_DestroyActor() end end)
 end

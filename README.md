@@ -71,11 +71,11 @@ Windows may warn that the launcher is from an unknown publisher: click **More in
 | Key | What it does |
 |---|---|
 | **E** on the passenger door | Get in the car (guest) |
-| **X** | Get out of the car (guest) |
-| **E** on the key or the shifter | Start/stop the engine or switch P/D from the passenger seat |
+| **E** on the passenger door, from the seat | Get out of the car (guest) |
+| **E** on the key, the shifter or the radio | Start/stop the engine, switch P/D or turn the radio on/off from the passenger seat |
 | **Middle mouse** | Ping a spot for your friend (**G** if the mouse button does not work) |
 | **F9** | Rescue menu: teleport to your friend, resync, unstick controls, or complete a stuck story task |
-| **End** or **F8** | Unstick the guest's controls |
+| **End** or **F8** | Unstick the guest's controls (seated, it also gets the guest out) |
 | **Esc** (host) | Pauses the game for both players |
 
 ## Known issues
