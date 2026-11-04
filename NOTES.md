@@ -1200,3 +1200,15 @@ Logs: `local/playtest-20261104-live1` (first session; the second one is in the t
   passes the highlight filter; the radio was left out (fork commit cfc2b6b, no reason given). A live IsInside=false on the radio
   showed both. Change: the radio is included; the X exit key and the guestui seat hint are removed at the owner's request
   (the passenger door is the exit). Owner: works end to end. guestui scenario updated (hint checks dropped), not run.
+- Research machine (fixture own1, garage): white screen on the first open on both sides. Cause: BP_Garage_InventingBench
+  ActivateScreen calls Widget.SetWidget and at once ScreenMID.SetTextureParameterValue(SlateUI, Widget.GetRenderTarget()), but the
+  widget component makes its render target only when it first draws: SlateUI stayed none (seen live; setting it by hand showed the
+  screen). Change: stations.lua, after ActivateScreen the render target is put on ScreenMID once it exists (owner: a short flash).
+- Guest research energy 0 0 0: amounts live in BaseInventoryManager.CurrencyTable (archetype -> hundredths; host 260/740/960 +
+  MechXP 116850), the guest's was empty. Change: stations.lua g.st.cur, host table down on change / every 10 s, guest writes it
+  (TMap Add, no CurrencyAdjust) and calls the bench's UpdateAnchorCounts (the energy board). Owner: guest researched a blueprint.
+- Upgrade kit from a guest's research: host bench OnNodePurchased turns its highlight off and spawns the kit; the guest picked the
+  kit up through the loot sync (host's actor destroyed, highlight back), but loot items travel as archetype + state only (ids.lua
+  shortcut "upgrades do not travel"), so the guest's kit had no IP_ItemUpgrade UpgradeNode: ToolManifestation.GetUpgrade invalid,
+  no install spots shown. The guest's drop spawned a kit on the host that lacks it too. Open: carry the node in the spec and
+  rebuild kits with BFL_ItemPropertyUtilityFns.CreateUpgradeItem(node); reading the node from a real kit not tried yet.

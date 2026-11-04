@@ -137,6 +137,38 @@ local function execPre(_, _, _, inputs, outputs)
     inputs:get():Empty(); outputs:get():Empty()
 end
 
+-- Currencies (anchor energy stable/unstable/corrupted, mechanic XP): the research screen and the tinker read the inventory
+-- manager's CurrencyTable (archetype -> hundredths); the guest's stayed empty, so it showed 0 0 0 and could research nothing
+-- (live 2026-11-04). The host's table goes down on change and every 10 s; the guest writes it as is (no CurrencyAdjust: that
+-- would count as earning). The guest never pays itself (execPre), so the host's value is the only truth.
+--   g.st.cur  path=hundredths lines
+local curSent, curAt = nil, 0
+local function hostCurrencies()
+    local im = FindFirstOf("BP_InventoryManager_C")
+    if not valid(im) then return end
+    local L = {}
+    im.CurrencyTable:ForEach(function(k, v)
+        local ca = k:get()
+        if valid(ca) then L[#L + 1] = fullpath(ca) .. "=" .. tostring(v:get()) end
+    end)
+    table.sort(L)
+    local msg = table.concat(L, "\n")
+    if msg ~= curSent or os.clock() - curAt >= 10 then curSent, curAt = msg, os.clock(); net.toGuests("g.st.cur", msg) end
+end
+net.on("g.st.cur", function(_, data)
+    if not guest() then return end
+    local im = FindFirstOf("BP_InventoryManager_C")
+    if not valid(im) then return end
+    for path, v in data:gmatch("([^=\n]+)=(%-?%d+)") do
+        local ca = StaticFindObject(path)
+        if not ca:IsValid() then pcall(LoadAsset, path); ca = StaticFindObject(path) end
+        if ca:IsValid() then im.CurrencyTable:Add(ca, tonumber(v)) end
+    end
+    -- the energy board beside the research machine is set by the bench on OnCurrencyAdjusted, which a direct write skips
+    local bench = first("BP_Garage_InventingBench_C")
+    if bench then bench:UpdateAnchorCounts() end
+end)
+
 -- Garage upgrades -----------------------------------------------------------------------------------------------------------
 
 net.on("g.st.up", function(_, data)
@@ -321,7 +353,35 @@ local function hookAll()
     end
 end
 
+-- Research screen white on its first open (friend's host 2026-11-03, both sides 2026-11-04): ActivateScreen gives the widget component
+-- its widget and at once puts the component's render target on the monitor (ScreenMID SlateUI), but the component makes that target
+-- only when it first draws, so the monitor got none. After the game's ActivateScreen, set it once the target exists.
+local BENCH = "/Game/Gameplay/CarGarage/Stations/ResearchStation/BP_Garage_InventingBench.BP_Garage_InventingBench_C"
+local SLATE = FName("SlateUI")
+local function fixScreen(bench, tries)
+    if not valid(bench) or not valid(bench.ScreenMID) then return end
+    local rt = bench.Widget:GetRenderTarget()
+    if not valid(rt) then
+        if tries > 0 then common.defer(16, function() pcall(fixScreen, bench, tries - 1) end) end
+        return
+    end
+    if not valid(bench.ScreenMID:K2_GetTextureParameterValue(SLATE)) then
+        bench.ScreenMID:SetTextureParameterValue(SLATE, rt)
+        log("PT|stations research screen given its render target")
+    end
+end
+local screenHooked = false
+local function hookScreen()
+    if screenHooked then return end
+    screenHooked = pcall(RegisterHook, BENCH .. ":ActivateScreen", function(self)
+        if not safety.active() then return end
+        local bench = self:get() -- a hook parameter must not outlive the callback
+        common.defer(0, function() pcall(fixScreen, bench, 200) end)
+    end)
+end
+
 LoopInGameThreadWithDelay(500, function()
+    if safety.active() then pcall(hookScreen) end
     if common.netMode() == "client" then
         local bench = first("BP_Garage_InventingBench_C")
         if bench and bench ~= mutedBench and PTNative_Mute then
@@ -338,6 +398,8 @@ LoopInGameThreadWithDelay(500, function()
             shredded = {}
         end
     elseif host() then
+        local okc, errc = pcall(hostCurrencies)
+        if not okc then log("PT|error stations currencies %s", tostring(errc)) end
         local okq, errq = pcall(hostQuirks)
         if not okq then log("PT|error stations host quirks %s", tostring(errq)) end
         local ok, err = pcall(hostShredder)
