@@ -7,7 +7,7 @@
 -- Mutation nocarsync: car.lua of the shipping mod does nothing (the guest keeps its duplicate car and never gets seated).
 --   guest_view_on_car_frame  the view is rendered from where the camera is after the car moved this frame (the car was placed after
 --                            the camera: the interior shook against the view, 2026-10-30). Mutation nocartick fails it.
---   guest_head_sways         the seated guest's head moves with the car's acceleration (passenger inertia). Mutation nosway fails it.
+--   guest_cabin_reference_stable  the passenger camera adds no synthetic cabin motion. Mutation oldpassengersway fails it.
 -- Messages "t.*" between the two scenario halves use the native channel (see channel.lua).
 return function(T)
     local L = require("scenarios.carlib")(T)
@@ -325,7 +325,7 @@ return function(T)
     end })
     -- the host drives
     add({ check = "guest_drive_started", timeout = 120, cond = function() return got("t.drive") ~= nil end })
-    add({ run = function() met = { frames = 0, stalls = 0, maxJump = 0, dist = 0, camMax = 0, lags = {}, tilts = {}, swayMax = 0 }; L.measuring = true
+    add({ run = function() met = { frames = 0, stalls = 0, maxJump = 0, dist = 0, camMax = 0, lags = {}, tilts = {}, swayMax = 0, mutesAt=PTNative_MuteCount() }; L.measuring = true
         LoopInGameThreadWithDelay(1, function() if L.measuring then pcall(measure) end end) end })
     add({ check = "guest_chassis_not_simulating", timeout = 5, cond = function()
         local c = L.car()
@@ -344,6 +344,11 @@ return function(T)
         return met.dist > 3000 and met.maxJump < 200 and met.stalls <= met.frames * 0.03
     end })
     if os.getenv("PT_VARIANT")=="motion" then
+        add({check="guest_native_pose_writes_blocked",timeout=1,cond=function()
+            local n=PTNative_MuteCount()-met.mutesAt
+            log('PT|info blocked native calls during drive=%d',n)
+            return n>=10
+        end})
         add({check="guest_received_host_timed_motion",timeout=1,cond=function()
             local f=io.open('ue4ss/UE4SS.log','rb');if not f then return false end
             local s=f:read('a');f:close();return s:find('PT|car host-timed motion active',1,true)~=nil
@@ -363,9 +368,9 @@ return function(T)
         log("PT|info view against the camera after the car moved: p95 %.2f uu over %d moving frames", p95, n)
         return n > 100 and p95 < 1
     end })
-    add({ check = "guest_head_sways", timeout = 1, cond = function()
+    add({ check = "guest_cabin_reference_stable", timeout = 1, cond = function()
         log("PT|info passenger head sway max %.2f uu", met.swayMax)
-        return met.swayMax > 1.5
+        return met.swayMax < 0.25
     end })
     add({ check = "guest_car_settled", timeout = 20, cond = function()
         local m = got("t.settled")

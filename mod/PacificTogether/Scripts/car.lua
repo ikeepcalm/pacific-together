@@ -833,7 +833,7 @@ end)
 -- the actor ticks, before the camera: the step runs there, the loop only stands in when the tick stops (mutation nocartick: loop only).
 local TICK = os.getenv("PT_MUTATE") ~= "nocartick"
 local LOOK = os.getenv("PT_MUTATE") ~= "nocarlook"
-local followed, followLoop = nil, nil
+local followed, followLoop, followUnmute = nil, nil, nil
 local tickStep, tickAt, tickHooked = nil, 0, false
 local function hookTick(car)
     if tickHooked or not TICK then return end
@@ -845,8 +845,8 @@ end
 
 -- Passenger head sway: the seated guest's camera moves against the car's acceleration on a damped spring (back on
 -- throttle, forward on braking, out in turns, down over bumps). The host feels the car through its controls and physics;
--- a kinematic copy gives the guest none of that. Mutation nosway: off.
-local SWAY = os.getenv("PT_MUTATE") ~= "nosway"
+-- Retained as a regression control: this synthetic camera offset visibly shifts the cabin relative to the guest.
+local SWAY = os.getenv("PT_MUTATE") == "oldpassengersway"
 local GAIN, MAXOFF, K, C = 0.012, 10, 247, 22 -- 0.5 g -> ~6 uu; spring 2.5 Hz, damping 0.7
 local sw = {}
 local function swayCam(me)
@@ -919,6 +919,7 @@ end)
 
 local function follow(car)
     if followLoop then CancelDelayedAction(followLoop) end
+    if followUnmute then followUnmute() end
     pcall(function() car.Chassis:SetSimulatePhysics(false) end)
     pcall(function() car.VehicleController:SetComponentTickEnabled(false) end)
     local buf, gaps, last, delay, target = {}, {}, nil, 0.1, 0.1
@@ -929,7 +930,9 @@ local function follow(car)
     local name = car:GetFullName()
     log("PT|car follow %s", name)
     followed = name
-    local physical, previousAt, stoppedAt = false, os.clock(), nil
+    local physical, previousAt, stoppedAt, poseMuted = false, os.clock(), nil, false
+    local carAddress=car:GetAddress()
+    followUnmute=function() if poseMuted then PTNative_Unmute(carAddress);poseMuted=false end end
     local function step()
         local ok, err = pcall(function()
             local t, rm = os.clock(), car.ReplicatedMovement -- os.clock: wall time on Windows, no engine call each frame
@@ -956,6 +959,12 @@ local function follow(car)
                 stoppedAt = nil
             end
             local motion=net.hostSupports("car-motion") and carMotion or nil
+            -- Only the negotiated visual follower owns this car's pose; raw OnRep writes bypass its buffer.
+            if motion and not physical and not poseMuted and PTNative_Mute and os.getenv('PT_MUTATE')~='nativecarpose' then
+                poseMuted=PTNative_Mute(carAddress,'OnRep_ReplicatedMovement')
+            elseif physical and poseMuted then
+                PTNative_Unmute(car:GetAddress());poseMuted=false
+            end
             if motion and last and not last.source then buf,gaps,last={},{},nil end
             local p = motion and motion.p or rm.Location
             local fresh = not last or (motion and motion.source~=last.source) or (not motion and (p.X ~= last.x or p.Y ~= last.y or p.Z ~= last.z))
@@ -1006,7 +1015,7 @@ local function follow(car)
     tickStep = step
     hookTick(car)
     followLoop = LoopInGameThreadWithDelay(1, function()
-        if not valid(car) then CancelDelayedAction(followLoop); followLoop, followed, tickStep = nil, nil, nil; pcall(swayReset); return end
+        if not valid(car) then followUnmute();followUnmute=nil;CancelDelayedAction(followLoop); followLoop, followed, tickStep = nil, nil, nil; pcall(swayReset); return end
         if os.clock() - tickAt > 0.2 then step() end
     end)
 end
