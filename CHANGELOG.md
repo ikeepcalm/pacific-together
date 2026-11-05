@@ -6,6 +6,8 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 ## [Unreleased]
 
 - Broken host foliage is removed on the guest even when represented by a mesh instance instead of a separate shrub actor.
+- Capture foliage breaks at the game's break event and match the original swapped instance transform, including actors removed between polls.
+- Updated peers interpolate car snapshots using the host's timestamps; older peers retain the previous vehicle follower.
 
 ### Fixed in the vehicle experiment
 

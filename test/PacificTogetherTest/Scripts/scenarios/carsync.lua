@@ -106,7 +106,13 @@ return function(T)
         local guestPC = function() return S.remotePCs()[1] end
         local function send(kind, data) PTNative_MsgToGuest(guestPC():GetAddress(), kind, data or "") end
         local moved, start, saved, measureMotion, stoppedAt = 0, nil, {}, motionStats(), nil
-        for _, s in ipairs(T.loadFixture("garage")) do add(s) end
+        if os.getenv("PT_VARIANT")=="motion" and (os.getenv("PT_FIXTURE") or "")=="" then
+            add(T.onMap("RB_MainMenu",90))
+            add({run=function()T.console("open "..T.GARAGE.."?listen")end})
+            add(T.onMap("RB_Garage",120))
+        else
+            for _, s in ipairs(T.loadFixture("garage")) do add(s) end
+        end
         add({ check = "host_listen_garage", timeout = 30, cond = function() return T.netMode() == "listen" and T.listening() end })
         add({ check = "host_guest_in_garage", timeout = 240, cond = function() return S.guestChar() ~= nil end })
         add({ wait = 5 })
@@ -337,6 +343,12 @@ return function(T)
         log("PT|info follow frames=%d dist=%.0f maxJump=%.1f stalls=%d maxRawGap=%.3fs maxSampleGap=%.3fs excludedRawJumps=%d", met.frames, met.dist, met.maxJump, met.stalls, met.rawGap or 0, met.sampleGap or 0, met.rawJumps or 0)
         return met.dist > 3000 and met.maxJump < 200 and met.stalls <= met.frames * 0.03
     end })
+    if os.getenv("PT_VARIANT")=="motion" then
+        add({check="guest_received_host_timed_motion",timeout=1,cond=function()
+            local f=io.open('ue4ss/UE4SS.log','rb');if not f then return false end
+            local s=f:read('a');f:close();return s:find('PT|car host-timed motion active',1,true)~=nil
+        end})
+    end
     add({ check = "guest_tilt_tracks_host", timeout = 1, cond = function()
         return #met.tilts >= 30 and met.tilts[math.ceil(#met.tilts * 0.95)] < 25
     end })

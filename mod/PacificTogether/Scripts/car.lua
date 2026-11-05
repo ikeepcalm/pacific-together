@@ -1,6 +1,6 @@
 -- M3 car (C1-C4, C7). Only the car's transform replicates, so:
 --   guest: its own copy of the car (Role 3) is destroyed once the host's replicated car is there; the replicated car is
---          kinematic and moved every frame by motion-time Hermite interpolation of ReplicatedMovement (X7); the game's
+--          kinematic and moved every frame by Hermite interpolation of host-timed snapshots (legacy: ReplicatedMovement); the game's
 --          door interaction (BP_CarPart_Door_Base:EnterCar) is turned into an intent, the host seats the guest in the
 --          mirrored passenger seat and the guest holds the seat (X8); the host's car state (parts, health, fuel, battery,
 --          ignition, gear, lights, doors, handbrake) arrives as a message and is applied to the guest's own car inventory.
@@ -797,6 +797,37 @@ local function motionTime(prev, t, p, v)
     return tm + 0.1 * (t - tm)
 end
 
+-- Keep the host's sample times: packet arrival gaps are not the car's travel time.
+local carMotion,carClock
+RegisterLoadMapPreHook(function()carMotion,carClock=nil,nil end)
+net.on("g.motion.car",function(_,data)
+    if common.netMode()~="client" or not net.hostSupports("car-motion") or #data>1024 then return end
+    local fields={}
+    for f in data:gmatch('[^|]+')do fields[#fields+1]=f end
+    if #fields~=11 or fields[1]~=net.worldToken() then return end
+    for i=2,11 do
+        fields[i]=tonumber(fields[i])
+        if not fields[i] or fields[i]~=fields[i] or math.abs(fields[i])>1e9 then return end
+    end
+    if carMotion and fields[2]<=carMotion.source then return end
+    local t=os.clock();local offset=t-fields[2]
+    if not carClock then log('PT|car host-timed motion active') end
+    -- Follow clock drift slowly; a delayed packet must not move the presentation clock abruptly.
+    carClock=carClock and carClock+math.max(-0.0005,math.min(0.0005,(offset-carClock)*0.01)) or offset
+    carMotion={source=fields[2],tm=fields[2]+carClock,t=t,
+        p=vec(fields[3],fields[4],fields[5]),r={Pitch=fields[6],Yaw=fields[7],Roll=fields[8]},v=vec(fields[9],fields[10],fields[11])}
+end)
+LoopInGameThreadWithDelay(50,function()
+    if common.netMode()~="listen" then return end
+    local guests=net.guests();local wanted=false
+    for _,pc in ipairs(guests)do if net.peerSupports(pc,"car-motion")then wanted=true;break end end
+    if not wanted then return end
+    local car=theCar(true);if not car then return end
+    local p,r,v=car:K2_GetActorLocation(),car:K2_GetActorRotation(),car:GetVelocity()
+    local data=string.format('%s|%.6f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f',net.worldToken(),os.clock(),p.X,p.Y,p.Z,r.Pitch,r.Yaw,r.Roll,v.X,v.Y,v.Z)
+    for _,pc in ipairs(guests)do if net.peerSupports(pc,"car-motion")then net.toGuest(pc,"g.motion.car",data)end end
+end)
+
 -- The guest's camera is set after the actors tick; a car placed from the UE4SS loop came after it, so the view lagged the car one
 -- frame and the interior shook against it at speed (POV in car space p5-p95 ~8 uu, 2026-10-30). The car's own ReceiveTick runs in
 -- the actor ticks, before the camera: the step runs there, the loop only stands in when the tick stops (mutation nocartick: loop only).
@@ -924,13 +955,15 @@ local function follow(car)
             else
                 stoppedAt = nil
             end
-            local p = rm.Location
-            local fresh = not last or p.X ~= last.x or p.Y ~= last.y or p.Z ~= last.z
+            local motion=net.hostSupports("car-motion") and carMotion or nil
+            if motion and last and not last.source then buf,gaps,last={},{},nil end
+            local p = motion and motion.p or rm.Location
+            local fresh = not last or (motion and motion.source~=last.source) or (not motion and (p.X ~= last.x or p.Y ~= last.y or p.Z ~= last.z))
             if not fresh and settled and not physical then return end
             if fresh then
                 settled = false
-                local r, v = rm.Rotation, rm.LinearVelocity
-                local tm = motionTime(last, t, p, v)
+                local r, v = motion and motion.r or rm.Rotation, motion and motion.v or rm.LinearVelocity
+                local tm = motion and motion.tm or motionTime(last, t, p, v)
                 if last then
                     table.insert(gaps, t - last.t)
                     if #gaps > 60 then table.remove(gaps, 1) end
@@ -941,7 +974,7 @@ local function follow(car)
                 else
                     delay = target
                 end
-                last = { t = t, tm = tm, x = p.X, y = p.Y, z = p.Z, vx = v.X, vy = v.Y, vz = v.Z, pitch = r.Pitch, yaw = r.Yaw, roll = r.Roll }
+                last = { t = t, tm = tm, source=motion and motion.source, x = p.X, y = p.Y, z = p.Z, vx = v.X, vy = v.Y, vz = v.Z, pitch = r.Pitch, yaw = r.Yaw, roll = r.Roll }
                 table.insert(buf, last)
                 if #buf > 64 then table.remove(buf, 1) end
             end

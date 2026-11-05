@@ -12,7 +12,8 @@ assert(type(PTNative_MsgReset) == "function", "PacificTogetherNative is outdated
 local M = {}
 local handlers = {}
 -- Extensions ride the author's PT1/PT1A contract, only after both peers opt in.
-local offered = "motion,door-motion,foliage,drop-velocity,item-state,intents,heap" .. (PTNative_TunnelMotionSend and ",datagrams" or "")
+local offered = "motion,car-motion,door-motion,foliage,drop-velocity,item-state,intents,heap" .. (PTNative_TunnelMotionSend and ",datagrams" or "")
+if os.getenv("PT_MUTATE")=="nocarmotion" then offered=offered:gsub(",car%-motion","") end
 if os.getenv("PT_MUTATE")=="nodoormotion" then offered=offered:gsub(",door%-motion","") end
 -- The simulated guest chassis fights pose correction; retain it only as a failing test control.
 if os.getenv("PT_MUTATE") == "physicalcar" then offered = offered .. ",physical-car" end
