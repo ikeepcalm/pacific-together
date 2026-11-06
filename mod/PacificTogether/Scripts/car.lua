@@ -1,6 +1,6 @@
 -- M3 car (C1-C4, C7). Only the car's transform replicates, so:
 --   guest: its own copy of the car (Role 3) is destroyed once the host's replicated car is there; the replicated car is
---          kinematic and moved every frame by motion-time Hermite interpolation of ReplicatedMovement (X7); the game's
+--          kinematic and moved every frame by Hermite interpolation of host-timed snapshots (legacy: ReplicatedMovement); the game's
 --          door interaction (BP_CarPart_Door_Base:EnterCar) is turned into an intent, the host seats the guest in the
 --          mirrored passenger seat and the guest holds the seat (X8); the host's car state (parts, health, fuel, battery,
 --          ignition, gear, lights, doors, handbrake) arrives as a message and is applied to the guest's own car inventory.
@@ -14,6 +14,10 @@ local log = common.log
 local ov = require("overlay")
 
 local M = {}
+local proxyInput
+function M.physicalProxyActive()
+    return common.netMode() == "client" and net.hostSupports("physical-car") and proxyInput ~= nil and os.clock() - proxyInput.at < 1
+end
 if os.getenv("PT_MUTATE") == "nocarsync" then
     log("PT|car disabled (mutation nocarsync)")
     return M
@@ -194,14 +198,15 @@ end
 -- Opening only unlatches one; its mesh then swings on physics. The guest's copy stayed shut (no physics there), and the
 -- host's door-state sync closed the guest's own opening 1-2 s later (hand playtest 2026-10-23).
 local DOOR = "BP_CarPart_Door_Base_C"
+local HOOD = "BP_Panel_Base_C"
 local function doorParts(car)
     local r, list = {}, {}
     pcall(function() car:GetAttachedActors(list, true) end)
     for _, e in ipairs(list) do
         local a = e:get()
-        if valid(a) and a:GetClass():GetFName():ToString() == DOOR then
+        if valid(a) and (a:GetClass():GetFName():ToString() == DOOR or a:GetClass():GetFName():ToString() == HOOD) then
             local ok, slot = pcall(function() return a.RootComponent.AttachParent:GetFName():ToString() end)
-            if ok then r[slot] = a end
+            if ok and (a:GetClass():GetFName():ToString() == DOOR or slot == "SLOT_Hood") then r[slot] = a end
         end
     end
     return r
@@ -210,6 +215,8 @@ local doorHold = 0 -- guest: until then its own door move (sent to the host) is 
 local entryDoor -- host: the door a guest opened last { part, at }; shut once they are seated (the game's entry does it itself)
 local doorHeld -- guest: the host's last state during the hold, applied when it ends (else a shut showed only 3 s later)
 local doorRest, doorSwung = {}, {} -- guest: part address -> the mesh's shut pose on its part; parts we posed open
+local doorTargets = {}
+RegisterLoadMapPreHook(function() doorTargets = {} end)
 
 -- host -------------------------------------------------------------------------------------------------------------------
 
@@ -286,7 +293,9 @@ end
 -- host hooks (listen only): a door verb or knock starts the swing watcher, a changed car loadout rebuilds the part lines.
 -- Each keeps its slow timer fallback (the 2 s swing pass, the 1 s part lines); first fires are logged as PT|probe.
 local DOORBP = "/Game/Gameplay/Inventory/Items/Car/Doors/BP_CarPart_Door_Base.BP_CarPart_Door_Base_C:"
+local HOODBP = "/Game/Gameplay/Inventory/Items/Car/Panels/BP_Panel_Base.BP_Panel_Base_C:"
 local hostHooked, probeN = false, {}
+local healthDirty=false
 local probeOk, probeLogged = {}, {} -- hook name -> registered; -> failure logged once
 local function probe(name, fn)
     if probeOk[name] then return true end
@@ -310,7 +319,17 @@ local function hostHooks()
     for _, fn in ipairs({ "AttemptOpen", "AttemptShut", "ObjectKicked", "OnConstraintBroken_Event_0" }) do
         all = probe(DOORBP .. fn, function() swingFor() end) and all
     end
+    for _, fn in ipairs({ "AttemptOpen", "AttemptShut", "OnConstraintBroken_Event_0" }) do
+        all = probe(HOODBP .. fn, function() swingFor() end) and all
+    end
     all = probe("/Game/Systems/Managers/BP_CarManager.BP_CarManager_C:UpdatedCarEquip", function() partsAt = -1 end) and all
+    for _,fn in ipairs({'SetHealth','ModifyHealth'})do
+        all=probe(COMP..'BP_HealthComponent.BP_HealthComponent_C:'..fn,function(self)
+            if common.netMode()~='listen' then return end
+            local owner=self:get():GetOwner()
+            if valid(owner) and same(owner:GetAttachParentActor(),theCar(true))then partsAt=-1;healthDirty=true end
+        end) and all
+    end
     hostHooked = all
 end
 
@@ -336,9 +355,10 @@ local function hostTick()
     -- while driving, and the guest's own pawn waited minutes for room (hand play 2026-10-24). Ignition, gear, lights, handbrake and
     -- doors (the H line) still go at once; the rest at most twice a second.
     local h = s:match("^[^\n]*")
-    if #guests ~= lastGuests or h ~= lastH or (s ~= lastSent and t - lastAt >= 0.5) or t - lastAt > 3 then
+    if #guests ~= lastGuests or h ~= lastH or (s ~= lastSent and (healthDirty or t - lastAt >= 0.5)) or t - lastAt > 3 then
         net.toGuests("g.car.s", s)
         lastSent, lastAt, lastGuests, lastH = s, t, #guests, h
+        healthDirty=false
     end
 end
 
@@ -408,6 +428,7 @@ LoopInGameThreadWithDelay(50, function()
 end)
 LoopInGameThreadWithDelay(16, function()
     if common.netMode() ~= "client" or not valid(wheelCar) then return end
+    if M.physicalProxyActive() then return end
     local a, b, u, extrapolate = wheelMotion.sample(wheelBuffer, os.clock())
     if not a then return end
     local ct = wheelCar:GetTransform()
@@ -785,12 +806,43 @@ local function motionTime(prev, t, p, v)
     return tm + 0.1 * (t - tm)
 end
 
+-- Keep the host's sample times: packet arrival gaps are not the car's travel time.
+local carMotion,carClock
+RegisterLoadMapPreHook(function()carMotion,carClock=nil,nil end)
+net.on("g.motion.car",function(_,data)
+    if common.netMode()~="client" or not net.hostSupports("car-motion") or #data>1024 then return end
+    local fields={}
+    for f in data:gmatch('[^|]+')do fields[#fields+1]=f end
+    if #fields~=11 or fields[1]~=net.worldToken() then return end
+    for i=2,11 do
+        fields[i]=tonumber(fields[i])
+        if not fields[i] or fields[i]~=fields[i] or math.abs(fields[i])>1e9 then return end
+    end
+    if carMotion and fields[2]<=carMotion.source then return end
+    local t=os.clock();local offset=t-fields[2]
+    if not carClock then log('PT|car host-timed motion active') end
+    -- Follow clock drift slowly; a delayed packet must not move the presentation clock abruptly.
+    carClock=carClock and carClock+math.max(-0.0005,math.min(0.0005,(offset-carClock)*0.01)) or offset
+    carMotion={source=fields[2],tm=fields[2]+carClock,t=t,
+        p=vec(fields[3],fields[4],fields[5]),r={Pitch=fields[6],Yaw=fields[7],Roll=fields[8]},v=vec(fields[9],fields[10],fields[11])}
+end)
+LoopInGameThreadWithDelay(50,function()
+    if common.netMode()~="listen" then return end
+    local guests=net.guests();local wanted=false
+    for _,pc in ipairs(guests)do if net.peerSupports(pc,"car-motion")then wanted=true;break end end
+    if not wanted then return end
+    local car=theCar(true);if not car then return end
+    local p,r,v=car:K2_GetActorLocation(),car:K2_GetActorRotation(),car:GetVelocity()
+    local data=string.format('%s|%.6f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f',net.worldToken(),os.clock(),p.X,p.Y,p.Z,r.Pitch,r.Yaw,r.Roll,v.X,v.Y,v.Z)
+    for _,pc in ipairs(guests)do if net.peerSupports(pc,"car-motion")then net.toGuest(pc,"g.motion.car",data)end end
+end)
+
 -- The guest's camera is set after the actors tick; a car placed from the UE4SS loop came after it, so the view lagged the car one
 -- frame and the interior shook against it at speed (POV in car space p5-p95 ~8 uu, 2026-10-30). The car's own ReceiveTick runs in
 -- the actor ticks, before the camera: the step runs there, the loop only stands in when the tick stops (mutation nocartick: loop only).
 local TICK = os.getenv("PT_MUTATE") ~= "nocartick"
 local LOOK = os.getenv("PT_MUTATE") ~= "nocarlook"
-local followed, followLoop = nil, nil
+local followed, followLoop, followUnmute = nil, nil, nil
 local tickStep, tickAt, tickHooked = nil, 0, false
 local function hookTick(car)
     if tickHooked or not TICK then return end
@@ -802,8 +854,8 @@ end
 
 -- Passenger head sway: the seated guest's camera moves against the car's acceleration on a damped spring (back on
 -- throttle, forward on braking, out in turns, down over bumps). The host feels the car through its controls and physics;
--- a kinematic copy gives the guest none of that. Mutation nosway: off.
-local SWAY = os.getenv("PT_MUTATE") ~= "nosway"
+-- Retained as a regression control: this synthetic camera offset visibly shifts the cabin relative to the guest.
+local SWAY = os.getenv("PT_MUTATE") == "oldpassengersway"
 local GAIN, MAXOFF, K, C = 0.012, 10, 247, 22 -- 0.5 g -> ~6 uu; spring 2.5 Hz, damping 0.7
 local sw = {}
 local function swayCam(me)
@@ -853,8 +905,30 @@ local function sway(car, t)
     cam:K2_SetRelativeLocation(kml():InverseTransformDirection(cam:GetAttachParent():K2_GetComponentToWorld(), w), false, {}, false)
 end
 
+-- Experimental proxy: the host remains authoritative; controls are presentation input on the guest.
+RegisterLoadMapPreHook(function() proxyInput = nil end)
+net.on("g.motion.physicalcar", function(_, data)
+    if common.netMode() ~= "client" or not net.hostSupports("physical-car") then return end
+    local epoch, th, brake, steer = data:match("^([^|]+)|([^|]+)|([^|]+)|([^|]+)$")
+    th, brake, steer = tonumber(th), tonumber(brake), tonumber(steer)
+    if epoch ~= net.worldToken() or not th or not brake or not steer or th ~= th or brake ~= brake or steer ~= steer
+        or math.abs(th) > 1 or math.abs(brake) > 1 or math.abs(steer) > 1 then return end
+    proxyInput = {th=th, brake=brake, steer=steer, at=os.clock()}
+end)
+LoopInGameThreadWithDelay(50, function()
+    if common.netMode() ~= "listen" then return end
+    local guests, car = net.guests(), theCar(true)
+    if #guests == 0 or not car then return end
+    local ok, data = pcall(function()
+        local v = car.VehicleController
+        return string.format("%s|%.3f|%.3f|%.3f", net.worldToken(), v.ThrottleInput, v.BrakeInput, v.SteerInput)
+    end)
+    if ok then for _, pc in ipairs(guests) do if net.peerSupports(pc, "physical-car") then net.toGuest(pc, "g.motion.physicalcar", data) end end end
+end)
+
 local function follow(car)
     if followLoop then CancelDelayedAction(followLoop) end
+    if followUnmute then followUnmute() end
     pcall(function() car.Chassis:SetSimulatePhysics(false) end)
     pcall(function() car.VehicleController:SetComponentTickEnabled(false) end)
     local buf, gaps, last, delay, target = {}, {}, nil, 0.1, 0.1
@@ -865,16 +939,49 @@ local function follow(car)
     local name = car:GetFullName()
     log("PT|car follow %s", name)
     followed = name
+    local physical, previousAt, stoppedAt, poseMuted = false, os.clock(), nil, false
+    local carAddress=car:GetAddress()
+    followUnmute=function() if poseMuted then PTNative_Unmute(carAddress);poseMuted=false end end
     local function step()
         local ok, err = pcall(function()
             local t, rm = os.clock(), car.ReplicatedMovement -- os.clock: wall time on Windows, no engine call each frame
-            local p = rm.Location
-            local fresh = not last or p.X ~= last.x or p.Y ~= last.y or p.Z ~= last.z
-            if not fresh and settled then return end
+            local dt = math.min(0.1, math.max(0, t - previousAt)); previousAt = t
+            local enabled = M.physicalProxyActive()
+            if enabled ~= physical then
+                physical = enabled
+                car.Chassis:SetSimulatePhysics(physical)
+                car.VehicleController:SetComponentTickEnabled(physical)
+                log("PT|car experimental physical proxy=%s", tostring(physical))
+            end
+            if physical then
+                local vc = car.VehicleController
+                vc.ThrottleInput, vc.BrakeInput, vc.SteerInput = proxyInput.th, proxyInput.brake, proxyInput.steer
+                local v = rm.LinearVelocity
+                if math.abs(proxyInput.th) < 0.01 and v.X^2 + v.Y^2 + v.Z^2 < 25 then
+                    stoppedAt = stoppedAt or t
+                    if t - stoppedAt >= 1 and os.getenv("PT_MUTATE") ~= "nostationaryguard" then
+                        car.Chassis:SetPhysicsLinearVelocity(vec(0, 0, 0), false, NONE)
+                        car.Chassis:SetPhysicsAngularVelocityInDegrees(vec(0, 0, 0), false, NONE)
+                    end
+                else stoppedAt = nil end
+            else
+                stoppedAt = nil
+            end
+            local motion=net.hostSupports("car-motion") and carMotion or nil
+            -- Only the negotiated visual follower owns this car's pose; raw OnRep writes bypass its buffer.
+            if motion and not physical and not poseMuted and PTNative_Mute and os.getenv('PT_MUTATE')~='nativecarpose' then
+                poseMuted=PTNative_Mute(carAddress,'OnRep_ReplicatedMovement')
+            elseif physical and poseMuted then
+                PTNative_Unmute(car:GetAddress());poseMuted=false
+            end
+            if motion and last and not last.source then buf,gaps,last={},{},nil end
+            local p = motion and motion.p or rm.Location
+            local fresh = not last or (motion and motion.source~=last.source) or (not motion and (p.X ~= last.x or p.Y ~= last.y or p.Z ~= last.z))
+            if not fresh and settled and not physical then return end
             if fresh then
                 settled = false
-                local r, v = rm.Rotation, rm.LinearVelocity
-                local tm = motionTime(last, t, p, v)
+                local r, v = motion and motion.r or rm.Rotation, motion and motion.v or rm.LinearVelocity
+                local tm = motion and motion.tm or motionTime(last, t, p, v)
                 if last then
                     table.insert(gaps, t - last.t)
                     if #gaps > 60 then table.remove(gaps, 1) end
@@ -885,13 +992,17 @@ local function follow(car)
                 else
                     delay = target
                 end
-                last = { t = t, tm = tm, x = p.X, y = p.Y, z = p.Z, vx = v.X, vy = v.Y, vz = v.Z, pitch = r.Pitch, yaw = r.Yaw, roll = r.Roll }
+                last = { t = t, tm = tm, source=motion and motion.source, x = p.X, y = p.Y, z = p.Z, vx = v.X, vy = v.Y, vz = v.Z, pitch = r.Pitch, yaw = r.Yaw, roll = r.Roll }
                 table.insert(buf, last)
                 if #buf > 64 then table.remove(buf, 1) end
             end
             delay = delay + (target - delay) * 0.01
             local to, rot = sample_at(buf, t - delay, "tm")
             if to then
+                if physical then
+                    to = kml():VInterpTo(car:K2_GetActorLocation(), to, dt, 10)
+                    rot = kml():RInterpTo(car:K2_GetActorRotation(), rot, dt, 10)
+                end
                 car:K2_SetActorLocationAndRotation(to, rot, false, {}, true)
                 local turn = wrap(rot.Yaw - lookYaw)
                 lookYaw = rot.Yaw
@@ -913,7 +1024,7 @@ local function follow(car)
     tickStep = step
     hookTick(car)
     followLoop = LoopInGameThreadWithDelay(1, function()
-        if not valid(car) then CancelDelayedAction(followLoop); followLoop, followed, tickStep = nil, nil, nil; pcall(swayReset); return end
+        if not valid(car) then followUnmute();followUnmute=nil;CancelDelayedAction(followLoop); followLoop, followed, tickStep = nil, nil, nil; pcall(swayReset); return end
         if os.clock() - tickAt > 0.2 then step() end
     end)
 end
@@ -1066,6 +1177,34 @@ local function predictEnter(me, car)
     end)
 end
 
+-- Keep a short-lived target while the installed part's component is being created.
+local healthTargets = {}
+RegisterLoadMapPreHook(function() healthTargets = {} end)
+local function retryHealth(name, arch, value)
+    local target = { arch = arch, value = value, tries = 0 }
+    healthTargets[name] = target
+    local function retry()
+        if healthTargets[name] ~= target or common.netMode() ~= "client" then return end
+        target.tries = target.tries + 1
+        local cm, cont = carManager(), equipped()
+        local item
+        if cont then cont.Slots:ForEach(function(_, e)
+            local slot = e:get()
+            if slotName(slot) == name then item = itemOf(slot) end
+        end) end
+        if item and archPath(item) ~= arch then healthTargets[name] = nil; return end
+        if not (M.holdSlot and M.holdSlot(name)) and item and cm then
+            local m = manifestation(cm, name)
+            local c = m and propComps(m)
+            local h = c and readPart(c)
+            if h and math.abs(h - value) <= 0.05 then healthTargets[name] = nil; return end
+            if h and valid(c.h) then c.h:SetHealth(value) end
+        end
+        if target.tries < 12 then common.defer(250, retry) else healthTargets[name] = nil end
+    end
+    common.defer(250, retry)
+end
+
 -- apply the host's state to our own car inventory (the manifestations on the replicated car follow it)
 local function applyState(data)
     local cm, cont = carManager(), equipped()
@@ -1091,6 +1230,7 @@ local function applyState(data)
         local want, it = parts[name], itemOf(slot)
         if M.holdSlot and M.holdSlot(name) then return end -- the guest just swapped this part itself (guestswap.lua)
         if not want then
+            healthTargets[name] = nil
             if it then slot:RemoveAllItems({}); changed = changed + 1; log("PT|car part removed %s", name); if ov.settled() then ov.post("%d car part{s} changed by the host", "info", "carpart") end end
             return
         end
@@ -1108,11 +1248,14 @@ local function applyState(data)
             if m then
                 local c = propComps(m)
                 local h, f, b = readPart(c)
-                if want.h and h and math.abs(h - want.h) > 0.05 then c.h:SetHealth(want.h); changed = changed + 1 end
+                if want.h and (not h or math.abs(h - want.h) > 0.05) then
+                    if h and os.getenv("PT_MUTATE") ~= "healthretryonly" then c.h:SetHealth(want.h); changed = changed + 1 end
+                    retryHealth(name, want.arch, want.h)
+                else healthTargets[name] = nil end
                 if want.f and f and math.abs(f - want.f) > 0.05 then c.f["Set Fuel"](c.f, want.f); changed = changed + 1 end
                 if want.b and b and math.abs(b - want.b) > 0.05 then c.b["Set Battery"](c.b, want.b); changed = changed + 1 end
-            end
-        end
+            elseif want.h then retryHealth(name, want.arch, want.h) end
+        else healthTargets[name] = nil end
     end)
     if changed > 0 then
         pcall(function() cm:UpdateAggregateFuel() end)
@@ -1149,6 +1292,7 @@ local function applyState(data)
             end
             local want = swing[slot]
             if want then
+                if net.hostSupports("door-motion") then return end
                 if m:IsSimulatingPhysics(FName("None")) then m:SetSimulatePhysics(false) end
                 m:K2_SetWorldLocationAndRotation(kml():TransformLocation(ct, want[1]), kml():TransformRotation(ct, want[2]), false, {}, true)
                 doorSwung[key] = true
@@ -1166,15 +1310,17 @@ end
 
 -- guest: its own open/close of the host's car door goes to the host, which runs the same AttemptOpen on its part;
 -- the result comes back with the car state
-net.on("g.car.door", function(_, data)
+net.on("g.car.door", function(pc, data)
     if common.netMode() ~= "listen" then return end
     local slot, verb = data:match("^([^|]*)|?(.*)$")
+    local pawn = valid(pc) and pc.Pawn
+    if slot == "SLOT_Hood" and valid(pawn) and same(pawn:GetAttachParentActor(), theCar(true)) then return end
     local shut = verb == "shut"
     local car = theCar(true)
     local part = car and doorParts(car)[slot]
     if not valid(part) then log("PT|car door intent: no door at %s", tostring(slot)); return end
     pcall(function() if shut then part:AttemptShut() else part:AttemptOpen() end end)
-    entryDoor = not shut and { part = part, at = now() } or nil
+    entryDoor = not shut and slot == "SLOT_FrontRightDoor" and { part = part, at = now() } or nil
     log("PT|car door intent %s %s applied", slot, shut and "shut" or "open")
 end)
 
@@ -1195,7 +1341,7 @@ local function sendExit()
     log("PT|car exit intent sent=%s", tostring(net.toHost("g.car.exit")))
 end
 
-local hooked, exitWanted, ctlWanted, aimed = false, false, false, nil
+local hooked, ctlWanted, aimed = false, false, nil
 local function hookAll()
     if hooked then return end
     local ok, err = pcall(RegisterHook, "/Game/Gameplay/Inventory/Items/Car/Doors/BP_CarPart_Door_Base.BP_CarPart_Door_Base_C:EnterCar", function(self)
@@ -1212,12 +1358,15 @@ local function hookAll()
     if not ok then log("PT|error car hook EnterCar %s", tostring(err)); return end
     -- shutting too: a door the host opened is posed on the guest with its physics off, so a local shut did nothing (2026-10-23)
     for fn, suffix in pairs({ AttemptOpen = "", AttemptShut = "|shut" }) do
-        local okd, errd = pcall(RegisterHook, "/Game/Gameplay/Inventory/Items/Car/Doors/BP_CarPart_Door_Base.BP_CarPart_Door_Base_C:" .. fn, function(self)
+        for _, path in ipairs({DOORBP, HOODBP}) do
+        local okd, errd = pcall(RegisterHook, path .. fn, function(self)
             pcall(function()
                 if common.netMode() ~= "client" then return end
                 local part, car = self:get(), theCar(false)
                 if not (valid(part) and car and same(part:GetAttachParentActor(), car)) then return end
                 local slot = part.RootComponent.AttachParent:GetFName():ToString()
+                if path == HOODBP and slot ~= "SLOT_Hood" then return end
+                if slot == "SLOT_Hood" and riding then return end
                 -- only our own physics swing needs protecting; a door the host opened is posed here, its shut animates from the host
                 if suffix == "" or part.MainMesh:IsSimulatingPhysics(FName("None")) then doorHold = now() + 1.5 end
                 log("PT|car door intent %s%s sent=%s", slot, suffix, tostring(net.toHost("g.car.door", slot .. suffix)))
@@ -1236,10 +1385,11 @@ local function hookAll()
             end)
         end)
         if not okd then log("PT|error car hook %s %s", fn, tostring(errd)) end
+        end
     end
     hooked = true
-    -- leaving: key X while seated; the key only raises a flag (an ExecuteInGameThread per press crashed UE4SS when spammed, ping.lua)
-    common.onKey("X", function() if aimed ~= "radio" then exitWanted = true end end)
+    -- leaving: the passenger door (owner 2026-11-04: X went, it is also the radio's next track). E only raises a flag (an
+    -- ExecuteInGameThread per press crashed UE4SS when spammed, ping.lua)
     common.onKey("E", function() ctlWanted = true end)
 end
 
@@ -1253,8 +1403,6 @@ StaticFindObject("/Script/Engine.Default__InputSettings").ActionMappings:ForEach
             if common.netMode() ~= "client" or not riding then return end
             local hm = first("BP_HighlightManager_C")
             if not (hm and hm.Enabled) then return end
-            -- X remains passenger exit outside the radio context.
-            if key == "X" and aimed ~= "radio" then return end
             net.toHost("g.car.ctl", action)
         end)
     end
@@ -1298,6 +1446,8 @@ local function unstick()
     probe("parent", function() local p = me:GetAttachParentActor(); return p:IsValid() and p:GetFName():ToString() or "none" end)
     probe("riding", function() return riding ~= nil end)
     log("PT|car unstick %s", table.concat(s, " "))
+    -- seated, it also gets out: the passenger door is the only other way since X went, and a door can be removed or broken off
+    if riding and common.netMode() == "client" then sendExit() end
     -- the controller looked normal when stuck (2026-10-22): dump the game's own car/seat/input state on the character and its manager
     local function dump(tag, o)
         if not valid(o) then return end
@@ -1338,10 +1488,6 @@ local function guestTick()
         doorHeld = nil
         local ok, err = pcall(applyState, held)
         if not ok then log("PT|error car apply %s", tostring(err)) end
-    end
-    if exitWanted then
-        exitWanted = false
-        if common.netMode() == "client" and riding then sendExit() end
     end
     if unstickWanted then
         unstickWanted = false
@@ -1389,10 +1535,21 @@ RegisterHook("/Script/PenDriverPro.BaseHighlightManager:PassesFilter", function(
     local h = highlight:get()
     if not valid(h) then return end
     local owner = h:GetOwner()
-    if not valid(owner) or owner:GetClass():GetFName():ToString() ~= "BP_CarPart_Interactive_C" then return end
-    local slot = {}
-    owner:GetSlotComponent(slot)
-    if valid(slot.SlotSceneComponent) and slot.SlotSceneComponent:GetFName():ToString() == "SLOT_Windshield" then return false end
+    if not valid(owner) then return end
+    local cls=owner:GetClass():GetFName():ToString()
+    if cls ~= "BP_CarPart_Interactive_C" and cls ~= HOOD then return end
+    if cls == "BP_CarPart_Interactive_C" then
+        local slot = {}; owner:GetSlotComponent(slot)
+        if valid(slot.SlotSceneComponent) then
+            local name = slot.SlotSceneComponent:GetFName():ToString()
+            if name == "SLOT_Windshield" or name == "SLOT_Hood" then return false end
+        end
+    end
+    local parent=valid(owner.RootComponent)and owner.RootComponent.AttachParent
+    if valid(parent) then
+        local name=parent:GetFName():ToString()
+        if name=="SLOT_Windshield" or name=="SLOT_Hood" then return false end
+    end
 end)
 local function highlightControl(hm)
     if not aimed or not controlCar or os.getenv("PT_MUTATE") == "nopasshighlight" then return end
@@ -1422,10 +1579,11 @@ LoopInGameThreadWithDelay(16, function()
             end
         end
         local radio = carRadio(car)
-        controlHighlights.radio = radio and radio.Highlight1
+        controlHighlights.radio = radio and radio.Highlight1 or nil -- a car without a radio (DLC zone, 2026-11-04): not false
         for what, h in pairs(controlHighlights) do
             if valid(h) then
                 local saved = {}
+                -- the radio too: left inside, the guest got no outline and no radio panel (live 2026-11-04)
                 if valid(h.ExtraData) and os.getenv("PT_MUTATE") ~= "nopasshighlight" then
                     saved.inside = h.ExtraData.IsInside
                     h.ExtraData.IsInside = false -- the passenger remains a character, outside the native driver state
@@ -1456,6 +1614,40 @@ end)
 -- The loop read every door's physics 20 times a second; it now works while swingUntil is ahead (set by the door hooks and by
 -- a door bit change in the 4 Hz sample) and, in case a hook did not fire, once every 2 s.
 local swingFallbackAt = 0
+net.on("g.motion.doors", function(_, data)
+    if common.netMode() ~= "client" or not net.hostSupports("door-motion") then return end
+    local epoch, identity, rows = data:match("^([^\n]+)\n([^\n]+)\n(.*)$")
+    if epoch ~= net.worldToken() or identity ~= wheelHostKey then return end
+    local targets = {}
+    for row in rows:gmatch("[^\n]+") do
+        local f={};for v in row:gmatch("[^|]+") do f[#f+1]=v end
+        if #f~=7 then return end
+        for i=2,7 do local n=tonumber(f[i]);if not n or n~=n or math.abs(n)>1e7 then return end;f[i]=n end
+        targets[f[1]]={p=vec(f[2],f[3],f[4]),r={Pitch=f[5],Yaw=f[6],Roll=f[7]}}
+    end
+    local t=os.clock()
+    for slot, target in pairs(targets) do
+        local old=doorTargets[slot]
+        target.fromP,target.fromR,target.at=old and old.shownP or target.p,old and old.shownR or target.r,t
+    end
+    doorTargets=targets
+end)
+LoopInGameThreadWithDelay(16,function()
+    if common.netMode()~="client" or os.clock()<doorHold then return end
+    local car=theCar(false);if not car then return end
+    local ct=car:GetTransform()
+    for slot,part in pairs(doorsOf(car)) do
+        local m=doorTargets[slot]
+        if m and valid(part.MainMesh) then
+            local u=math.min(1,(os.clock()-m.at)/0.075)
+            m.shownP=kml():VLerp(m.fromP,m.p,u);m.shownR=kml():RLerp(m.fromR,m.r,u,true)
+            local mesh=part.MainMesh
+            mesh:SetSimulatePhysics(false)
+            mesh:K2_SetWorldLocationAndRotation(kml():TransformLocation(ct,m.shownP),kml():TransformRotation(ct,m.shownR),false,{},true)
+            doorSwung[part:GetAddress()]=true
+        end
+    end
+end)
 M.swingWork = 0 -- debug counter for scenarios: passes that read door physics
 LoopInGameThreadWithDelay(50, function()
     if os.clock() >= swingUntil then
@@ -1467,6 +1659,18 @@ LoopInGameThreadWithDelay(50, function()
         local car = theCar(true)
         if not car then return end
         M.swingWork = M.swingWork + 1
+        local rows,ct={},car:GetTransform()
+        for slot,d in pairs(doorsOf(car)) do
+            local mesh=d.MainMesh
+            if valid(mesh) and mesh:IsSimulatingPhysics(FName("None")) then
+                local p=kml():InverseTransformLocation(ct,mesh:K2_GetComponentLocation())
+                local r=kml():InverseTransformRotation(ct,mesh:K2_GetComponentRotation())
+                rows[#rows+1]=string.format("%s|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f",slot,p.X,p.Y,p.Z,r.Pitch,r.Yaw,r.Roll)
+            end
+        end
+        for _,pc in ipairs(net.guests()) do
+            if net.peerSupports(pc,"door-motion") then net.toGuest(pc,"g.motion.doors",net.worldToken().."\n"..car:GetFName():ToString().."\n"..table.concat(rows,"\n")) end
+        end
         for _, d in pairs(doorsOf(car)) do
             local m = valid(d) and d.MainMesh
             if m and m:IsSimulatingPhysics(FName("None")) then
@@ -1479,7 +1683,6 @@ LoopInGameThreadWithDelay(50, function()
 end)
 
 M.exit = sendExit
-M.aimed = function() return aimed end -- guestui.lua's seat hint: "ign", "gear" or nil
 M.unstick = function() unstickWanted = true end -- guestui.lua: second key and console command
 -- for guestact.lua (the guest's car work and ARC)
 M.theCar, M.carManager, M.equipped, M.itemOf, M.slotName = theCar, carManager, equipped, itemOf, slotName

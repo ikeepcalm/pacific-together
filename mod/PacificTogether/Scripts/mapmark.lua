@@ -160,8 +160,124 @@ if os.getenv("PT_MUTATE") ~= "nowaypoint" then
     end)
 end
 
+-- The guest's ARC map is the host's (live 2026-11-04). Its own game kept every junction open (Icon_Entrance/Exit/Closed on one
+-- spot, the host shows one), its clumps spawned other buildings than the host's (runtime icon components, other names on each
+-- side), and the gateway's icons stay off on a portal copy the host's game did not activate. So the host sends each visible icon
+-- (texture, materials, place, size, color) and the guest hides all of its own and draws the host's on components of its own.
+-- Players, the car and the waypoint (car texture, pin) stay each side's own. No GetOwner: an icon whose actor was gone crashed
+-- the host in it (access violation, live 2026-11-04).
+-- shortcut: no tooltips, layer offsets or per-layer rotation on the copies; send them if hover text or odd icons turn out to matter.
+local SKIP = { ["Car_-_Key"] = true, ["Map-Pin"] = true }
+local hostIcons, applied, sentIcons, sentAt, proxies, proxyOf, holder = nil, nil, nil, nil, {}, {}, nil
+local hid, missing = {}, {} -- guest: its own icons it turned off (full name -> component); asset paths that did not load
+local DEFAULT_MAT = { ["/MinimapPlugin/Materials/Icons/M_UMG_MapIcon.M_UMG_MapIcon"] = true, ["/MinimapPlugin/Materials/Icons/M_Canvas_MapIcon.M_Canvas_MapIcon"] = true }
+local function path(o) return valid(o) and (o:GetFullName():gsub("^%S+ ", "")) or "" end
+local function mat(o) local p = path(o); return DEFAULT_MAT[p] and "" or p end -- the default (nearly every icon) is not sent
+local function eachIcon(fn)
+    for _, c in ipairs(FindAllOf("MapIconComponent") or {}) do
+        if valid(c) and not proxyOf[c:GetFullName()] then
+            local t = c.IconTexture
+            if not SKIP[valid(t) and t:GetFName():ToString() or "?"] then fn(c) end
+        end
+    end
+end
+local function hostList()
+    local L = {}
+    eachIcon(function(c)
+        -- an orphan in /Engine/Transient (its actor gone) sits at 0,0 and the host's map does not draw it: the guest drew it mid-map
+        if c:IsIconVisible() and not c:GetFullName():find("/Engine/Transient", 1, true) then
+            local l = c:K2_GetComponentLocation()
+            local function add(tex, col, size, z)
+                L[#L + 1] = table.concat({ path(tex), mat(c.IconMaterial_UMG), mat(c.IconMaterial_Canvas),
+                    string.format("%.0f|%.0f|%.0f|%.0f|%d|%d|%.2f|%.2f|%.2f|%.2f|%s|%.0f|%d", l.X, l.Y, l.Z, size, c.IconSizeUnit,
+                        z, col.R, col.G, col.B, col.A, tostring(c.bIconRotates), c:K2_GetComponentRotation().Yaw, c.IconFogInteraction) }, "|")
+            end
+            add(c.IconTexture, c.IconDrawColor, c.IconSize, c.IconZOrder)
+            -- each layer draws over the base (a junction: grey square, black glyph at 0.67; a house: black, white glyph)
+            for i = 0, c:GetIconLayerCount() - 1 do
+                local t = c:GetIconTextureForLayer(i)
+                if c:IsIconVisibleForLayer(i) and valid(t) then
+                    add(t, c:GetIconDrawColorForLayer(i), c.IconSize * c:GetIconScaleForLayer(i).X, c.IconZOrder + i + 1)
+                end
+            end
+        end
+    end)
+    table.sort(L)
+    return table.concat(L, "\n")
+end
+local function asset(p)
+    if p == "" or missing[p] then return nil end
+    local o = StaticFindObject(p)
+    if not o:IsValid() then pcall(LoadAsset, p); o = StaticFindObject(p) end
+    if not o:IsValid() then missing[p] = true; return nil end -- a runtime material (/Engine/Transient): no retry per apply
+    return o
+end
+local function proxy(i)
+    if valid(proxies[i]) then return proxies[i] end
+    if not valid(holder) then holder = FindFirstOf("BP_GobblerMapBounds_C") end -- lives as long as the map; none, no map to draw on
+    if not valid(holder) then return nil end
+    local c = holder:AddComponentByClass(class(ICON), true, XF, false) -- manual attachment: its transform is the world's
+    proxies[i], proxyOf[c:GetFullName()] = c, true
+    return c
+end
+local function applyIcons()
+    local i = 0
+    for line in (hostIcons .. "\n"):gmatch("(.-)\n") do
+        local f = {}
+        for x in (line .. "|"):gmatch("(.-)|") do f[#f + 1] = x end
+        if #f >= 16 then
+            local c = proxy(i + 1)
+            if not c then return false end
+            i = i + 1
+            local tex, mu, mc = asset(f[1]), asset(f[2]), asset(f[3])
+            if tex then c:SetIconTexture(tex) end
+            if mu then c:SetIconMaterialForUMG(mu) else c:ResetIconMaterialForUMG() end
+            if mc then c:SetIconMaterialForCanvas(mc) else c:ResetIconMaterialForCanvas() end
+            c:K2_SetWorldLocationAndRotation({ X = tonumber(f[4]), Y = tonumber(f[5]), Z = tonumber(f[6]) }, { Pitch = 0, Yaw = tonumber(f[15]), Roll = 0 }, false, {}, true)
+            c:SetIconSize(tonumber(f[7]), tonumber(f[8]))
+            c:SetIconZOrder(tonumber(f[9]))
+            c:SetIconDrawColor({ R = tonumber(f[10]), G = tonumber(f[11]), B = tonumber(f[12]), A = tonumber(f[13]) })
+            c:SetIconRotates(f[14] == "true")
+            c:SetIconFogInteraction(tonumber(f[16]))
+            c:SetIconVisible(true)
+        end
+    end
+    for j = i + 1, #proxies do if valid(proxies[j]) then proxies[j]:SetIconVisible(false) end end
+    log("PT|mapmark guest map draws %d host icons", i)
+    return true
+end
+-- the session ended with the guest still in the map: its own icons back, the host's copies off
+local function restoreIcons()
+    for _, c in pairs(hid) do if valid(c) then c:SetIconVisible(true) end end
+    for _, c in ipairs(proxies) do if valid(c) then c:SetIconVisible(false) end end
+    hid = {}
+end
+local function iconTick()
+    if not safety.active() then
+        if next(hid) then restoreIcons() end
+        hostIcons, applied, sentIcons = nil, nil, nil
+        return
+    end
+    if not safety.guest() then
+        local msg = hostList()
+        -- again every 10 s: one sent before the guest was ready is gone (seen: none arrived after a join)
+        if msg ~= sentIcons or os.clock() - (sentAt or 0) >= 10 then sentIcons, sentAt = msg, os.clock(); net.toGuests("g.map.icons", msg) end
+        return
+    end
+    if not hostIcons then return end
+    eachIcon(function(c) if c:IsIconVisible() then c:SetIconVisible(false); hid[c:GetFullName()] = c end end)
+    if hostIcons ~= applied and applyIcons() then applied = hostIcons end
+end
+net.on("g.map.icons", function(_, msg) if safety.guest() then hostIcons = msg end end)
+if os.getenv("PT_MUTATE") ~= "noicons" then
+    LoopInGameThreadWithDelay(2000, function()
+        local ok, err = pcall(iconTick)
+        if not ok then log("PT|error mapmark icons %s", tostring(err)) end
+    end)
+end
+
 -- a map change frees every object we hold: forget them before it happens
-RegisterLoadMapPreHook(function() marks, captureSeen, captureDone = {}, nil, 0; wp.sent, wp.got = nil, nil end)
+RegisterLoadMapPreHook(function() marks, captureSeen, captureDone = {}, nil, 0; wp.sent, wp.got = nil, nil; hostIcons, applied, sentIcons, proxies, proxyOf, holder, hid = nil, nil, nil, {}, {}, nil, {} end)
 
 LoopInGameThreadWithDelay(250, function()
     local ok, err = pcall(update)

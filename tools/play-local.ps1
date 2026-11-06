@@ -24,7 +24,12 @@ $sides = @(@{ Role = "host"; Dir = Join-Path $Root "client1" }, @{ Role = "clien
 foreach ($s in $sides) {
     $s.Bin = Join-Path $s.Dir $BinRel
     $s.Log = Join-Path $s.Bin "ue4ss\UE4SS.log"
-    if (-not (Test-Path "$($s.Bin)\ue4ss\Mods\PacificTogetherNative")) { throw "$($s.Dir) is not set up; run tools\setup-test.ps1" }
+    foreach ($file in @('PacificTogether\enabled.txt', 'PacificTogether\Scripts\main.lua', 'PacificTogetherNative\enabled.txt', 'PacificTogetherNative\dlls\main.dll')) {
+        $required = Join-Path "$($s.Bin)\ue4ss\Mods" $file
+        if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+            throw "Missing mod file: $required. Check the mod junction targets: their source worktree may have been removed."
+        }
+    }
 }
 $running = @(Get-Process -Name "PenDriverPro-Win64-Shipping", "PenDriverPro" -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$Root\", "OrdinalIgnoreCase") })
 if ($running) { Write-Host "A game from $Root is already running (PID $($running.Id -join ', ')). Close it first."; exit 2 }

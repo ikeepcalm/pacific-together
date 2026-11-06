@@ -5,6 +5,28 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+- Synchronize damaged car-part health, wreck paint, trunk opening and item positions; remove host-cleared vegetation on updated guests and hide the hood highlight while riding.
+
+- Keep the guest cabin steady by disabling synthetic passenger head sway; negotiated car motion owns its visual pose without competing native movement notifications.
+- Broken host foliage is removed on the guest even when represented by a mesh instance instead of a separate shrub actor.
+- Capture foliage breaks at the game's break event and match the original swapped instance transform, including actors removed between polls.
+- Updated peers interpolate car snapshots using the host's timestamps; older peers retain the previous vehicle follower.
+
+### Fixed in the vehicle experiment
+
+- Guest hood open/close follows the host using the panel's own interaction path.
+- Loose items retain durability, health, fuel and battery when copied, picked up and dropped by an updated guest.
+- Shared custom music pauses its built-in carrier without repeatedly finishing and restarting the song.
+- Loose-item presentation uses a delayed snapshot buffer for movement between network updates.
+
+Validation and remaining limits: [client sync report](docs/spikes/client-sync-fixes-20261104.md).
+
+### Added
+
+- Share the host's current custom radio song automatically with an updated guest. Missing MP3/WAV/OGG files use a
+  SHA-256-verified cache; matching local files need no download, and different files with the same name stay distinct.
+  A newly available track restarts together on both sides. Protocol remains 6; older peers retain the previous behavior.
+
 ### Fixed
 
 - Preserve author protocol 6 and keyed drop adoption; optional motion, heap and intent extensions activate only after negotiation.
@@ -23,6 +45,38 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 - Remote wheels follow the host's rolling, steering and suspension poses while guest vehicle physics stays disabled.
 - A seated guest cannot highlight the windshield; ignition, shifter and on-foot selection remain available.
 
+
+## [0.8.9] - 2026-11-04
+
+Network protocol **7**: both players need 0.8.9.
+
+### Changed
+
+- The guest's map is the host's: closed junctions, buildings, the gateway and quest markers look the same on both screens,
+  and the map is turned the same way (each side used to pick its own north).
+- The guest leaves the car through the passenger door; the X key and the "X Exit car" / "E Radio on/off" text are gone.
+  **End**/**F8** in the seat also gets the guest out (for a car without its passenger door).
+- The guest gets the radio's own outline and panel from the passenger seat (station, track, volume, power).
+- The intro movies are skipped while the mod is installed (they come back on uninstall).
+
+### Fixed
+
+- "Wake the main story" (F9) now also starts the next mission, with its task and map marker.
+- An old mission's green marker no longer stays on the guest's map.
+- The car radio no longer sounds muffled to the guest in the seat.
+- The research machine's screen no longer stays white the first time it is opened (a short flash remains).
+- The guest sees the host's anchor energy and mechanic XP, so it can research; the energy board beside the machine shows it too.
+- A car without a radio no longer causes errors on the guest.
+- The guest finds the zone's gateway by its place instead of its name, which differs between the two games (not yet seen in
+  a real zone).
+- After joining, the guest clears its own lootables a few at a time instead of all at once (aimed at the join stutter; not yet
+  checked by hand).
+
+### Known issues
+
+- An upgrade kit printed by the research machine loses its upgrade when the other player picks it up: that copy shows no place
+  to install it. Let the player at the machine take and install the kit.
+- After "Wake the main story" Oppy does not say the next mission's lines.
 
 ## [0.8.8] - 2026-11-02
 

@@ -33,6 +33,7 @@ local NOCAR = os.getenv("PT_MUTATE") == "nocarloot"
 -- tests only: the host sends no positions of moving world items
 local NOFALL = os.getenv("PT_MUTATE") == "nofall"
 local NOROTATE = os.getenv("PT_MUTATE") == "norotationsync"
+local NOITEMSTATE = os.getenv("PT_MUTATE") == "noitemstate"
 
 local INV = { "Inventory_Trunk", "Inventory_LargeTrunk", "Inventory_Garage", "Inventory_GarageLarge", "Inventory_GarageExpansion1",
               "Inventory_GarageExpansion1_Large", "Inventory_Garage_BackRoom", "Inventory_Tubes_In", "Inventory_Tubes_Out", "Inventory_GarageTransfer" }
@@ -43,6 +44,7 @@ local DROP = 500 -- uu: an unknown pickup this close to the guest is its own dro
 local MATCH = 60 -- uu: a local actor this close to the host's, same class, is the same thing
 
 local replica = require("replica")
+local itemMotion = require("itemmotion")
 local replicas = replica.new(nil)
 local M = {}
 local ents, byName, nextId = {}, {}, 1 -- id -> entity; actor full name -> id (host)
@@ -53,6 +55,7 @@ local pendingDrops, dropKey = {}, 0 -- guest: key -> its own dropped actor, unti
 local claimed = {} -- guest: local actors that are some entity's copy
 local function isClaimed(a) return common.resolve(claimed[a:GetFullName()]) ~= nil end
 local out = {} -- lines for the other side, sent at the end of the tick
+local validItemSpec
 local tickN, hostScanned, fullAt = 0, false, nil
 local skip = {} -- host: address -> class address of an actor that never qualifies (an /Engine/Transient template): its name is not read again
 local function known(a)
@@ -159,7 +162,9 @@ end
 -- a template part (abandoned-car door, wheel, gas cap): "pitch,roll,item spec,mesh"
 -- some parts hold items (their ItemInstance has a container): "spec;contents", contents "-" when there is none
 local function partBox(a)
-    if NOCAR then return nil end
+    if NOCAR or not alive(a)or not alive(a.ItemInstance)then return nil end
+    local cls=StaticFindObject('/Script/PenDriverInventory.ItemInstance')
+    if not alive(cls)or not a.ItemInstance:IsA(cls)then return nil end
     local ok, c = pcall(function()
         local o = {}
         ids.bfl():GetInstanceContainer(a.ItemInstance, a, o)
@@ -167,14 +172,14 @@ local function partBox(a)
     end)
     return ok and alive(c) and c or nil
 end
-local function partContents(a)
+local function partContents(a, layout)
     local c = partBox(a)
-    return c and ids.encode(ids.count(c)) or "-"
+    return c and (layout and ids.layout(c) or ids.encode(ids.count(c))) or "-"
 end
 local function partKey(a) return ids.spec(a.ItemInstance) .. ";" .. partContents(a) end
-local function partState(a)
+local function partState(a, layout)
     local r = a:K2_GetActorRotation()
-    return string.format("%.1f,%.1f,%s,%s;%s", r.Pitch, r.Roll, ids.spec(a.ItemInstance), alive(a.RequestedMesh) and ids.path2(a.RequestedMesh) or "-", partContents(a))
+    return string.format("%.1f,%.1f,%s,%s;%s", r.Pitch, r.Roll, ids.spec(a.ItemInstance), alive(a.RequestedMesh) and ids.path2(a.RequestedMesh) or "-", partContents(a,layout))
 end
 
 -- a plasma generator the host broke (harvested): the game sets Broken, swaps the glass mesh, kills the light and the highlight. The
@@ -222,6 +227,11 @@ local function menuShows(c) return os.getenv("PT_MUTATE") ~= "nomenuwait" and me
 local filling = {} -- containers being filled a few steps a frame: { e, steps, i, finish, before, t0 }
 RegisterLoadMapPreHook(function() filling, pendingDrops = {}, {} end) -- their containers (and our drops) go with the old world
 local function applyState(e, s)
+    if e.kind=="W" then
+        if not NOITEMSTATE and net.hostSupports('item-state') and entityAlive(e) and alive(e.actor.Instance)
+            and validItemSpec(s,ids.path(e.actor.Instance.Archetype)) then ids.setProps(e.actor.Instance,s) end
+        return
+    end
     if e.kind == "R" then
         if s == "br" and entityAlive(e) then applyBroken(e.actor) end
         return
@@ -231,7 +241,10 @@ local function applyState(e, s)
         if entityAlive(e) and alive(e.actor.ItemInstance) and spec then
             ids.setProps(e.actor.ItemInstance, spec)
             local body, box = s:match(";(.*)$"), partBox(e.actor)
-            if box and body and body ~= "-" then ids.apply(box, ids.decode(body)) end
+            if box and body and body ~= "-" and not (common.netMode()=="client" and net.hostSupports("wreck-state") and body:sub(1,1)~="@") then
+                if menuShows(box) and body:sub(1,1) ~= "@" then e.pendingPartState=s;return end
+                if body:sub(1,1)=='@' then ids.applyLayout(box,body) else ids.apply(box, ids.decode(body)) end
+            end
             e.last = partKey(e.actor)
         end
         return
@@ -240,7 +253,7 @@ local function applyState(e, s)
     if not alive(c) then e.pending = s; return end
     local waiting = e.pending
     e.pending, e.box = nil, c:GetAddress()
-    if menuShows(c) then
+    if menuShows(c) and s:sub(3,3) ~= "@" and s:sub(3,3) ~= "!" then
         if not waiting then log("PT|loot partner changed the open container %s: applied when the menu closes", e.id) end
         e.pending = s
         return
@@ -250,12 +263,12 @@ local function applyState(e, s)
     -- guest's frame 2.3 s); the container is busy meanwhile, so the change scan does not send it half done
     local steps = {}
     local sliced = os.getenv("PT_MUTATE") ~= "noslice"
-    if body:sub(1, 1) == "@" then ids.applyLayout(c, body, sliced and steps or nil)
+    if body:sub(1, 1) == "@" or body:sub(1,1)=="!" then ids.applyLayout(c, body, sliced and steps or nil)
     else ids.apply(c, ids.decode(body), sliced and steps or nil) end
     local function finish()
         if not alive(c) then return end
         if e.kind == "L" and flags ~= "-" then applyFlags(e.actor, tonumber(flags)) end
-        e.last, e.n, e.rolled = stateOf(e), c:GetNumItems(), flagsOf(e)
+        e.last, e.n, e.rolled = stateOf(e), ids.numItems(c), flagsOf(e)
     end
     if #steps == 0 then finish() return end
     e.busy = true
@@ -294,6 +307,24 @@ local function carBoxes()
     return r
 end
 
+local function partLockers()
+    if common.netMode()=="client" and not net.hostSupports("named-storage")then return {} end
+    for _,pc in ipairs(net.guests())do if not net.peerSupports(pc,"named-storage")then return {} end end
+    local boxes={}
+    for _,s in ipairs(FindAllOf("BP_GarageInstallation_Spawner_C") or {}) do
+        if alive(s) and not s:GetFullName():find("/Engine/Transient",1,true) then
+            local name=s:GetFName():ToString()
+            if name:find("^BP_GarageStation_PartStorage_") then
+                local o={};s:GetUpgradeActor(o);local actor=o["Upgrade Actor"]
+                if alive(actor) then
+                    local c=actor.NamedPartsContainer
+                    if alive(c)then boxes["PartsLocker."..name..".1"]=c end
+                end
+            end
+        end
+    end
+    return boxes
+end
 local function register(id, kind, actor, invName)
     local e = { id = id, kind = kind, actor = actor, lease = common.lease(actor), name = actor and actor:GetFullName(), addr = actor and actor:GetAddress() }
     if kind == "L" then e.get = function() return entityAlive(e) and e.actor.InventoryContainer or nil end
@@ -306,6 +337,8 @@ local function register(id, kind, actor, invName)
             pcall(function() m.Inventories_Garage:ForEach(function(k, v) if k:get().TagName:ToString() == invName then e.cache = v:get(); e.cacheLease = common.lease(e.cache) end end) end)
             return alive(e.cache) and e.cache or nil
         end
+    elseif kind == "I" and invName:find("^PartsLocker%.") then
+        e.get=function() return partLockers()[invName] end
     elseif kind == "I" and invName:find("^Car%.") then
         e.get = function()
             if common.resolve(e.cacheLease) then return e.cache end
@@ -329,6 +362,37 @@ local function xform(x, y, z, yaw, pitch, roll)
              Translation = { X = x, Y = y, Z = z }, Scale3D = { X = 1, Y = 1, Z = 1 } }
 end
 
+validItemSpec=function(spec, path)
+    if type(spec) ~= "string" or #spec > 2048 or spec:sub(1, #path) ~= path then return false end
+    local rest, seen = spec:sub(#path + 1), {}
+    while rest ~= "" do
+        local field, tail = rest:match("^:([^:]+)(.*)$")
+        if not field then return false end
+        local key, raw = field:match("^([dfbh])([%d%.%+%-eE]+)$")
+        local value = raw and tonumber(raw)
+        if not key or seen[key] or not value or value ~= value or math.abs(value) > 10000000
+            or (key == "d" and value % 1 ~= 0) then return false end
+        seen[key], rest = true, tail
+    end
+    return true
+end
+
+local function validLayout(body)
+    if type(body)~='string'or #body>30000 or body:sub(1,1)~='@'then return false end
+    local total=0
+    for row in body:sub(2):gmatch('[^,]+')do
+        local x,y,r,entry=row:match('^(%d+)%.(%d+)%.([01])=(.+)$')
+        if not x or tonumber(x)>1024 or tonumber(y)>1024 then return false end
+        for stack in entry:gmatch('[^+]+')do
+            local spec,n=stack:match('^([^*]+)%*(%d+)$')
+            local path=spec and spec:match('^(/Game/[%w_/%.-]+)')
+            if not path or not validItemSpec(spec,path)or tonumber(n)<1 then return false end
+            total=total+tonumber(n);if total>4096 then return false end
+        end
+    end
+    return true
+end
+
 local function line(e)
     local a = e.actor
     local l, r = a:K2_GetActorLocation(), a:K2_GetActorRotation()
@@ -337,7 +401,7 @@ local function line(e)
     elseif e.kind == "R" then what, state = ids.path2(a:GetClass()), brokenOf(a) and "br" or "-"
     elseif e.kind == "B" then what, state = ids.path2(a:GetClass()), "-"
     elseif e.kind == "P" then what, state = ids.path2(a:GetClass()), partState(a)
-    else what, state = ids.path(a.Instance.Archetype), "-;" end
+    else what, state = ids.path(a.Instance.Archetype), ids.spec(a.Instance);e.itemState=state end
     local add = string.format("A|%s|%s|%.0f|%.0f|%.0f|%.0f|%s", e.id, what, l.X, l.Y, l.Z, r.Yaw, state)
     if e.kind == "W" and not NOROTATE and not NOFALL then
         add = add .. string.format("\nM|%s|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f", e.id, l.X, l.Y, l.Z, r.Yaw, r.Pitch, r.Roll)
@@ -423,6 +487,7 @@ local function scanHost()
         end
     end
     local names = { table.unpack(INV) }
+    for name in pairs(partLockers()) do names[#names+1]=name end
     local m = inventoryManager()
     if m then
         pcall(function()
@@ -445,7 +510,7 @@ local function scanHost()
             local e = register(id, "I", nil, p)
             local c = e.get()
             if alive(c) then
-                e.last, e.n = stateOf(e), c:GetNumItems()
+                e.last, e.n = stateOf(e), ids.numItems(c)
                 log("PT|loot container %s items=%d state=%d bytes", id, e.n, #e.last)
                 say("S|" .. id .. "|" .. e.last)
             else ents[id] = nil end
@@ -609,7 +674,10 @@ local function onAdd(id, what, x, y, z, yaw, state)
     end
     if not a then log("PT|loot could not make %s %s", id, what); return end
     e = register(id, kind, a)
-    if kind == "W" then freezeItem(a) end
+    if kind == "W" then
+        if not NOITEMSTATE and alive(a.Instance) and validItemSpec(state, what) then ids.setProps(a.Instance, state) end
+        freezeItem(a)
+    end
     if kind == "L" then applyState(e, state) end
 end
 
@@ -631,6 +699,7 @@ local function purge()
         made.claimed, made.spawned)
 end
 
+local PURGE = { "BP_Lootable_Base_C", "LootableTemplatePart", "LootableTemplate", "BP_Spawn_ResourceBase_C" }
 local function scanGuest()
     for id, e in pairs(ents) do
         if e.kind == "W" and not entityAlive(e) then
@@ -663,14 +732,12 @@ local function scanGuest()
     -- its own random lootables keep appearing for a while after the join; every 2 s: these scans took 300-400 ms of each
     -- 500 ms tick in a zone and the guest could not even turn its camera (local playtest 2026-10-22, PT|slow loot.lua)
     -- still 330 ms every 2 s in play, and the game stops spawning its own loot soon after the join: the first 90 s only
-    if tickN % 4 == 0 and os.clock() - fullAt < 90 then
-        for _, a in ipairs(FindAllOf("BP_Lootable_Base_C") or {}) do
+    -- one class per tick, each every 2 s: all four in one tick held 150-240 ms frames for the whole 90 s (friend session
+    -- 2026-11-03, guest PT|slow loot.lua:961 every 2 s after the join)
+    if os.clock() - fullAt < 90 then
+        local c = PURGE[tickN % #PURGE + 1]
+        for _, a in ipairs(FindAllOf(c) or {}) do
             if alive(a) and not isClaimed(a) then a:K2_DestroyActor() end
-        end
-        for _, c in ipairs({ "LootableTemplatePart", "LootableTemplate", "BP_Spawn_ResourceBase_C" }) do
-            for _, a in ipairs(FindAllOf(c) or {}) do
-                if alive(a) and not isClaimed(a) then a:K2_DestroyActor() end
-            end
         end
     end
 end
@@ -707,6 +774,7 @@ local function scanDrops()
                     dropKey = dropKey + 1
                     pendingDrops[tostring(dropKey)] = common.lease(a)
                     drop = drop .. "|" .. dropKey
+                    if not NOITEMSTATE and net.hostSupports("drop-velocity") and net.hostSupports("item-state") then drop = drop .. "|" .. ids.spec(a.Instance) end
                 end
                 say(drop)
                 log("PT|loot guest drop %s told the host", ids.path(a.Instance.Archetype):match("[^/]+$"))
@@ -807,7 +875,7 @@ local function scanChanges()
     local spots = tickN % 4 == 1 and playerSpots()
     -- the other parts, round robin: each one at least every ~30 s, 3 per tick (10 per tick, every 10 s, was ~0.5 s of each
     -- minute on both sides in a zone; FPS hunt 2026-11-01)
-    local far, farR = 3, 6
+    local far, farR, farW = 3, 6, 3
     local now = os.clock()
     for id, e in pairs(ents) do
         if e.kind == "R" then
@@ -818,6 +886,18 @@ local function scanChanges()
             if due and listening and entityAlive(e) then
                 local b = brokenOf(e.actor)
                 if b ~= (e.br or false) then e.br = b; say("S|" .. id .. "|" .. (b and "br" or "-")) end
+            end
+        elseif e.kind=="W" then
+            if spots and listening then e.near=entityAlive(e) and inReach(e.actor,spots) end
+            local due=e.near or (farW>0 and now-(e.stateAt or 0)>5)
+            if due and not e.near then farW=farW-1 end
+            if due and listening and entityAlive(e) and alive(e.actor.Instance) then
+                e.stateAt=now
+                local s=ids.spec(e.actor.Instance)
+                if s~=e.itemState then
+                    e.itemState=s
+                    for _,pc in ipairs(net.guests())do if net.peerSupports(pc,'item-state')then net.toGuest(pc,'g.loot.b','S|'..id..'|'..s)end end
+                end
             end
         elseif e.kind == "P" then
             -- a part's full key (fuel, wear, contents) is costly (~0.4 ms) and changes slowly: every 2 s near a player
@@ -835,16 +915,16 @@ local function scanChanges()
                     say("S|" .. id .. "|" .. partState(e.actor))
                 end
             end
-        elseif not e.busy and ((e.box and dirty[e.box]) or now >= (e.nextAt or 0)) then
+        elseif not e.busy and not e.pending and (listening or e.last ~= nil) and ((e.box and dirty[e.box]) or now >= (e.nextAt or 0)) then
             -- an untouched container is read every ~5 s; its slot events (dirty) bring it in at once (all of them each tick
             -- held host frames 30-40 ms, playtest 2026-10-31)
             e.nextAt = now + 4 + math.random() * 2
             local c = e.get()
             if alive(c) then e.box = c:GetAddress() end
             local r = alive(c) and flagsOf(e) or nil
-            if alive(c) and (c:GetNumItems() ~= e.n or r ~= e.rolled or dirty[e.box]) then
+            if alive(c) then
                 dirty[e.box] = nil
-                e.n, e.rolled = c:GetNumItems(), r
+                e.n, e.rolled = ids.numItems(c), r
                 local s = stateOf(e)
                 if s and s ~= e.last then
                     e.last = s
@@ -857,6 +937,23 @@ local function scanChanges()
     dirty = {} -- containers nobody tracks (the player's own hands, crafting) are not kept
 end
 
+-- Active containers use the same wire state, but do not wait for the background discovery tick.
+LoopInGameThreadWithDelay(100,function()
+    local mode=common.netMode()
+    if mode~='listen'and mode~='client'then return end
+    if mode=='client'and (not fullAt or net.lifecycle()~='active')then return end
+    if mode=='listen'and not readyFor then return end
+    for id,e in pairs(ents)do
+        if (e.kind=='I'or e.kind=='L')and not e.busy and not e.pending and e.last then
+            local c=e.get()
+            if alive(c)and(dirty[c:GetAddress()]or menuShows(c))then
+                local state=stateOf(e)
+                if state and state~=e.last then e.last=state;say('S|'..id..'|'..state)end
+            end
+        end
+    end
+    if not DEAF then flush()end
+end)
 -- overlay: what the other player took from or put into a container
 local function announce(e, before)
     local d = (e.n or 0) - (before or 0)
@@ -901,12 +998,14 @@ local function handle(l, guest, pc)
         if not fullAt then fullAt = os.clock(); purge() end
         net.baselineComplete("loot")
     elseif op == "S" and ents[id] then
+        local layoutIntent=not guest and ents[id].kind=='P' and f[3]:find(';@',1,true)
+        if layoutIntent and (not pc or not net.peerSupports(pc,'wreck-state')or not validLayout(f[3]:match(';(.*)$')))then return end
         log("PT|loot got S %s (%s)", id, f[3]:sub(1, 80))
         local before = ents[id].n
         applyState(ents[id], f[3])
         announce(ents[id], before)
         -- the guest's change: the host applies it and the other players see it
-        if not guest then say(l) end
+        if not guest then say(layoutIntent and ('S|'..id..'|'..partState(ents[id].actor)) or l) end
     elseif op == "S" and guest then
         -- a container of the game's that the guest has not registered yet
         local name = id:match("^I:(.+)$")
@@ -928,10 +1027,16 @@ local function handle(l, guest, pc)
             if ents[id].kind == "W" then freezeItem(ents[id].actor) end
             local e = ents[id]
             local p, r = { X = tonumber(f[3]), Y = tonumber(f[4]), Z = tonumber(f[5]) }, { Pitch = tonumber(f[7]) or 0, Yaw = tonumber(f[6]), Roll = tonumber(f[8]) or 0 }
-            e.motion = { p = p, r = r, fromP = e.actor:K2_GetActorLocation(), fromR = e.actor:K2_GetActorRotation(), at = os.clock() }
+            e.motion = e.motion or {}
+            itemMotion.push(e.motion, p, r, os.clock(), e.actor:K2_GetActorLocation(), e.actor:K2_GetActorRotation())
         end)
     elseif op == "N" and not guest then
         local count = #f
+        local itemSpec
+        if count == 16 then
+            if not pc or not net.peerSupports(pc, "item-state") or not validItemSpec(f[16], f[2]) then return end
+            itemSpec, count = f[16], 15
+        end
         local key = (count == 7 or count == 15) and f[count] or nil
         if key then
             if not key:match("^%d+$") then return end
@@ -944,6 +1049,7 @@ local function handle(l, guest, pc)
             if not v or v ~= v or math.abs(v) > (i <= 5 and 1e8 or 100000) then return end
         end
         local w = spawnItem(f[2], tonumber(f[3]), tonumber(f[4]), tonumber(f[5]), tonumber(f[6]))
+        if w and itemSpec and alive(w.Instance) then ids.setProps(w.Instance, itemSpec) end
         if w and count == 14 then
             w:K2_SetActorRotation({ Pitch = tonumber(f[7]), Yaw = tonumber(f[6]), Roll = tonumber(f[8]) }, true)
             local v, av = { X = tonumber(f[9]), Y = tonumber(f[10]), Z = tonumber(f[11]) }, { X = tonumber(f[12]), Y = tonumber(f[13]), Z = tonumber(f[14]) }
@@ -1092,18 +1198,19 @@ LoopInGameThreadWithDelay(16, function()
         local pose = replica.take(replicas, id)
         if pose and entityAlive(e) then
             freezeItem(e.actor)
-            e.motion = { p = { X = pose[3], Y = pose[4], Z = pose[5] },
-                r = { Pitch = pose[7], Yaw = pose[6], Roll = pose[8] },
-                fromP = e.actor:K2_GetActorLocation(), fromR = e.actor:K2_GetActorRotation(), at = os.clock() }
+            e.motion = e.motion or {}
+            itemMotion.push(e.motion, { X = pose[3], Y = pose[4], Z = pose[5] },
+                { Pitch = pose[7], Yaw = pose[6], Roll = pose[8] }, os.clock(),
+                e.actor:K2_GetActorLocation(), e.actor:K2_GetActorRotation())
         end
         local m = e.motion
         if m and entityAlive(e) then
-            local u = math.min((os.clock() - m.at) / 0.05, 1)
+            local a, b, u = itemMotion.sample(m, os.clock())
             local p = {}
-            for _, k in ipairs({"X", "Y", "Z"}) do p[k] = m.fromP[k] + (m.p[k] - m.fromP[k]) * u end
-            local r = KML:RLerp(m.fromR, m.r, u, true)
+            for _, k in ipairs({"X", "Y", "Z"}) do p[k] = a.p[k] + (b.p[k] - a.p[k]) * u end
+            local r = KML:RLerp(a.r, b.r, u, true)
             e.actor:K2_SetActorLocationAndRotation(p, r, false, {}, true)
-            if u >= 1 then e.motion = nil end
+            if #m == 1 or (u >= 1 and b == m[#m]) then e.motion = nil end
         end
     end
 end)
@@ -1144,4 +1251,173 @@ function M.actorOf(id)
     local e = ents[id]
     return e and e.kind == "P" and entityAlive(e) and e.actor or nil
 end
+
+-- Wreck presentation/layout extends the author's inventory messages only for negotiated peers.
+local wreckPending,wreckSent,wreckBodies={},{},{}
+RegisterLoadMapPreHook(function()wreckPending,wreckSent,wreckBodies={},{},{} end)
+local VEHICLE='/Game/Gameplay/Vehicles/Templates/BaseActors/BP_Template_BaseVehicle.BP_Template_BaseVehicle_C'
+local TRUNK='/Game/Gameplay/Vehicles/Templates/BaseActors/BP_TemplatePart_Trunk.BP_TemplatePart_Trunk_C'
+local function assetName(o)return alive(o) and ids.path2(o) or '-' end
+local function safeAsset(p)return p=='-' or (#p<1024 and p:match('^/Game/[%w_/%.-]+$')~=nil) end
+local function materialPalette(mid,palette,layer,fields)
+    if not alive(palette)then return end
+    local defaults=palette:GetCDO()
+    local asset=ids.asset('/Game/BaseArt/LayerLibrary/Gameplay/ML_Palette_'..layer..'.ML_Palette_'..layer)
+    if not asset then return end
+    for _,field in ipairs(fields)do
+        local info=mid:GetParameterInfo(0,FName(field[1]),asset)
+        if info.Index>=0 then mid['Set'..field[3]..'ParameterValueByInfo'](mid,info,defaults[field[2]])end
+    end
+end
+local paintFields={
+    {'Palette_Paint_Color','Paint Color Tint','Vector'},
+    {'Palette_Paint_Texture','Paint Combo Texture','Texture'},
+    {'Palette_Paint_ColorAmount','Paint Color Amount','Scalar'},
+    {'Palette_Paint_Roughness','Paint Roughness','Scalar'},
+    {'Palette_Paint_Metallic','Paint Metallic','Scalar'},
+    {'Palette_Paint_Spec','Paint Spec','Scalar'},
+    {'Palette_Paint_UVTileRate','Paint UV Tile Rate','Scalar'},
+}
+local decalFields={
+    {'Palette_Decal_Diffuse_Texture','Decal Diffuse Texture','Texture'},
+    {'Palette_Decal_Mask_Texture','Decal Mask Texture','Texture'},
+    {'Palette_Paint_Color','Decal Tint','Vector'},
+    {'Palette_Decal_DiffuseBoost','Decal Diffuse Boost','Scalar'},
+    {'Palette_Decal_Roughness','Decal Roughness','Scalar'},
+    {'Palette_Decal_Metallic','Decal Metallic','Scalar'},
+    {'Palette_Decal_Spec','Decal Spec','Scalar'},
+}
+local function wreckTint(a)
+    if #a.DynamicMaterialInstances == 0 then a:SetupMaterials() end
+    a:SetupTintOnVehicleAndParts()
+    local meshClass=StaticFindObject('/Script/Engine.StaticMeshComponent')
+    for _,w in ipairs(a:GetAllTemplateParts())do
+        local part=w:get()
+        if alive(part)then
+            for _,v in ipairs(part:K2_GetComponentsByClass(meshClass))do
+                local mesh=v:get()
+                for i=0,mesh:GetNumMaterials()-1 do
+                    local mid=mesh:GetMaterial(i)
+                    if not mid:IsA(StaticFindObject('/Script/Engine.MaterialInstanceDynamic'))then mid=mesh:CreateDynamicMaterialInstance(i,nil,FName('None'))end
+                    materialPalette(mid,a.SelectedPaintPalette,'Paint',paintFields)
+                    materialPalette(mid,a.SelectedDecalPalette,'Decal',decalFields)
+                end
+            end
+        end
+    end
+end
+net.on('g.loot.wreck',function(_,data)
+    if common.netMode()~='client' or not net.hostSupports('wreck-state') or #data>32000 then return end
+    local epoch,id,kind,body=data:match('^([^|]+)|([BP]%d+)|([BJTC])|(.*)$')
+    if epoch~=net.worldToken() or not id then return end
+    if kind=='B' then
+        local paint,decal=body:match('^([^|]+)|([^|]+)$')
+        if not paint or not safeAsset(paint) or not safeAsset(decal) then return end
+    elseif kind=='J' then
+        if not body:match('^B%d+|[%w_. %-]+$') or #body>256 then return end
+    elseif kind=='T' then
+        local state,strength,opened=body:match('^(%d+),(%d+),([01])$')
+        if not state or tonumber(state)>255 or tonumber(strength)>1000000 then return end
+    elseif kind=='C' and not validLayout(body)then return end
+    wreckPending[id..kind]={id=id,kind=kind,body=body}
+end)
+LoopInGameThreadWithDelay(16,function()
+    if common.netMode()~='client' then return end
+    local start=os.clock()
+    local linking=false
+    for _,row in pairs(wreckPending)do if row.kind=='B' or row.kind=='J'then linking=true;break end end
+    for key,row in pairs(wreckPending)do
+        local e=ents[row.id];local a=e and entityAlive(e) and e.actor
+        if a then
+            local done=true
+            if row.kind=='B' and e.kind=='B' and a:IsA(StaticFindObject(VEHICLE))then
+                local p,d=row.body:match('^([^|]+)|([^|]+)$')
+                local paint=p~='-' and ids.asset(p);local decal=d~='-' and ids.asset(d)
+                if (p=='-' or paint)and(d=='-' or decal)then
+                    if paint then a.SelectedPaintPalette=paint end
+                    if decal then a.SelectedDecalPalette=decal end
+                    wreckTint(a)
+                else done=false end
+            elseif row.kind=='J' and e.kind=='P' then
+                local parent,socket=row.body:match('^([^|]+)|(.+)$');local b=ents[parent]
+                if b and entityAlive(b)then
+                    a:K2_AttachToActor(b.actor,FName('None'),1,1,1,false);a.MySocket=FName(socket)
+                    wreckBodies[parent]=common.lease(b.actor)
+                else done=false end
+            elseif row.kind=='T' and e.kind=='P' and a:IsA(StaticFindObject(TRUNK))and alive(a.BP_LockedComponent)then
+                local state,strength,opened=row.body:match('^(%d+),(%d+),([01])$')
+                a.BP_LockedComponent:SetLockStrength(tonumber(strength))
+                local wasOpen=a.AnimStateOpened;a.AnimStateOpened=opened=='1'
+                if a.AnimStateOpened and not wasOpen then a.OpenTrunkTimeline:PlayFromStart();a:SetHighlightOpened()
+                elseif tonumber(state)~=0 then a:InitializeTrunk(1)end
+                a:UpdateTrunkState()
+            elseif row.kind=='C' and e.kind=='P' then
+                local c=partBox(a)
+                if c and not linking and not next(wreckBodies) then ids.applyLayout(c,row.body);e.wreckLayout=row.body;e.last=partKey(a)
+                else done=false end
+            end
+            if done then wreckPending[key]=nil end
+        end
+        if os.clock()-start>0.002 then break end
+    end
+    for id,lease in pairs(wreckBodies)do
+        local a=common.resolve(lease)
+        local cls=StaticFindObject(VEHICLE)
+        if a and alive(cls)and a:IsA(cls)then
+            local e=ents[id]
+            if not e.wreckLinked then a:LinkTrunkAndTrunkContents();e.wreckLinked=true end
+            wreckTint(a)
+        end
+        wreckBodies[id]=nil
+        if os.clock()-start>0.002 then break end
+    end
+end)
+LoopInGameThreadWithDelay(500,function()
+    local mode=common.netMode()
+    if mode~='listen' and mode~='client' then return end
+    if mode=='client' and not net.hostSupports('wreck-state')then return end
+    local guests=mode=='listen' and net.guests() or {}
+    local vehicle,trunk=StaticFindObject(VEHICLE),StaticFindObject(TRUNK)
+    local spots,far,now=playerSpots(),3,os.clock()
+    local function send(id,kind,body)
+        local data=net.worldToken()..'|'..id..'|'..kind..'|'..body
+        for _,pc in ipairs(guests)do
+            if net.peerSupports(pc,'wreck-state')and net.lifecycle(pc)=='active' then
+                local key=common.identity(pc)..'|'..id..kind
+                if wreckSent[key]~=data then net.toGuest(pc,'g.loot.wreck',data);wreckSent[key]=data end
+            end
+        end
+    end
+    for id,e in pairs(ents)do
+        if (e.kind=='B' or e.kind=='P')and entityAlive(e)and(e.kind~='P' or alive(e.actor.ItemInstance))then
+            local a=e.actor
+            if e.pendingPartState then
+                local c=partBox(a)
+                if c and not menuShows(c)then local s=e.pendingPartState;e.pendingPartState=nil;applyState(e,s)end
+            end
+            if mode=='listen' then
+                if e.kind=='B' and alive(vehicle)and a:IsA(vehicle)then
+                    send(id,'B',assetName(a.SelectedPaintPalette)..'|'..assetName(a.SelectedDecalPalette))
+                elseif e.kind=='P' then
+                    local parent=a:GetAttachParentActor();local parentId=alive(parent)and byName[parent:GetAddress()]
+                    if parentId and ents[parentId]and ents[parentId].kind=='B'then send(id,'J',parentId..'|'..a.MySocket:ToString())end
+                    if alive(trunk)and a:IsA(trunk)then
+                        local state,strength={},{};a:GetTrunkState(state);a.BP_LockedComponent:GetLockStrength(strength)
+                        send(id,'T',state['Current State']..','..strength.Strength..','..(a.AnimStateOpened and '1'or '0'))
+                    end
+                                        local near=inReach(a,spots)
+                    if near or (far>0 and now-(e.wreckAt or 0)>10)then
+                        if not near then far=far-1 end;e.wreckAt=now
+                        local c=partBox(a);if c then local body=ids.layout(c);if validLayout(body)then send(id,'C',body)end end
+                    end
+                end
+            elseif e.kind=='P' and e.wreckLayout and not wreckPending[id..'C']then
+                local c=partBox(a)
+                if c then local body=ids.layout(c);if body~=e.wreckLayout then
+                    e.wreckLayout=body;net.toHost('g.loot.b','S|'..id..'|'..partState(a,true))
+                end end
+            end
+        end
+    end
+end)
 return M

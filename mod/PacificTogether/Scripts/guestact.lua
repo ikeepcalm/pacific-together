@@ -125,15 +125,11 @@ net.on("g.act.gate", function(_, data)
     for _, o in ipairs(FindAllOf("BP_StormManager_C") or {}) do if valid(o) then sm = o break end end
     if not (screen and sm) then log("PT|act gate: no ARC screen or storm manager"); return end
     if not screen.AbleToChooseExit then log("PT|act gate refused (ARC not charged or exit already chosen)"); return end
-    for _, p in ipairs(FindAllOf("BP_LevelTransition_ExitPortal_C") or {}) do
-        if valid(p) and p:GetFName():ToString() == data then
-            sm["Select Exit Portal Actor"](sm, p)
-            log("PT|act gate selected %s", data)
-            ov.post(ov.other() .. " summoned the gateway", "good")
-            return
-        end
-    end
-    log("PT|act gate: no portal %s", data)
+    local p = common.findPortal(data)
+    if not p then log("PT|act gate: no portal at %s", data) return end
+    sm["Select Exit Portal Actor"](sm, p)
+    log("PT|act gate selected %s (%s)", data, p:GetFName():ToString())
+    ov.post(ov.other() .. " summoned the gateway", "good")
 end)
 
 net.on("g.act.anchor", function(_, data)
@@ -298,7 +294,7 @@ local function holdGate()
 end
 local function gateHook(self, portal)
     if not guest() then return end
-    local name = portal:get():GetFName():ToString()
+    local name = common.portalKey(portal:get())
     log("PT|act gate intent %s", name)
     net.toHost("g.act.gate", name)
 end

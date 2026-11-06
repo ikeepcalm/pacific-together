@@ -18,6 +18,10 @@ return function(T)
         end
     end
     local function cabinet(suffix) local s=spawner(suffix);if not s then return end; local o={};s:GetUpgradeActor(o);return o["Upgrade Actor"] end
+    local function lockerBox(suffix)
+        local boxes={};cabinet(suffix).BP_InventoryContainerComponent:GetContainers(boxes)
+        return boxes[1]:get()
+    end
     local function bodies(a,fn)
         for _,v in ipairs(a:K2_GetComponentsByClass(StaticFindObject("/Script/Engine.PrimitiveComponent"))) do fn(v:get()) end
     end
@@ -44,7 +48,7 @@ return function(T)
     end
     local function report(k) return function() poll();return got["t.motion."..k]~=nil end end
     if T.ROLE=="host" then
-        local item,origin,arch,drive,guestDrop,dropWatch,maxDropV
+        local item,origin,arch,drive,guestDrop,dropWatch,maxDropV,itemDrive,smoothItem,smoothOrigin
         maxDropV = 0
         local function findGuestDrop()
             for _,a in ipairs(FindAllOf("BP_WorldItem_C") or {}) do
@@ -63,6 +67,19 @@ return function(T)
             end},
             {check="both_host_lockers_spawned",timeout=20,cond=function() return alive(cabinet("BackYard")) and alive(cabinet("Fence")) end},
             {check="both_guest_lockers_spawned",timeout=60,cond=report("lockers")},
+            {check="guest_baseline_applied_before_locker_transfer",timeout=180,cond=function()
+                local f=io.open("ue4ss/UE4SS.log","rb");if not f then return false end
+                local text=f:read("a");f:close();return text:find("PT|net baseline applied",1,true)~=nil
+            end},
+            {run=function()
+                local ids=assert(loadfile("ue4ss/Mods/PacificTogether/Scripts/ids.lua"))()
+                local arch=ids.archetype("/Game/Gameplay/Inventory/Items/Car/Wheels/Wheel_Spare_01/IA_Attach_Wheel_Spare")
+                local inst=StaticFindObject("/Script/PenDriverInventory.Default__InventoryBlueprintLibrary"):CreateItemInstance(T.world(),arch,0)
+                assert(lockerBox("BackYard"):AddItem(inst,true),"locker rejected wheel")
+                send("locker_item")
+            end},
+            {check="guest_locker_contents_received",timeout=30,cond=report("locker_item_ok")},
+            {check="guest_locker_removal_reaches_host",timeout=30,cond=function() return lockerBox("BackYard"):GetNumItems()==0 end},
             {run=function()
                 local c=car();c:ManualSetIgnition_NoAnim(2);c:ManualActivate_Gearbox(0,true);c.VehicleController:SetParkingBrakeActive(false)
                 drive=LoopInGameThreadWithDelay(16,function() c:AccelerateBrake(0.2);c:SteerLeftRight(0.7) end)
@@ -85,6 +102,24 @@ return function(T)
                 local r=item:K2_GetActorRotation();send("landed",string.format("%f,%f,%f,%f,%f,%f",p.X,p.Y,p.Z,r.Pitch,r.Yaw,r.Roll))
             end},
             {check="guest_same_landing_pose",timeout=10,cond=report("landed_ok")},
+            {run=function()
+                local p=item:K2_GetActorLocation()
+                smoothOrigin={X=p.X,Y=p.Y+800,Z=p.Z+300}
+                smoothItem=spawn(arch,smoothOrigin,{X=0,Y=0,Z=0})
+                bodies(smoothItem,function(c) c:SetSimulatePhysics(false) end)
+                send("smooth",string.format("%f,%f,%f",smoothOrigin.X,smoothOrigin.Y,smoothOrigin.Z))
+            end},
+            {wait=1},
+            {run=function()
+                local start=os.clock()
+                itemDrive=LoopInGameThreadWithDelay(16,function()
+                    local x=math.min(os.clock()-start,5)*180
+                    smoothItem:K2_SetActorLocation({X=smoothOrigin.X+x,Y=smoothOrigin.Y,Z=smoothOrigin.Z},false,{},true)
+                end)
+            end},
+            {wait=5.5},
+            {run=function() CancelDelayedAction(itemDrive);send("smooth_end") end},
+            {check="guest_item_smooth_during_motion",timeout=15,cond=report("smooth_ok")},
             {run=function()
                 local p=L.guestChar():K2_GetActorLocation();origin={X=p.X+30,Y=p.Y,Z=p.Z+300}
                 dropWatch=LoopInGameThreadWithDelay(16,function()
@@ -115,10 +150,16 @@ return function(T)
     end
     local arch,origin,seen,lastZ,airSamples,wheelStart,rolled,steered,thrown,filterSent,exitSent= nil,nil,nil,nil,0,nil,false,false,false,false,false
     local observer, seatRequested, keySelected, localDropAddr, picked
+    local lastMoveAt, maxMoveGap, moveSamples = nil, 0, 0
+    local smoothLast, smoothFrames, smoothMoved, smoothFirst, smoothEnd, smoothReported, smoothOrigin = nil, 0, 0, nil, nil, false, nil
     local function xyz(s) local x,y,z=s:match("([^,]+),([^,]+),([^,]+)");return {X=tonumber(x),Y=tonumber(y),Z=tonumber(z)} end
     local function tick()
         poll()
         if alive(cabinet("BackYard")) and alive(cabinet("Fence")) then send("lockers") end
+        if got["t.motion.locker_item"] and not sent.locker_item_ok and alive(cabinet("BackYard")) then
+            local c=lockerBox("BackYard")
+            if c:GetNumItems()>0 then send("locker_item_ok");c:RemoveAllItems() end
+        end
         if got["t.motion.wheels"] then
             local r=K:InverseTransformRotation(car():GetTransform(),wheelMesh():K2_GetComponentRotation())
             if wheelStart then
@@ -129,16 +170,38 @@ return function(T)
         end
         if got["t.motion.arch"] then arch=StaticFindObject(got["t.motion.arch"]) end
         if got["t.motion.origin"] and not origin then origin=xyz(got["t.motion.origin"]) end
+        if got["t.motion.smooth"] and not smoothOrigin then smoothOrigin=xyz(got["t.motion.smooth"]);origin=smoothOrigin;seen=nil;lastZ=nil end
         if origin and not alive(seen) then
             for _,a in ipairs(FindAllOf("BP_WorldItem_C") or {}) do
                 if T.inWorld(a) and alive(a.Instance) and a.Instance.Archetype:GetAddress()==arch:GetAddress() then local p=a:K2_GetActorLocation()
-                    if (p.X-origin.X)^2+(p.Y-origin.Y)^2<1500^2 then seen=a;break end
+                    local radius=(smoothOrigin and not thrown) and 300 or 1500
+                    if (p.X-origin.X)^2+(p.Y-origin.Y)^2<radius^2 then seen=a;break end
                 end
             end
         end
         if alive(seen) then
             local p=seen:K2_GetActorLocation()
-            if p.Z>origin.Z-300 and lastZ and math.abs(lastZ-p.Z)>1 then airSamples=airSamples+1 end
+            if got["t.motion.smooth"] and not got["t.motion.smooth_end"] then
+                if smoothLast then
+                    smoothFrames=smoothFrames+1
+                    if math.abs(p.X-smoothLast)>.05 then
+                        smoothMoved=smoothMoved+1
+                        smoothFirst=smoothFirst or smoothFrames; smoothEnd=smoothFrames
+                    end
+                end
+                smoothLast=p.X
+            elseif got["t.motion.smooth_end"] and not smoothReported then
+                smoothReported=true
+                local span=smoothFirst and smoothEnd-smoothFirst+1 or 0
+                T.log("PT|info item smooth frames=%d moving=%d span=%d",smoothFrames,smoothMoved,span)
+                if span>=20 and smoothMoved/span>=.65 then send("smooth_ok") end
+            end
+            if p.Z>origin.Z-300 and lastZ and math.abs(lastZ-p.Z)>1 then
+                airSamples=airSamples+1
+                local now=os.clock()
+                if lastMoveAt then maxMoveGap=math.max(maxMoveGap,now-lastMoveAt) end
+                lastMoveAt,moveSamples=now,moveSamples+1
+            end
             lastZ=p.Z
             if airSamples>=3 then send(thrown and "throw_airborne" or "airborne") end
             local landed=got[thrown and "t.motion.throw_landed" or "t.motion.landed"]
@@ -146,11 +209,15 @@ return function(T)
                 local f={};for v in landed:gmatch("[^,]+") do f[#f+1]=tonumber(v) end
                 local r=seen:K2_GetActorRotation();local physical=false;bodies(seen,function(c) physical=physical or c:IsSimulatingPhysics(FName("None")) end)
                 if thrown then assert(seen:GetAddress()==localDropAddr,"guest throw was replaced instead of adopted") end
-                if not physical and (p.X-f[1])^2+(p.Y-f[2])^2+(p.Z-f[3])^2<9 and math.abs((r.Pitch-f[4]+180)%360-180)<2 and math.abs((r.Roll-f[6]+180)%360-180)<2 then send(thrown and "throw_landed_ok" or "landed_ok") end
+                if not physical and (p.X-f[1])^2+(p.Y-f[2])^2+(p.Z-f[3])^2<9 and math.abs((r.Pitch-f[4]+180)%360-180)<2 and math.abs((r.Roll-f[6]+180)%360-180)<2 then
+                    if not sent[thrown and "throw_landed_ok" or "landed_ok"] then T.log("PT|info item flight %s samples=%d max_move_gap=%.3fs",thrown and "guest" or "host",moveSamples,maxMoveGap) end
+                    send(thrown and "throw_landed_ok" or "landed_ok")
+                end
             end
         end
         if got["t.motion.throw"] and not thrown then
             thrown=true;origin=xyz(got["t.motion.throw"]);seen=nil;lastZ=nil;airSamples=0;got["t.motion.landed"]=nil
+            lastMoveAt,maxMoveGap,moveSamples=nil,0,0
             localDropAddr=spawn(arch,origin,{X=650,Y=0,Z=180}):GetAddress()
         end
         if got["t.motion.pickup"] and alive(seen) and not picked then

@@ -2,7 +2,6 @@
 --   pause menu   the guest's Esc did nothing: the game opens its pause menu only when UGameplayStatics::SetGamePaused succeeds,
 --                and a client's SetGamePaused is always false. After "Set Pause Menu Opened" the guest shows/hides the menu widget
 --                itself; the world is not paused (a guest cannot pause the host's world).
---   seat hint    "X  Exit car" above the hotbar while the guest is seated, plus "E  Ignition" / "E  Shifter P/D" when aimed (car.lua)
 --   loading      "Joining host...", "Loading...", "Waiting for host..." in the screen centre until the guest can move
 --   fade         a short fade to black and back when the guest is seated or leaves its seat
 --   unstick      the End key does what F8 does (laptop keyboards need Fn for F8); the console command "ptunstick" too
@@ -33,7 +32,7 @@ local function hookPause()
 end
 
 -- widget --------------------------------------------------------------------------------------------------------------------
-local ui, loading = nil, nil -- { widget, msg, hint, cache }
+local ui, loading = nil, nil -- { widget, msg, cache }
 
 local function text(tree, name, size)
     local t = StaticConstructObject(StaticFindObject("/Script/UMG.TextBlock"), tree, FName(name))
@@ -68,7 +67,6 @@ local function build()
         slot:SetAutoSize(true)
     end
     n.msg = text(tree, "PTGuestUiMsg", 30); put(n.msg, 0.45)
-    n.hint = text(tree, "PTGuestUiHint", 20); put(n.hint, 0.78, 0.62) -- above the hotbar and right of it (at 0.9 it sat on the inventory cells)
     canvas:SetVisibility(3); w:SetVisibility(3)
     w:AddToViewport(Z)
     return n
@@ -144,10 +142,7 @@ local function update()
     local me = pc.Pawn
     local isSeated = valid(me) and seated(me) or false
     show(ui.msg, "msg", message(pc, me, mapName, isSeated))
-    local car = package.loaded["car"]
-    local aim = isSeated and car and car.aimed and car.aimed()
-    show(ui.hint, "hint", not isSeated and "" or aim == "ign" and "E  Ignition    X  Exit car"
-        or aim == "gear" and "E  Shifter P/D    X  Exit car" or aim == "radio" and "E  Radio on/off    X  Exit car" or "X  Exit car")
+    -- no seat hint (owner 2026-11-04): the dashboard has the game's own outlines and the passenger door is the way out
     if wasSeated ~= nil and wasSeated ~= isSeated and mapName ~= MENU then fade(pc) end
     wasSeated = isSeated
 end

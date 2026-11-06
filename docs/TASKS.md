@@ -14,6 +14,9 @@ Reviewed against 0.0.7 on 2026-10-24. This list tracks remaining work, not relea
 
 ## Current priorities
 
+Automatic host-song file sharing: [PT11](spikes/PT11-shared-custom-music.md).
+the owner has reserved the live two-client playback check.
+
 November 1 continuation: Healer/Charging visibility and host resource state are covered by the focused `boons`
 scenario. Current evidence and remaining anomaly limits: [W8-boons](spikes/W8-boons.md).
 

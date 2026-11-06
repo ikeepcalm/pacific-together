@@ -70,7 +70,8 @@ net.on("g.motion.heap", function(_,data)
     for token in (numbers..","):gmatch("([^,]*),") do
         local n=tonumber(token);if not n or n~=n or math.abs(n)>1e7 then return end;fields[#fields+1]=n
     end
-    if #fields~=10 then return end
+    if #fields~=10 and not (#fields==13 and net.hostSupports("heap-lid")) then return end
+    for i=11,#fields do if math.abs(fields[i])>360 then return end end
     wanted={at=os.clock(),fields=fields,key=key}
 end)
 local FX = {
@@ -149,9 +150,15 @@ LoopInGameThreadWithDelay(50,function()
             values[#values+1]=string.format("%.4f",t:GetTimelineLength())
         end
         local data=heap:GetFName():ToString().."|"..table.concat(values,",")
-        if data~=last or os.clock()-sentAt>1 then
-            net.toGuests("g.motion.heap",data)
-            last,sentAt=data,os.clock()
+        local lidRotation=heap.SM_LuckyJunkHeap_Small_Lid.RelativeRotation
+        local lidKey=string.format("%.3f,%.3f,%.3f",lidRotation.Pitch,lidRotation.Yaw,lidRotation.Roll)
+        if data..lidKey~=last or os.clock()-sentAt>1 then
+            local r=heap.SM_LuckyJunkHeap_Small_Lid.RelativeRotation
+            local lid=string.format(',%.4f,%.4f,%.4f',r.Pitch,r.Yaw,r.Roll)
+            for _,pc in ipairs(net.guests())do
+                net.toGuest(pc,"g.motion.heap",data..(net.peerSupports(pc,"heap-lid")and lid or ""))
+            end
+            last,sentAt=data..lidKey,os.clock()
         end
     elseif mode=="client" and held then
         local pc=UE.GetPlayerController()
@@ -170,6 +177,10 @@ LoopInGameThreadWithDelay(16,function()
             heap[name]:SetPlaybackPosition(position,false,true)
             rendered[name]=position
         end
+    end
+    -- Timeline updates share this mesh; the host's final pose wins over an inactive timeline.
+    if #f==13 then
+        heap.SM_LuckyJunkHeap_Small_Lid:K2_SetRelativeRotation({Pitch=f[11],Yaw=f[12],Roll=f[13]},false,{},false)
     end
 end)
 return {}
