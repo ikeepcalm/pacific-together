@@ -13,7 +13,12 @@ function M.push(b, p, r, now, currentP, currentR)
     while #b > 8 do table.remove(b, 1) end
 end
 
+function M.pushTimed(b,p,r,source,received,currentP,currentR)
+    b.clock=math.min(b.clock or math.huge,received-source)
+    M.push(b,p,r,source,currentP,currentR)
+end
 function M.sample(b, now)
+    if b.clock then now=now-b.clock end
     if #b == 0 then return end
     if os.getenv("PT_MUTATE") == "olditemclock" then return b[#b], b[#b], 1 end
     local t = now - DELAY

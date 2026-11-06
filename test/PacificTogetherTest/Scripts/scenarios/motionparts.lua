@@ -19,8 +19,12 @@ return function(T)
     end
     local function cabinet(suffix) local s=spawner(suffix);if not s then return end; local o={};s:GetUpgradeActor(o);return o["Upgrade Actor"] end
     local function lockerBox(suffix)
-        local boxes={};cabinet(suffix).BP_InventoryContainerComponent:GetContainers(boxes)
-        return boxes[1]:get()
+        local c=cabinet(suffix).NamedPartsContainer
+        return {
+            GetNumItems=function()local items={};c:GetAllItems(items);return #items end,
+            AddItem=function(_,inst)return c:AddItem(FName('Stations.Slots.01'),inst,false)end,
+            RemoveAllItems=function()return c:RemoveAllItems()end,
+        }
     end
     local function bodies(a,fn)
         for _,v in ipairs(a:K2_GetComponentsByClass(StaticFindObject("/Script/Engine.PrimitiveComponent"))) do fn(v:get()) end

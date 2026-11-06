@@ -790,7 +790,7 @@ end
 local poseRows, poseBytes = {}, 0
 local function sendPose(e, l, r, final)
     e.poseSerial = (e.poseSerial or 0) + 1
-    local row = string.format("%s|%d|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f", e.id, e.poseSerial, l.X, l.Y, l.Z, r.Yaw, r.Pitch, r.Roll)
+    local row = string.format("%s|%d|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f", e.id, e.poseSerial, l.X, l.Y, l.Z, r.Yaw, r.Pitch, r.Roll)..string.format("|%.5f",os.clock())
     local legacy = string.format("M|%s|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f", e.id, l.X, l.Y, l.Z, r.Yaw, r.Pitch, r.Roll)
     if not final then
         if poseBytes + #row < 850 then poseRows[#poseRows + 1], poseBytes = row, poseBytes + #row + 1
@@ -798,7 +798,7 @@ local function sendPose(e, l, r, final)
     end
     for _, pc in ipairs(net.guests()) do
         if net.peerSupports(pc, "motion") then
-            if final then net.toGuest(pc, "g.loot.pose", net.worldToken() .. "\n" .. row) end
+            if final then net.toGuest(pc, "g.loot.pose", net.worldToken() .. "\n" .. (net.peerSupports(pc,"item-clock")and row or row:match("^(.*)|[^|]*$"))) end
         else net.toGuest(pc, "g.loot.b", legacy) end
     end
 end
@@ -813,7 +813,7 @@ local function acceptPoses(_, data)
     end
     for row in rows:gmatch("[^\n]+") do
         local f = {}; for v in row:gmatch("[^|]+") do f[#f + 1] = v end
-        local valid = #f == 8
+        local valid = #f == 8 or (#f == 9 and net.hostSupports("item-clock"))
         for i = 2, #f do
             local n = tonumber(f[i]); if not n or n ~= n or math.abs(n) > (i == 2 and 9007199254740991 or 1e8) then valid = false end
             f[i] = n
@@ -847,7 +847,15 @@ local function scanMoves()
             end
         end
     end
-    if #poseRows > 0 then net.toGuests("g.motion.items", net.worldToken() .. "\n" .. table.concat(poseRows, "\n")) end
+    if #poseRows > 0 then
+        for _,pc in ipairs(net.guests())do
+            local rows=poseRows
+            if not net.peerSupports(pc,'item-clock')then
+                rows={};for _,row in ipairs(poseRows)do rows[#rows+1]=row:match('^(.*)|[^|]*$')end
+            end
+            net.toGuest(pc,'g.motion.items',net.worldToken()..'\n'..table.concat(rows,'\n'))
+        end
+    end
 end
 
 -- where this side's players stand (own pawn; on the host also the guests')
@@ -1199,9 +1207,10 @@ LoopInGameThreadWithDelay(16, function()
         if pose and entityAlive(e) then
             freezeItem(e.actor)
             e.motion = e.motion or {}
-            itemMotion.push(e.motion, { X = pose[3], Y = pose[4], Z = pose[5] },
-                { Pitch = pose[7], Yaw = pose[6], Roll = pose[8] }, os.clock(),
-                e.actor:K2_GetActorLocation(), e.actor:K2_GetActorRotation())
+            e.motion.lastReceivedAt=os.clock()
+            local p,r={X=pose[3],Y=pose[4],Z=pose[5]},{Pitch=pose[7],Yaw=pose[6],Roll=pose[8]}
+            if pose[9]then itemMotion.pushTimed(e.motion,p,r,pose[9],os.clock(),e.actor:K2_GetActorLocation(),e.actor:K2_GetActorRotation())
+            else itemMotion.push(e.motion,p,r,os.clock(),e.actor:K2_GetActorLocation(),e.actor:K2_GetActorRotation())end
         end
         local m = e.motion
         if m and entityAlive(e) then
@@ -1210,7 +1219,7 @@ LoopInGameThreadWithDelay(16, function()
             for _, k in ipairs({"X", "Y", "Z"}) do p[k] = a.p[k] + (b.p[k] - a.p[k]) * u end
             local r = KML:RLerp(a.r, b.r, u, true)
             e.actor:K2_SetActorLocationAndRotation(p, r, false, {}, true)
-            if #m == 1 or (u >= 1 and b == m[#m]) then e.motion = nil end
+            if (not m.lastReceivedAt or os.clock()-m.lastReceivedAt>1) and (#m==1 or (u>=1 and b==m[#m]))then e.motion=nil end
         end
     end
 end)

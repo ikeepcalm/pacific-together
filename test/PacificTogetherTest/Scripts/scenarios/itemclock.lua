@@ -32,6 +32,25 @@ return function(T)
             return frames > 0 and moving / frames > .8
         end)
     end
+    for _,fps in ipairs({30,60,144})do
+        add('host_clock_ignores_delivery_jitter_'..fps,function()
+            local b,nextPose,previous={},0,nil
+            for frame=0,fps*3 do
+                local now=frame/fps
+                while nextPose<=60 and nextPose*.05+(nextPose%4)*.015<=now do
+                    local source=nextPose*.05
+                    M.pushTimed(b,p(source*100),r,100+source,200+now,p(previous or 0),r)
+                    nextPose=nextPose+1
+                end
+                if #b>0 then
+                    local x=sample(b,200+now)
+                    if now>.4 and now<2.8 and math.abs(x-(now-.12)*100)>.01 then return false end
+                    previous=x
+                end
+            end
+            return true
+        end)
+    end
     add("stops_at_last_pose", function()
         local b = {}; M.push(b, p(10), r, 1, p(0), r)
         return math.abs(sample(b, 5) - 10) < .001
