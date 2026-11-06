@@ -5,6 +5,8 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+- Synchronize damaged car-part health, wreck paint, trunk opening and item positions; remove host-cleared vegetation on updated guests and hide the hood highlight while riding.
+
 - Keep the guest cabin steady by disabling synthetic passenger head sway; negotiated car motion owns its visual pose without competing native movement notifications.
 - Broken host foliage is removed on the guest even when represented by a mesh instance instead of a separate shrub actor.
 - Capture foliage breaks at the game's break event and match the original swapped instance transform, including actors removed between polls.

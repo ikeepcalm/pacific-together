@@ -295,6 +295,7 @@ end
 local DOORBP = "/Game/Gameplay/Inventory/Items/Car/Doors/BP_CarPart_Door_Base.BP_CarPart_Door_Base_C:"
 local HOODBP = "/Game/Gameplay/Inventory/Items/Car/Panels/BP_Panel_Base.BP_Panel_Base_C:"
 local hostHooked, probeN = false, {}
+local healthDirty=false
 local probeOk, probeLogged = {}, {} -- hook name -> registered; -> failure logged once
 local function probe(name, fn)
     if probeOk[name] then return true end
@@ -322,6 +323,13 @@ local function hostHooks()
         all = probe(HOODBP .. fn, function() swingFor() end) and all
     end
     all = probe("/Game/Systems/Managers/BP_CarManager.BP_CarManager_C:UpdatedCarEquip", function() partsAt = -1 end) and all
+    for _,fn in ipairs({'SetHealth','ModifyHealth'})do
+        all=probe(COMP..'BP_HealthComponent.BP_HealthComponent_C:'..fn,function(self)
+            if common.netMode()~='listen' then return end
+            local owner=self:get():GetOwner()
+            if valid(owner) and same(owner:GetAttachParentActor(),theCar(true))then partsAt=-1;healthDirty=true end
+        end) and all
+    end
     hostHooked = all
 end
 
@@ -347,9 +355,10 @@ local function hostTick()
     -- while driving, and the guest's own pawn waited minutes for room (hand play 2026-10-24). Ignition, gear, lights, handbrake and
     -- doors (the H line) still go at once; the rest at most twice a second.
     local h = s:match("^[^\n]*")
-    if #guests ~= lastGuests or h ~= lastH or (s ~= lastSent and t - lastAt >= 0.5) or t - lastAt > 3 then
+    if #guests ~= lastGuests or h ~= lastH or (s ~= lastSent and (healthDirty or t - lastAt >= 0.5)) or t - lastAt > 3 then
         net.toGuests("g.car.s", s)
         lastSent, lastAt, lastGuests, lastH = s, t, #guests, h
+        healthDirty=false
     end
 end
 
@@ -1168,6 +1177,34 @@ local function predictEnter(me, car)
     end)
 end
 
+-- Keep a short-lived target while the installed part's component is being created.
+local healthTargets = {}
+RegisterLoadMapPreHook(function() healthTargets = {} end)
+local function retryHealth(name, arch, value)
+    local target = { arch = arch, value = value, tries = 0 }
+    healthTargets[name] = target
+    local function retry()
+        if healthTargets[name] ~= target or common.netMode() ~= "client" then return end
+        target.tries = target.tries + 1
+        local cm, cont = carManager(), equipped()
+        local item
+        if cont then cont.Slots:ForEach(function(_, e)
+            local slot = e:get()
+            if slotName(slot) == name then item = itemOf(slot) end
+        end) end
+        if item and archPath(item) ~= arch then healthTargets[name] = nil; return end
+        if not (M.holdSlot and M.holdSlot(name)) and item and cm then
+            local m = manifestation(cm, name)
+            local c = m and propComps(m)
+            local h = c and readPart(c)
+            if h and math.abs(h - value) <= 0.05 then healthTargets[name] = nil; return end
+            if h and valid(c.h) then c.h:SetHealth(value) end
+        end
+        if target.tries < 12 then common.defer(250, retry) else healthTargets[name] = nil end
+    end
+    common.defer(250, retry)
+end
+
 -- apply the host's state to our own car inventory (the manifestations on the replicated car follow it)
 local function applyState(data)
     local cm, cont = carManager(), equipped()
@@ -1193,6 +1230,7 @@ local function applyState(data)
         local want, it = parts[name], itemOf(slot)
         if M.holdSlot and M.holdSlot(name) then return end -- the guest just swapped this part itself (guestswap.lua)
         if not want then
+            healthTargets[name] = nil
             if it then slot:RemoveAllItems({}); changed = changed + 1; log("PT|car part removed %s", name); if ov.settled() then ov.post("%d car part{s} changed by the host", "info", "carpart") end end
             return
         end
@@ -1210,11 +1248,14 @@ local function applyState(data)
             if m then
                 local c = propComps(m)
                 local h, f, b = readPart(c)
-                if want.h and h and math.abs(h - want.h) > 0.05 then c.h:SetHealth(want.h); changed = changed + 1 end
+                if want.h and (not h or math.abs(h - want.h) > 0.05) then
+                    if h and os.getenv("PT_MUTATE") ~= "healthretryonly" then c.h:SetHealth(want.h); changed = changed + 1 end
+                    retryHealth(name, want.arch, want.h)
+                else healthTargets[name] = nil end
                 if want.f and f and math.abs(f - want.f) > 0.05 then c.f["Set Fuel"](c.f, want.f); changed = changed + 1 end
                 if want.b and b and math.abs(b - want.b) > 0.05 then c.b["Set Battery"](c.b, want.b); changed = changed + 1 end
-            end
-        end
+            elseif want.h then retryHealth(name, want.arch, want.h) end
+        else healthTargets[name] = nil end
     end)
     if changed > 0 then
         pcall(function() cm:UpdateAggregateFuel() end)
@@ -1269,9 +1310,11 @@ end
 
 -- guest: its own open/close of the host's car door goes to the host, which runs the same AttemptOpen on its part;
 -- the result comes back with the car state
-net.on("g.car.door", function(_, data)
+net.on("g.car.door", function(pc, data)
     if common.netMode() ~= "listen" then return end
     local slot, verb = data:match("^([^|]*)|?(.*)$")
+    local pawn = valid(pc) and pc.Pawn
+    if slot == "SLOT_Hood" and valid(pawn) and same(pawn:GetAttachParentActor(), theCar(true)) then return end
     local shut = verb == "shut"
     local car = theCar(true)
     local part = car and doorParts(car)[slot]
@@ -1323,6 +1366,7 @@ local function hookAll()
                 if not (valid(part) and car and same(part:GetAttachParentActor(), car)) then return end
                 local slot = part.RootComponent.AttachParent:GetFName():ToString()
                 if path == HOODBP and slot ~= "SLOT_Hood" then return end
+                if slot == "SLOT_Hood" and riding then return end
                 -- only our own physics swing needs protecting; a door the host opened is posed here, its shut animates from the host
                 if suffix == "" or part.MainMesh:IsSimulatingPhysics(FName("None")) then doorHold = now() + 1.5 end
                 log("PT|car door intent %s%s sent=%s", slot, suffix, tostring(net.toHost("g.car.door", slot .. suffix)))
@@ -1491,10 +1535,21 @@ RegisterHook("/Script/PenDriverPro.BaseHighlightManager:PassesFilter", function(
     local h = highlight:get()
     if not valid(h) then return end
     local owner = h:GetOwner()
-    if not valid(owner) or owner:GetClass():GetFName():ToString() ~= "BP_CarPart_Interactive_C" then return end
-    local slot = {}
-    owner:GetSlotComponent(slot)
-    if valid(slot.SlotSceneComponent) and slot.SlotSceneComponent:GetFName():ToString() == "SLOT_Windshield" then return false end
+    if not valid(owner) then return end
+    local cls=owner:GetClass():GetFName():ToString()
+    if cls ~= "BP_CarPart_Interactive_C" and cls ~= HOOD then return end
+    if cls == "BP_CarPart_Interactive_C" then
+        local slot = {}; owner:GetSlotComponent(slot)
+        if valid(slot.SlotSceneComponent) then
+            local name = slot.SlotSceneComponent:GetFName():ToString()
+            if name == "SLOT_Windshield" or name == "SLOT_Hood" then return false end
+        end
+    end
+    local parent=valid(owner.RootComponent)and owner.RootComponent.AttachParent
+    if valid(parent) then
+        local name=parent:GetFName():ToString()
+        if name=="SLOT_Windshield" or name=="SLOT_Hood" then return false end
+    end
 end)
 local function highlightControl(hm)
     if not aimed or not controlCar or os.getenv("PT_MUTATE") == "nopasshighlight" then return end

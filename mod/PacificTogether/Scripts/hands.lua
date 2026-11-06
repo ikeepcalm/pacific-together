@@ -218,8 +218,12 @@ local function build(char, st)
         local lc = a.LightComponent
         lc:SetMobility(2)
         -- the potato flashlight's own values (intensity is unitless here: the level's lamps are 2..160, the torch 80000)
-        lc:SetLightColor({ R = 1, G = 0.77, B = 0.75, A = 1 }, true)
-        if m.kind == "point" then
+        local bio = m.arch == "IA_Tool_Toggle_Flashlight_Bio"
+        lc:SetLightColor(bio and { R = 1, G = 0.165, B = 0.888, A = 1 } or { R = 1, G = 0.77, B = 0.75, A = 1 }, true)
+        if bio then
+            lc.bUseInverseSquaredFalloff = false; lc.LightFalloffExponent = 2
+            lc:SetIntensity(100); lc:SetAttenuationRadius(2000); lc:SetOuterConeAngle(75)
+        elseif m.kind == "point" then
             lc:SetIntensity(20000); lc:SetAttenuationRadius(800)
         else
             lc:SetIntensity(80000); lc:SetAttenuationRadius(1350); lc:SetOuterConeAngle(36)

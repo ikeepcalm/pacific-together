@@ -7,7 +7,10 @@ local function live(a) return a and a:IsValid() and not a:HasAnyInternalFlags(EI
 local function inWorld(a)
     if not live(a) then return false end
     local w=a:GetWorld()
-    return live(w) and w:GetFullName()==UEHelpers.GetWorld():GetFullName()
+    if not live(w)then return false end
+    -- UE4SS returns a streamed actor's package world, not its level's active owning world.
+    local level=w.PersistentLevel;local owner=live(level)and level.OwningWorld
+    return live(owner) and owner:GetFullName()==UEHelpers.GetWorld():GetFullName()
 end
 local function path(a) return a:GetFullName():match("^%S+ (.+)$") end
 local function close(p,q) return (p.X-q.X)^2+(p.Y-q.Y)^2+(p.Z-q.Z)^2<5^2 end
@@ -107,5 +110,111 @@ LoopInGameThreadWithDelay(16,function()
         if w.job.tries<300 then common.defer(1000,function()pending[#pending+1]=w.job end)end
         work=nil
     end
+end)
+-- A saved host world can already lack foliage before any break observer runs.
+local presence,readyAt=nil,0
+RegisterLoadMapPreHook(function()presence=nil;readyAt=os.clock()+5 end)
+local function vegetation(mesh)
+    return mesh and mesh:find('^/Game/') and (mesh:find('/Trees/',1,true)or mesh:find('/Shrubs/',1,true))
+end
+local function inside(p,c,r)return(p.X-c.X)^2+(p.Y-c.Y)^2+(p.Z-c.Z)^2<r*r end
+local function finite(v)return v and v==v and math.abs(v)<1e8 end
+net.on('g.foliage.presence',function(_,data)
+    if common.netMode()~='client' or not net.hostSupports('foliage-state')or #data>30000 then return end
+    local header,body=data:match('^([^\n]+)\n(.*)$');if not header then return end
+    local epoch,x,y,z,r=header:match('^([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)$')
+    x,y,z,r=tonumber(x),tonumber(y),tonumber(z),tonumber(r)
+    if epoch~=net.worldToken()or not finite(x)or not finite(y)or not finite(z)or not r or r~=r or r<100 or r>2500 then return end
+    local groups,n,total={},0,0
+    for row in body:gmatch('[^\n]+')do
+        local mesh,points=row:match('^([^|]+)|(.*)$')
+        if not vegetation(mesh)or #mesh>512 or groups[mesh]then return end
+        n=n+1;if n>256 then return end
+        local list={};groups[mesh]=list
+        for point in points:gmatch('[^;]+')do
+            local a,b,c=point:match('^([^,]+),([^,]+),([^,]+)$');a,b,c=tonumber(a),tonumber(b),tonumber(c)
+            if not finite(a)or not finite(b)or not finite(c)then return end
+            total=total+1;if total>2048 then return end
+            list[#list+1]={X=a,Y=b,Z=c}
+        end
+    end
+    presence={p={X=x,Y=y,Z=z},r=r,groups=groups,components=nil,i=1}
+end)
+LoopInGameThreadWithDelay(1000,function()
+    if common.netMode()~='listen' or os.clock()<readyAt or os.getenv('PT_MUTATE')=='nofoliagepresence'then return end
+    local guests={}
+    for _,pc in ipairs(net.guests())do if net.peerSupports(pc,'foliage-state')and net.lifecycle(pc)=='active'then guests[#guests+1]=pc end end
+    if #guests==0 then return end
+    local cm=FindFirstOf('BP_CarManager_C');local car=live(cm)and cm.NewCarActor
+    if not live(car)then return end
+    local center,radius=car:K2_GetActorLocation(),2000
+    local groups={}
+    local function include(mesh,p)
+        if not vegetation(mesh)then return end
+        groups[mesh]=groups[mesh]or{}
+        if p and inside(p,center,radius)then groups[mesh][#groups[mesh]+1]=string.format('%.1f,%.1f,%.1f',p.X,p.Y,p.Z)end
+    end
+    for _,c in ipairs(FindAllOf('FoliageInstancedStaticMeshComponent')or{})do
+        if inWorld(c)and live(c.StaticMesh)then
+            local mesh=path(c.StaticMesh);include(mesh)
+            if vegetation(mesh)then for _,i in ipairs(c:GetInstancesOverlappingSphere(center,radius,true))do
+                local xf={};if c:GetInstanceTransform(i:get(),xf,true)then include(mesh,xf.Translation)end
+            end end
+        end
+    end
+    for _,a in ipairs(FindAllOf('BP_Crash_Complex_Foliage_Base_C')or{})do
+        if live(a)and live(a.BaseMesh)and live(a.BaseMesh.StaticMesh)then
+            -- Preview actors supply mesh names only, never world instances at the origin.
+            include(path(a.BaseMesh.StaticMesh))
+            if inWorld(a)and not a.IsBroken then local s=source(a);include(s.mesh,s.p)end
+        end
+    end
+    local rows={string.format('%s|%.1f|%.1f|%.1f|%d',net.worldToken(),center.X,center.Y,center.Z,radius)}
+    for mesh,points in pairs(groups)do rows[#rows+1]=mesh..'|'..table.concat(points,';')end
+    local data=table.concat(rows,'\n');if #data>30000 or #rows>257 then return end
+    for _,pc in ipairs(guests)do net.toGuest(pc,'g.foliage.presence',data)end
+end)
+LoopInGameThreadWithDelay(16,function()
+    local w=presence
+    if common.netMode()~='client' or not w then return end
+    local function missing(mesh,p)
+        local list=w.groups[mesh]
+        if not list or not inside(p,w.p,w.r-5)then return false end
+        for _,q in ipairs(list)do if close(p,q)then return false end end
+        return true
+    end
+    if not w.components then
+        w.components={}
+        for _,c in ipairs(FindAllOf('FoliageInstancedStaticMeshComponent')or{})do
+            if inWorld(c)and live(c.StaticMesh)and w.groups[path(c.StaticMesh)]then w.components[#w.components+1]=common.lease(c)end
+        end
+        for _,a in ipairs(FindAllOf('BP_Crash_Complex_Foliage_Base_C')or{})do
+            if inWorld(a)and not a.IsBroken and live(a.BaseMesh)and live(a.BaseMesh.StaticMesh)then
+                local s=source(a);if missing(s.mesh,s.p)then
+                    a:ComplexBreak({X=0,Y=0,Z=0},a.BaseMesh)
+                    common.log('PT|foliage saved actor removed %.1f %.1f %.1f',s.p.X,s.p.Y,s.p.Z)
+                end
+            end
+        end
+    end
+    local start,removed=os.clock(),0
+    while w.i<=#w.components and os.clock()-start<0.002 do
+        local c=common.resolve(w.components[w.i]);local done=true
+        if live(c)and live(c.StaticMesh)then
+            local mesh=path(c.StaticMesh);local indices={}
+            for _,i in ipairs(c:GetInstancesOverlappingSphere(w.p,w.r,true))do indices[#indices+1]=i:get()end
+            table.sort(indices,function(a,b)return a>b end)
+            for _,i in ipairs(indices)do
+                local xf={}
+                if c:GetInstanceTransform(i,xf,true)and missing(mesh,xf.Translation)and c:RemoveInstance(i)then
+                    removed=removed+1
+                    common.log('PT|foliage saved instance removed %.1f %.1f %.1f',xf.Translation.X,xf.Translation.Y,xf.Translation.Z)
+                    if removed>=8 then done=false;break end
+                end
+            end
+        end
+        if done then w.i=w.i+1 end
+    end
+    if w.i>#w.components then presence=nil end
 end)
 return M

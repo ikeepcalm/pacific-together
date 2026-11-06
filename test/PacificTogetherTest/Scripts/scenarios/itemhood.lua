@@ -2,7 +2,9 @@
 return function(T)
     local L = require("scenarios.sessionlib")(T)
     local ids = assert(loadfile("ue4ss/Mods/PacificTogether/Scripts/ids.lua"))()
-    local path = "/Game/Gameplay/Inventory/Items/Tools/Flare/IA_Tool_Throw_Flare"
+    local health=os.getenv('PT_VARIANT')=='health'
+    local path = health and '/Game/Gameplay/Inventory/Items/Car/Wheels/Wheel_Basic_01/IA_Attach_Wheel_Basic' or "/Game/Gameplay/Inventory/Items/Tools/Flare/IA_Tool_Throw_Flare"
+    local spec=path..(health and ':h37.5' or ':d123')
     local got, sent = {}, {}
     local function alive(a) return a and a:IsValid() and not a:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) end
     local function poll() while true do local k,d=PTNative_MsgPoll("t.itemhood.");if not k then return end;got[k]=d end end
@@ -34,7 +36,15 @@ return function(T)
             end
         end
     end
-    local function damaged(a) return alive(a) and alive(a.Instance) and ids.spec(a.Instance):find(":d123",1,true)~=nil end
+    local function damaged(a)
+        if not alive(a)or not alive(a.Instance)or ids.spec(a.Instance)~=spec then return false end
+        if health then
+            local o={{},{},{},{},{},{},{},{},{},{}}
+            ids.bfl():GetHealth(a.Instance,T.world(),o[1],o[2],o[3],o[4],o[5],o[6],o[7],o[8],o[9],o[10])
+            return math.abs(o[3].Health-tonumber(spec:match(':h(.+)$')))<0.01
+        end
+        return true
+    end
     local steps={};local function add(s) steps[#steps+1]=s end
     if T.ROLE=="host" then
         local item, pos
@@ -63,10 +73,14 @@ return function(T)
         add({run=function()
             local p=L.guestChar():K2_GetActorLocation();pos={X=p.X+120,Y=p.Y,Z=p.Z+100}
             item=ids.system():SpawnItemActor(T.world(),{Rotation={X=0,Y=0,Z=0,W=1},Translation=pos,Scale3D={X=1,Y=1,Z=1}},ids.archetype(path),0,0)
-            assert(alive(item) and alive(item.Instance));ids.setProps(item.Instance,path..":d123");assert(damaged(item))
+            assert(alive(item) and alive(item.Instance));ids.setProps(item.Instance,spec);assert(damaged(item))
             send("item",string.format("%f,%f,%f",pos.X,pos.Y,pos.Z))
         end})
         add({check="guest_sees_damaged_item",timeout=45,cond=function() return has("seen") end})
+        if health then
+            add({run=function()spec=path..':h21.25';ids.setProps(item.Instance,spec);send('changed')end})
+            add({check='guest_sees_health_change_on_existing_item',timeout=8,cond=function()return has('updated')end})
+        end
         add({check="guest_pickup_removes_host_item",timeout=45,cond=function() return not alive(item) end})
         add({check="guest_drop_preserves_host_durability",timeout=60,cond=function() poll();return got["t.itemhood.drop"] and damaged(findNear(pos)) end})
         add({run=function() send("done") end});add({wait=2});return steps
@@ -101,15 +115,22 @@ return function(T)
         if not pos then local x,y,z=got["t.itemhood.item"]:match("([^,]+),([^,]+),([^,]+)");pos={X=tonumber(x),Y=tonumber(y),Z=tonumber(z)} end
         item=findNear(pos);return damaged(item)
     end})
-    add({run=function() send("seen");T.myPawn()["Pickup Actor"](T.myPawn(),item,true) end})
+    add({run=function()send('seen')end})
+    if health then
+        add({check='health_change_requested',timeout=15,cond=function()return has('changed')end})
+        add({run=function()spec=path..':h21.25'end})
+        add({check='existing_world_item_health_updated',timeout=8,cond=function()return damaged(item)end})
+        add({run=function()send('updated')end})
+    end
+    add({run=function()T.myPawn()["Pickup Actor"](T.myPawn(),item,true)end})
     add({check="damaged_item_in_backpack",timeout=30,cond=function()
         local c=T.first("BP_InventoryManager_C").Inventory_Player;local a={};c:GetAllItems(a)
-        for _,w in ipairs(a) do local i=w:get();if alive(i) and ids.spec(i)==path..":d123" then return true end end
+        for _,w in ipairs(a) do local i=w:get();if alive(i) and ids.spec(i)==spec then return true end end
     end})
     add({run=function()
         local m=T.first("BP_InventoryManager_C");local c=m.Inventory_Player;local slot
         for i=0,c:GetNumSlots()-1 do local s=c:GetSlot(i);if alive(s) and s:GetNumItems()>0 then local a={};s:GetItems(a)
-            for _,w in ipairs(a) do local it=w:get();if alive(it) and ids.spec(it)==path..":d123" then slot=s;break end end
+            for _,w in ipairs(a) do local it=w:get();if alive(it) and ids.spec(it)==spec then slot=s;break end end
         end;if slot then break end end
         assert(slot);slot:TransferSingleIntoContainer(m.Inventory_PlayerHand)
         local a,b={},{};m:PlayerDropHandItem(a,b);assert(a["Drop Success"] and damaged(b["World Actor"]));send("drop")
