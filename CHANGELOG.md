@@ -5,6 +5,8 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+- Updated guests replay the host's bobblehead, hanging ornament and ignition-key motion without detached cosmetic bodies.
+
 - Synchronize damaged car-part health, wreck paint, trunk opening and item positions; remove host-cleared vegetation on updated guests and hide the hood highlight while riding.
 
 - Keep the guest cabin steady by disabling synthetic passenger head sway; negotiated car motion owns its visual pose without competing native movement notifications.

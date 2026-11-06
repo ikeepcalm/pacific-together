@@ -323,6 +323,31 @@ return function(T)
         local me = T.myPawn()
         return me ~= nil and T.cls(me) == T.CHAR
     end })
+    local cosmeticStats={bobble={n=0,max=0},hanging={n=0,max=0},key={n=0,max=0}}
+    local cosmeticCache,cosmeticAt={},-1
+    LoopInGameThreadWithDelay(16,function()
+        if not L.measuring then return end
+        local car=L.car();if not car then return end
+        if os.clock()-cosmeticAt>1 then
+            cosmeticCache={};cosmeticAt=os.clock()
+            if car.SM_Wagon_01_KeyPhysics:IsValid()then cosmeticCache[#cosmeticCache+1]={a=car,body=car.SM_Wagon_01_KeyPhysics,key="key"}end
+            for _,entry in ipairs({{'BP_CarPart_Cosmetic_Bobble_Base_C','BobbleTop','bobble'}, {'BP_CarPart_Hanging_Base_C','HangingMesh','hanging'}})do
+                for _,a in ipairs(FindAllOf(entry[1])or{})do
+                    if a:IsValid()and a:GetAttachParentActor():IsValid()and a:GetAttachParentActor():GetAddress()==car:GetAddress()then
+                        cosmeticCache[#cosmeticCache+1]={a=a,body=a[entry[2]],key=entry[3]}
+                    end
+                end
+            end
+        end
+        for _,e in ipairs(cosmeticCache)do if e.a:IsValid()and e.body:IsValid()then
+            local p,q=e.a:K2_GetActorLocation(),e.body:K2_GetComponentLocation()
+            local d=math.sqrt((p.X-q.X)^2+(p.Y-q.Y)^2+(p.Z-q.Z)^2)
+            local stat=cosmeticStats[e.key];stat.n=stat.n+1;stat.max=math.max(stat.max,d)
+            local r=StaticFindObject('/Script/Engine.Default__KismetMathLibrary'):InverseTransformRotation(e.a:GetTransform(),e.body:K2_GetComponentRotation())
+            stat.first=stat.first or {Pitch=r.Pitch,Yaw=r.Yaw,Roll=r.Roll};stat.swing=stat.swing or 0
+            for _,axis in ipairs({'Pitch','Yaw','Roll'})do stat.swing=math.max(stat.swing,math.abs((r[axis]-stat.first[axis]+180)%360-180))end
+        end end
+    end)
     -- the host drives
     add({ check = "guest_drive_started", timeout = 120, cond = function() return got("t.drive") ~= nil end })
     add({ run = function() met = { frames = 0, stalls = 0, maxJump = 0, dist = 0, camMax = 0, lags = {}, tilts = {}, swayMax = 0, mutesAt=PTNative_MuteCount() }; L.measuring = true
@@ -337,6 +362,22 @@ return function(T)
     end })
     add({ check = "guest_drive_stopped", timeout = DRIVE_S + 60, cond = function() return got("t.stop") ~= nil end })
     add({ run = function() L.measuring = false; measureMotion(nil, nil, true) end })
+    add({check="cosmetics_remain_on_car",timeout=1,cond=function()
+        local pass=true
+        for key,stat in pairs(cosmeticStats)do
+            log("PT|info cosmetic %s samples=%d maxDistance=%.2f",key,stat.n,stat.max)
+            if stat.n<30 or stat.max>(key=="key"and 300 or 100) then pass=false end
+        end
+        return pass
+    end})
+    add({check="cosmetics_wobble_in_car_frame",timeout=1,cond=function()
+        local pass=true
+        for key,stat in pairs(cosmeticStats)do
+            log("PT|info cosmetic %s swing=%.3f deg",key,stat.swing or 0)
+            if (stat.swing or 0)<0.1 then pass=false end
+        end
+        return pass
+    end})
     add({ check = "guest_car_follows", timeout = 1, cond = function()
         table.sort(met.tilts)
         log("PT|info guest tilt difference p95=%.1f deg samples=%d", #met.tilts > 0 and met.tilts[math.ceil(#met.tilts * 0.95)] or -1, #met.tilts)

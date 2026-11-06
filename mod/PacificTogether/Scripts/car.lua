@@ -852,6 +852,82 @@ local function hookTick(car)
     log("PT|car follow on the car's tick: %s", tostring(tickHooked))
 end
 
+-- Cosmetic constraints are created before the guest's local car is replaced by the host replica.
+local cosmeticBindings,cosmeticBodies={},{}
+RegisterLoadMapPreHook(function()cosmeticBindings,cosmeticBodies={},{} end)
+LoopInGameThreadWithDelay(500,function()
+    local mode=common.netMode();if mode~='client'and mode~='listen'then return end
+    local car=theCar(mode=='listen');if not car or not valid(car.Chassis)then return end
+    local keyBody=car.SM_Wagon_01_KeyPhysics
+    if valid(keyBody)then
+        local key=common.identity(car)..':key'
+        cosmeticBodies[key]={body=common.lease(keyBody),car=common.lease(car),part=common.lease(car),kind='SM_Wagon_01_KeyPhysics',class=car:GetClass():GetFName():ToString()}
+    end
+    for _,entry in ipairs({{'BP_CarPart_Cosmetic_Bobble_Base_C','PhysicsConstraint','BobbleTop'},
+                          {'BP_CarPart_Hanging_Base_C','PhysicsConstraint_Tree','HangingMesh'}})do
+        for _,part in ipairs(FindAllOf(entry[1])or{})do
+            if valid(part)and same(part:GetAttachParentActor(),car)then
+                local key=common.identity(part)
+                if key and cosmeticBindings[key]~=common.identity(car)then
+                    local constraint,body=part[entry[2]],part[entry[3]]
+                    if valid(constraint)and valid(body)then
+                        if mode=="client"then constraint:SetConstrainedComponents(body,NONE,car.Chassis,NONE)end
+                        cosmeticBindings[key]=common.identity(car)
+                        cosmeticBodies[key]={body=common.lease(body),car=common.lease(car),part=common.lease(part),kind=entry[3],class=part:GetClass():GetFName():ToString()}
+                    end
+                end
+            end
+        end
+    end
+end)
+local cosmeticMotion=require('itemmotion')
+local cosmeticBuffers,cosmeticSerial={},0
+local cosmeticStream={BobbleTop='b',HangingMesh='h',SM_Wagon_01_KeyPhysics='k'}
+RegisterLoadMapPreHook(function()cosmeticBuffers,cosmeticSerial={},0 end)
+LoopInGameThreadWithDelay(50,function()
+    if common.netMode()~='listen'then return end
+    local guests=net.guests();if #guests==0 then return end
+    for _,entry in pairs(cosmeticBodies)do
+        local body,part=common.resolve(entry.body),common.resolve(entry.part)
+        if body and part then
+            local xf=part:GetTransform()
+            local p=kml():InverseTransformLocation(xf,body:K2_GetComponentLocation())
+            local r=kml():InverseTransformRotation(xf,body:K2_GetComponentRotation())
+            cosmeticSerial=cosmeticSerial+1
+            local data=string.format('%s|%d|%s|%s|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f',net.worldToken(),cosmeticSerial,entry.kind,entry.class,p.X,p.Y,p.Z,r.Pitch,r.Yaw,r.Roll)
+            for _,pc in ipairs(guests)do if net.peerSupports(pc,'cosmetic-motion')then net.toGuest(pc,'g.motion.cosmetic.'..cosmeticStream[entry.kind],data)end end
+        end
+    end
+end)
+local function receiveCosmetic(_,data)
+    if common.netMode()~='client'or not net.hostSupports('cosmetic-motion')or #data>512 then return end
+    local f={};for v in data:gmatch('[^|]+')do f[#f+1]=v end
+    if #f~=10 or f[1]~=net.worldToken()or(f[3]~='BobbleTop'and f[3]~='HangingMesh'and f[3]~='SM_Wagon_01_KeyPhysics')or not f[4]:match('^[%w_]+$')then return end
+    for i=5,10 do f[i]=tonumber(f[i]);if not f[i]or f[i]~=f[i]or math.abs(f[i])>500 then return end end
+    local serial=tonumber(f[2]);if not serial or serial%1~=0 or serial<0 or serial>1e9 then return end
+    local b=cosmeticBuffers[f[3]]
+    if b and (serial<=b.serial or b.class~=f[4])then if serial<=b.serial then return end;b=nil end
+    if not b then b={class=f[4]};cosmeticBuffers[f[3]]=b end
+    b.serial,b.at=serial,os.clock()
+    local p,r=vec(f[5],f[6],f[7]),{Pitch=f[8],Yaw=f[9],Roll=f[10]}
+    local last=b[#b];cosmeticMotion.push(b,p,r,b.at,last and last.p or p,last and last.r or r)
+end
+for _,suffix in pairs(cosmeticStream)do net.on('g.motion.cosmetic.'..suffix,receiveCosmetic)end
+local function renderCosmetics()
+    for _,entry in pairs(cosmeticBodies)do
+        local b=cosmeticBuffers[entry.kind]
+        local body,part=common.resolve(entry.body),common.resolve(entry.part)
+        if b and b.class==entry.class and body and part then
+            local a,z,u=cosmeticMotion.sample(b,os.clock())
+            if a then
+                if body:IsSimulatingPhysics(NONE)then body:SetSimulatePhysics(false)end
+                local p=vec(a.p.X+(z.p.X-a.p.X)*u,a.p.Y+(z.p.Y-a.p.Y)*u,a.p.Z+(z.p.Z-a.p.Z)*u)
+                local r={};for _,k in ipairs({'Pitch','Yaw','Roll'})do r[k]=a.r[k]+wrap(z.r[k]-a.r[k])*u end
+                body:K2_SetWorldLocationAndRotation(kml():TransformLocation(part:GetTransform(),p),kml():TransformRotation(part:GetTransform(),r),false,{},true)
+            end
+        end
+    end
+end
 -- Passenger head sway: the seated guest's camera moves against the car's acceleration on a damped spring (back on
 -- throttle, forward on braking, out in turns, down over bumps). The host feels the car through its controls and physics;
 -- Retained as a regression control: this synthetic camera offset visibly shifts the cabin relative to the guest.
@@ -1003,7 +1079,22 @@ local function follow(car)
                     to = kml():VInterpTo(car:K2_GetActorLocation(), to, dt, 10)
                     rot = kml():RInterpTo(car:K2_GetActorRotation(), rot, dt, 10)
                 end
+                local cosmeticPose={}
+                if not physical and os.getenv('PT_MUTATE')~='nocosmeticcarry'then
+                    local before=car:GetTransform()
+                    for key,entry in pairs(cosmeticBodies)do
+                        local body=common.resolve(entry.body)
+                        if not body or not common.resolve(entry.car)then cosmeticBodies[key]=nil
+                        elseif same(common.resolve(entry.car),car) and not cosmeticBuffers[entry.kind]then
+                            cosmeticPose[#cosmeticPose+1]={body=body,relative=kml():MakeRelativeTransform(body:K2_GetComponentToWorld(),before)}
+                        end
+                    end
+                end
                 car:K2_SetActorLocationAndRotation(to, rot, false, {}, true)
+                local after=#cosmeticPose>0 and car:GetTransform()
+                for _,entry in ipairs(cosmeticPose)do
+                    entry.body:K2_SetWorldTransform(kml():ComposeTransforms(entry.relative,after),false,{},true)
+                end
                 local turn = wrap(rot.Yaw - lookYaw)
                 lookYaw = rot.Yaw
                 local pc = localPC()
@@ -1018,6 +1109,7 @@ local function follow(car)
             if last and t - delay > last.tm + 0.3 then settled = true end
         end)
         if not ok then log("PT|error car follow %s", tostring(err)) end
+        local okc,errc=pcall(renderCosmetics);if not okc then log("PT|error cosmetic render %s",tostring(errc))end
         local oks, errs = pcall(sway, car, os.clock())
         if not oks and not sw.err then sw.err = true; log("PT|error car sway %s", tostring(errs)) end
     end
