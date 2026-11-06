@@ -8,6 +8,7 @@ local UEHelpers = require("UEHelpers")
 local common = require("common")
 local safety = require("safety")
 local net = require("net")
+local tint=require("itemtint")
 local log = common.log
 
 local M = {}
@@ -92,6 +93,7 @@ end
 
 -- theirs ----------------------------------------------------------------------------------------------------------------
 
+local remoteTint=""
 local remote = { state = "", at = 0 } -- last report from the other player
 local mirrors = {}                    -- character full name -> { actor, parts, light, state, swingAt }
 local handledUse = nil
@@ -208,6 +210,7 @@ local function build(char, st)
                 a:K2_SetActorRelativeTransform({ Translation = { X = v[1], Y = v[2], Z = v[3] }, Rotation = { X = v[4], Y = v[5], Z = v[6], W = v[7] },
                     Scale3D = { X = v[8], Y = v[9], Z = v[10] } }, false, {}, true)
             end
+            tint.mesh(a.StaticMeshComponent,remoteTint)
             m.parts[#m.parts + 1] = a
             if world then break end -- the world mesh is the whole tool
         end
@@ -287,7 +290,7 @@ end
 
 -- state reports and tool use ---------------------------------------------------------------------------------------------
 
-local lastSent, lastAt = nil, 0
+local lastSent, lastAt, lastTint = nil, 0, nil
 local function send(kind, data)
     if safety.guest() then net.toHost(kind, data) else net.toGuests(kind, data) end
 end
@@ -295,6 +298,15 @@ end
 local function report()
     if not safety.active() then lastSent = nil; return end
     local s = localState()
+    local c=ownChar();local hand={}
+    if c then c:GetActiveHandItem(false,hand) end
+    local h=hand['Hand Item'];local appearance=valid(h) and valid(h.Instance) and tint.spec(h.Instance) or ""
+    if appearance~=lastTint or os.time()-lastAt>=3 then
+        lastTint=appearance
+        if safety.guest() then
+            if net.hostSupports('item-tint') then net.toHost('g.hands.tint',appearance) end
+        else for _,pc in ipairs(net.guests()) do if net.peerSupports(pc,'item-tint') then net.toGuest(pc,'g.hands.tint',appearance) end end end
+    end
     -- on change, else every 3 s so a late joiner and a missed message catch up
     if s ~= lastSent or os.time() - lastAt >= 3 then
         lastSent, lastAt = s, os.time()
@@ -302,6 +314,14 @@ local function report()
     end
 end
 
+net.on('g.hands.tint',function(pc,data)
+    if #data>2200 or (safety.guest() and not net.hostSupports('item-tint')) or (not safety.guest() and not net.peerSupports(pc,'item-tint')) then return end
+    if data~="" and not data:match('^:p[%w_/%.-]+:t[01]:c[%w_/%.-]+$') then return end
+    if remoteTint~=data then
+        remoteTint=data
+        for k in pairs(mirrors) do dropMirror(k) end
+    end
+end)
 net.on("g.hands.s", function(_, data) remote.state, remote.at = data, os.time() end)
 net.on("g.hands.use", function() remote.useAt = os.clock() end)
 
@@ -316,7 +336,7 @@ local function hookUse()
 end
 
 -- a map change frees every object we hold
-RegisterLoadMapPreHook(function() mirrors, others, nextScan, remote = {}, {}, 0, { state = "", at = 0 } end)
+RegisterLoadMapPreHook(function() remoteTint="";lastTint=nil;mirrors, others, nextScan, remote = {}, {}, 0, { state = "", at = 0 } end)
 
 LoopInGameThreadWithDelay(100, function()
     local ok, err = pcall(function()

@@ -240,6 +240,14 @@ class PacificTogetherNative : public CppUserModBase
             });
             if (std::getenv("PT_SCENARIO"))
             {
+                // One machine-wide clock lets two test processes compare simultaneous state without estimating network delay.
+                l->register_function("PTNative_TestMonotonicSeconds", [](const LuaMadeSimple::Lua& l) -> int {
+                    LARGE_INTEGER ticks{}, frequency{};
+                    QueryPerformanceCounter(&ticks);
+                    QueryPerformanceFrequency(&frequency);
+                    l.set_number(static_cast<double>(ticks.QuadPart) / frequency.QuadPart);
+                    return 1;
+                });
                 // test runs only: PTNative_ReloadLua() right before RestartMod("PacificTogether"). The event queued here
                 // runs before the reinstall's and holds it until the game thread waits. Returns false while one is under way.
                 l->register_function("PTNative_ReloadLua", [](const LuaMadeSimple::Lua& l) -> int {

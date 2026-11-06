@@ -1,6 +1,6 @@
 -- Item containers as plain data: "path:d12:f7.5*count,..." strings (archetype + durability/fuel/battery/health per item)
 -- that both players can compare, send and apply.
--- shortcut: tints, upgrades and chart data do not travel; add them to PROPS when playtests show it matters.
+-- Paint/decal state follows the instance; upgrades and chart data remain outside this format.
 local UEHelpers = require("UEHelpers")
 
 local M = {}
@@ -65,6 +65,7 @@ local function spec(it, p)
             if ok and type(v) == "number" then s = s .. ":" .. pr[1] .. string.format(pr[5] and "%.5g" or "%d", v) end
         end
     end
+    if t.IP_Tintable then s=s..require("itemtint").spec(it) end
     return s
 end
 
@@ -76,6 +77,7 @@ local function setProps(it, p, s)
             lib():SetItemProperty(t[pr[2]], it, FName(pr[3]), pr[5] and (string.unpack("<i4", string.pack("<f", v))) or math.floor(v))
         end
     end
+    if t.IP_Tintable then require("itemtint").set(it,s) end
 end
 
 -- spec string -> list of item instances

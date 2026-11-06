@@ -368,12 +368,19 @@ validItemSpec=function(spec, path)
     while rest ~= "" do
         local field, tail = rest:match("^:([^:]+)(.*)$")
         if not field then return false end
-        local key, raw = field:match("^([dfbh])([%d%.%+%-eE]+)$")
-        local value = raw and tonumber(raw)
-        if not key or seen[key] or not value or value ~= value or math.abs(value) > 10000000
-            or (key == "d" and value % 1 ~= 0) then return false end
+        local key, raw = field:match("^([dfbhpct])(.*)$")
+        if not key or seen[key] then return false end
+        if key=="p" or key=="c" then
+            if raw~="-" and (#raw>1024 or not raw:match("^/Game/BaseArt/Palettes/[%w_/%.-]+$")) then return false end
+        elseif key=="t" then if raw~="0" and raw~="1" then return false end
+        else
+            if not raw:match("^[%d%.%+%-eE]+$") then return false end
+            local value=tonumber(raw)
+            if not value or value~=value or math.abs(value)>10000000 or (key=="d" and value%1~=0) then return false end
+        end
         seen[key], rest = true, tail
     end
+    if seen.p or seen.t or seen.c then return seen.p and seen.t and seen.c or false end
     return true
 end
 
@@ -1268,34 +1275,6 @@ local VEHICLE='/Game/Gameplay/Vehicles/Templates/BaseActors/BP_Template_BaseVehi
 local TRUNK='/Game/Gameplay/Vehicles/Templates/BaseActors/BP_TemplatePart_Trunk.BP_TemplatePart_Trunk_C'
 local function assetName(o)return alive(o) and ids.path2(o) or '-' end
 local function safeAsset(p)return p=='-' or (#p<1024 and p:match('^/Game/[%w_/%.-]+$')~=nil) end
-local function materialPalette(mid,palette,layer,fields)
-    if not alive(palette)then return end
-    local defaults=palette:GetCDO()
-    local asset=ids.asset('/Game/BaseArt/LayerLibrary/Gameplay/ML_Palette_'..layer..'.ML_Palette_'..layer)
-    if not asset then return end
-    for _,field in ipairs(fields)do
-        local info=mid:GetParameterInfo(0,FName(field[1]),asset)
-        if info.Index>=0 then mid['Set'..field[3]..'ParameterValueByInfo'](mid,info,defaults[field[2]])end
-    end
-end
-local paintFields={
-    {'Palette_Paint_Color','Paint Color Tint','Vector'},
-    {'Palette_Paint_Texture','Paint Combo Texture','Texture'},
-    {'Palette_Paint_ColorAmount','Paint Color Amount','Scalar'},
-    {'Palette_Paint_Roughness','Paint Roughness','Scalar'},
-    {'Palette_Paint_Metallic','Paint Metallic','Scalar'},
-    {'Palette_Paint_Spec','Paint Spec','Scalar'},
-    {'Palette_Paint_UVTileRate','Paint UV Tile Rate','Scalar'},
-}
-local decalFields={
-    {'Palette_Decal_Diffuse_Texture','Decal Diffuse Texture','Texture'},
-    {'Palette_Decal_Mask_Texture','Decal Mask Texture','Texture'},
-    {'Palette_Paint_Color','Decal Tint','Vector'},
-    {'Palette_Decal_DiffuseBoost','Decal Diffuse Boost','Scalar'},
-    {'Palette_Decal_Roughness','Decal Roughness','Scalar'},
-    {'Palette_Decal_Metallic','Decal Metallic','Scalar'},
-    {'Palette_Decal_Spec','Decal Spec','Scalar'},
-}
 local function wreckTint(a)
     if #a.DynamicMaterialInstances == 0 then a:SetupMaterials() end
     a:SetupTintOnVehicleAndParts()
@@ -1308,8 +1287,7 @@ local function wreckTint(a)
                 for i=0,mesh:GetNumMaterials()-1 do
                     local mid=mesh:GetMaterial(i)
                     if not mid:IsA(StaticFindObject('/Script/Engine.MaterialInstanceDynamic'))then mid=mesh:CreateDynamicMaterialInstance(i,nil,FName('None'))end
-                    materialPalette(mid,a.SelectedPaintPalette,'Paint',paintFields)
-                    materialPalette(mid,a.SelectedDecalPalette,'Decal',decalFields)
+                    require('itemtint').material(mid,a.SelectedPaintPalette,a.SelectedDecalPalette)
                 end
             end
         end

@@ -12,7 +12,8 @@ assert(type(PTNative_MsgReset) == "function", "PacificTogetherNative is outdated
 local M = {}
 local handlers = {}
 -- Extensions ride the author's PT1/PT1A contract, only after both peers opt in.
-local offered = "motion,item-clock,cosmetic-motion,car-motion,door-motion,named-storage,foliage,foliage-state,wreck-state,drop-velocity,item-state,intents,heap,heap-lid" .. (PTNative_TunnelMotionSend and ",datagrams" or "")
+local offered = "motion,item-tint,world-clock,item-clock,cosmetic-motion,car-motion,door-motion,named-storage,foliage,foliage-state,wreck-state,drop-velocity,item-state,intents,heap,heap-lid" .. (PTNative_TunnelMotionSend and ",datagrams" or "")
+if os.getenv("PT_MUTATE")=="noworldclock" then offered=offered:gsub(",world%-clock","") end
 if os.getenv("PT_MUTATE")=="noheaplid" then offered=offered:gsub(",heap%-lid","") end
 if os.getenv("PT_MUTATE")=="nowreckstate" then offered=offered:gsub(",wreck%-state","") end
 if os.getenv("PT_MUTATE")=="nocarmotion" then offered=offered:gsub(",car%-motion","") end
@@ -84,8 +85,12 @@ function M.guests()
     return list
 end
 
+local function legacyItems(data)
+    return data:gsub(":p/Game/BaseArt/Palettes/Paints/[%w_/%.-]+", ""):gsub(":p%-", ""):gsub(":c/Game/BaseArt/Palettes/Decals/[%w_/%.-]+", ""):gsub(":c%-", ""):gsub(":t[01]", "")
+end
 function M.toHost(kind, data)
     local pc = localPC()
+    if (kind=="g.loot.b" or kind=="g.swap.set" or kind=="g.st.shred") and not M.hostSupports("item-tint") then data=legacyItems(data or "") end
     if kind:sub(1, 13) == "g.radio.file." and not M.hostSupports("music-files") then return false end
     if kind == "g.heap.intent" and not M.hostSupports("heap") then return false end
     if protected(kind) and M.hostSupports("intents") then
@@ -153,6 +158,7 @@ end
 -- bytes sent per kind, logged every 30 s (the guest's pawn waited minutes behind our traffic, hand play 2026-10-24)
 local byKind, byAt = {}, os.clock()
 function M.toGuest(pc, kind, data)
+    if (kind=="g.loot.b" or kind=="g.loot.wreck" or kind=="g.st.shredback") and not M.peerSupports(pc,"item-tint") then data=legacyItems(data or "") end
     if not (pc:IsValid() and PTNative_MsgToGuest ~= nil) then return false end
     if kind:sub(1, 13) == "g.radio.file." and not M.peerSupports(pc, "music-files") then return false end
     if kind == "g.heap.fx" and not M.peerSupports(pc, "heap") then return false end
@@ -175,7 +181,7 @@ function M.toGuest(pc, kind, data)
     end
     if os.getenv("PT_MUTATE") == "noflow" then return PTNative_MsgToGuest(pc:GetAddress(), kind, data) end
     -- transition.lua's one-word notices skip the queue: after a map load they would wait behind the loot lists for the guest
-    if kind == "g.trans" then return PTNative_MsgToGuest(pc:GetAddress(), kind, data) end
+    if kind == "g.trans" or kind == "g.world.clock" then return PTNative_MsgToGuest(pc:GetAddress(), kind, data) end
     local f = flowFor(pc)
     f.queue[#f.queue + 1] = { kind, data, costOf(data) }
     drain(f)
@@ -346,7 +352,7 @@ local function dispatch()
     while true do
         local kind, data, from = PTNative_MsgPoll("g.")
         if not kind then return end
-        if common.netMode() == "client" and kind:sub(1, 9) ~= "g.motion." and kind ~= "g.net.testintent" then received = received + 1 end -- motion has its own native window, outside the reliable gameplay queue
+        if common.netMode() == "client" and kind:sub(1, 9) ~= "g.motion." and kind ~= "g.net.testintent" and kind ~= "g.world.clock" then received = received + 1 end -- motion and clock bypass the gameplay window
         local fn, pc = handlers[kind], sender(from)
         if not fn then
             log("PT|error net no handler for %s", kind)

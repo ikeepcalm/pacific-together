@@ -5,6 +5,9 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+- Updated peers keep the host's day clock through loading, with latency compensation and a clock acknowledgement before the loading-screen release.
+- Car-part paint and decals follow removal, remote hand presentation, storage, drops, pickup and reinstallation on updated peers.
+
 - Updated peers interpolate loose-item flight using host snapshot times and retain the motion buffer across short delivery gaps.
 
 - Updated guests replay the host's bobblehead, hanging ornament and ignition-key motion without detached cosmetic bodies.

@@ -11,6 +11,7 @@ local net = require("net")
 local safety = require("safety")
 local log = common.log
 local ov = require("overlay")
+local clock = require("worldclock")
 
 local M = { enabled = os.getenv("PT_MUTATE") ~= "noworldsync", mutate = os.getenv("PT_MUTATE") } -- the test mutation switches the module off
 
@@ -244,7 +245,7 @@ local function applyTime(s)
         if b then b["Capture Configure"](b, true) end -- turns the bounds and renders the map picture again
         log("PT|world guest north %.1f (map %s)", n, b and "turned" or "not loaded")
     end
-    if s.tod then
+    if s.tod and not clock.active() then
         local r = {}
         tod["Get Current Time Of Day"](tod, r)
         local d = math.abs((r["Returned Time Of Day"] or 0) - tonumber(s.tod))
