@@ -155,6 +155,7 @@ class App : Form
     readonly string settingsFile = Path.Combine(Environment.GetEnvironmentVariable("APPDATA") ?? "", @"PacificTogether\launcher.txt");  // line 1 folder, 2 IP, 3 host|join
     TextBox folder, ip, output;
     RadioButton rHost, rJoin;
+    CheckBox throughSteam;
     Label status, versions;
     PtButton install, uninstall, openLogs, collect, browse;
     readonly List<PtButton> tabs = new List<PtButton>();
@@ -254,6 +255,9 @@ class App : Form
         rJoin.CheckedChanged += delegate { ip.Enabled = rJoin.Checked; if (rJoin.Checked && !busy) ip.Focus(); };
         ip.Enabled = false;
 
+        throughSteam = new CheckBox { Text = "Launch through Steam", AutoSize = true, ForeColor = Pal.Text, Font = UI.Body(10.5f) };
+        row(throughSteam, SizeType.Absolute, UI.S(28));
+
         var bf = new FlowLayoutPanel { Height = UI.S(52), WrapContents = false, Margin = new Padding(0, UI.S(14), 0, 0) };
         install = new PtButton("In&stall && play", Kind.Primary) { Size = new Size(UI.S(190), UI.S(44)), Margin = new Padding(0, 0, UI.S(10), 0) };
         install.Font = UI.Head(12f, false);
@@ -316,14 +320,15 @@ class App : Form
     {
         var s = new List<string>();
         try { s.AddRange(File.ReadAllLines(settingsFile)); } catch { }
-        while (s.Count < 3) s.Add("");
+        while (s.Count < 4) s.Add("");
         folder.Text = s[0].Length > 0 ? s[0] : FindGame();
         ip.Text = s[1];
+        throughSteam.Checked = s[3] == "steam";
         if (s[2] == "join" || (s[2] == "" && s[1] != "")) rJoin.Checked = true;
     }
     void SaveSettings()
     {
-        try { Directory.CreateDirectory(Path.GetDirectoryName(settingsFile)); File.WriteAllLines(settingsFile, new[] { folder.Text.Trim(), ip.Text.Trim(), rJoin.Checked ? "join" : "host" }); } catch { }
+        try { Directory.CreateDirectory(Path.GetDirectoryName(settingsFile)); File.WriteAllLines(settingsFile, new[] { folder.Text.Trim(), ip.Text.Trim(), rJoin.Checked ? "join" : "host", throughSteam.Checked ? "steam" : "direct" }); } catch { }
     }
     string FindGame()
     {
@@ -361,7 +366,7 @@ class App : Form
     void Execute(string extra, string doneOk, bool launch)
     {
         var script = Path.Combine(baseDir, "install.ps1");
-        if (!File.Exists(script)) { Fail("install.ps1 is missing next to the app. Unpack the whole zip first."); return; }
+        if (!File.Exists(script)) { Fail("Installer files are missing. Reopen the complete Pacific Together installer."); return; }
         if (!GameOk) { Fail("Pick the folder that contains PenDriverPro first."); return; }
         output.Clear(); SetBusy(true);
         var path = folder.Text.Trim();
@@ -381,19 +386,26 @@ class App : Form
 
     void Fail(string m) { MessageBox.Show(this, m, "Pacific Together", MessageBoxButtons.OK, MessageBoxIcon.Error); }
 
-    // through Steam when it is installed (overlay, invites, its own launch checks), else the exe itself (steam_appid.txt lets it start)
+    // Direct launch always uses the selected copy, even when Steam is installed.
     static string SteamExe()
     {
         try { var v = Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Valve\Steam", "SteamExe", null) as string; return v != null && File.Exists(v) ? v : null; }
         catch { return null; }
+    }
+    static ProcessStartInfo GameStartInfo(string bin, bool useSteam)
+    {
+        if (!useSteam) return new ProcessStartInfo(Path.Combine(bin, "PenDriverPro-Win64-Shipping.exe")) { WorkingDirectory = bin };
+        var steam = SteamExe();
+        if (steam == null) throw new InvalidOperationException("Steam was not found. Disable 'Launch through Steam' to start the selected copy directly.");
+        return new ProcessStartInfo(steam, "-applaunch 1458140") { WorkingDirectory = Path.GetDirectoryName(steam) };
     }
     void StartGame()
     {
         ArchiveLog();
         try
         {
-            if (SteamExe() != null) { Process.Start("steam://rungameid/1458140"); Log("Starting Pacific Drive through Steam."); }
-            else { Process.Start(new ProcessStartInfo(Path.Combine(Bin, "PenDriverPro-Win64-Shipping.exe")) { WorkingDirectory = Bin }); Log("Starting Pacific Drive (Steam not found)."); }
+            Process.Start(GameStartInfo(Bin, throughSteam.Checked));
+            Log(throughSteam.Checked ? "Starting Pacific Drive through Steam." : "Starting the selected Pacific Drive copy directly.");
         }
         catch (Exception ex) { Fail("Could not start the game: " + ex.Message); }
     }
@@ -545,6 +557,16 @@ class App : Form
 
     // ---- entry ----
     // the release exe carries the package as the resource payload.zip: unpacked once per version (its version.txt names the folder)
+    static bool CompletePayload(string dir, ZipArchive z)
+    {
+        foreach (var e in z.Entries)
+        {
+            if (e.FullName.EndsWith("/")) continue;
+            var file = Path.Combine(dir, e.FullName.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(file) || new FileInfo(file).Length != e.Length) return false;
+        }
+        return true;
+    }
     static void Unpack()
     {
         var res = typeof(App).Assembly.GetManifestResourceStream("payload.zip");
@@ -556,12 +578,16 @@ class App : Form
             if (stamp == null) throw new InvalidDataException("payload has no version.txt");
             string ver;
             using (var r = new StreamReader(stamp.Open())) ver = r.ReadToEnd().Trim();
-            var dir = Path.Combine(Data, "app", Regex.Replace(ver, @"[^\w.\-]", "_"));
-            if (!File.Exists(Path.Combine(dir, @"game\ue4ss\Mods\PacificTogether\version.txt")))
+            if (z.GetEntry("install.ps1") == null) throw new InvalidDataException("payload has no install.ps1");
+            var root = Path.GetFullPath(Path.Combine(Data, "app"));
+            var dir = Path.GetFullPath(Path.Combine(root, Regex.Replace(ver, @"[^\w.\-]", "_")));
+            if (!dir.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("invalid package version");
+            if (!CompletePayload(dir, z))
             {
                 var part = dir + ".part";
                 if (Directory.Exists(part)) Directory.Delete(part, true);
                 z.ExtractToDirectory(part);
+                if (!CompletePayload(part, z)) throw new InvalidDataException("package extraction is incomplete");
                 if (Directory.Exists(dir)) Directory.Delete(dir, true);
                 Directory.Move(part, dir);
             }

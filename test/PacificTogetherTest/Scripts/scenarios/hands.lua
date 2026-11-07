@@ -14,7 +14,8 @@ return function(T)
     local L = require("scenarios.sessionlib")(T)
     local log, ROLE = T.log, T.ROLE
     local TOOLS = "/Game/Gameplay/Inventory/Items/Tools/"
-    local FLASH = TOOLS .. "Flashlight/Potato/IA_Tool_Toggle_Flashlight.IA_Tool_Toggle_Flashlight"
+    local bio = os.getenv("PT_VARIANT") == "bio"
+    local FLASH = bio and (TOOLS .. "BioLantern/IA_Tool_Toggle_Flashlight_Bio.IA_Tool_Toggle_Flashlight_Bio") or (TOOLS .. "Flashlight/Potato/IA_Tool_Toggle_Flashlight.IA_Tool_Toggle_Flashlight")
     local PATCH = TOOLS .. "PatchKit/IA_Tool_Target_Consumable_PatchKit.IA_Tool_Target_Consumable_PatchKit"
     -- a car part is the two-handed kind (Archetype.Size 1; the fuel can is a one-hand tool)
     local BREAKER = TOOLS .. "Breaker/IA_Tool_Target_Breaker.IA_Tool_Target_Breaker" -- the Impact Hammer: carries an engine Cylinder (VFX volume)
@@ -120,7 +121,10 @@ return function(T)
             for _, a in ipairs(FindAllOf(cls) or {}) do
                 if alive(a) and a.LightComponent:IsVisible() then
                     local l = a:K2_GetActorLocation()
-                    if math.sqrt((l.X - head.X) ^ 2 + (l.Y - head.Y) ^ 2 + (l.Z - head.Z) ^ 2) < 120 then return true end
+                    if math.sqrt((l.X - head.X) ^ 2 + (l.Y - head.Y) ^ 2 + (l.Z - head.Z) ^ 2) < 120 then
+                        local c = a.LightComponent.LightColor
+                        if not bio or (c.R > 240 and c.G > 90 and c.G < 140 and c.B > 220 and not a.LightComponent.bUseInverseSquaredFalloff and math.abs(a.LightComponent.Intensity - 100) < 1) then return true end
+                    end
                 end
             end
         end

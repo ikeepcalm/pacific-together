@@ -5,6 +5,30 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
+### Added
+
+- Automatic sharing of the host's custom MP3, WAV and OGG radio tracks; guests no longer need to copy matching files manually.
+
+### Changed
+
+- Smoother car movement, wheel rotation, steering and suspension on the guest, with a steady passenger view.
+- The bobblehead, hanging ornament and ignition key follow the host's motion.
+- Smoother thrown-item movement, preserving throw velocity and rotation.
+- The guest's day clock follows the host through loading; time synchronization is confirmed before the loading screen clears.
+
+### Fixed
+
+- Removed car parts keep their paint and decals in hands, on the ground, after pickup and when installed again. Other players see the same appearance.
+- Dropped items and car parts retain health, durability, fuel and battery charge instead of returning to full condition.
+- Part lockers and shared containers load their contents on joining and synchronize item placement and changes.
+- Abandoned cars match the host's paint, decals, part condition, trunk state and stored-item layout.
+- Car doors, hood and trunk follow the host's opening and closing actions. Passengers cannot select the hood or windshield from inside.
+- Bushes and small trees cleared by the host no longer remain standing on the guest.
+- Lucky Junk Heap interactions, rewards, animations, sounds and lid position follow the host.
+- Corrected the other player's bio-lantern light color, intensity and range.
+- Prevented repeated custom-song restarts and overlapping radio playback.
+- The installer restores missing files. The launcher supports direct launch of the selected copy or launch through Steam.
+
 ## [0.8.9] - 2026-11-04
 
 Network protocol **7**: both players need 0.8.9.
@@ -39,7 +63,7 @@ Network protocol **7**: both players need 0.8.9.
 
 ## [0.8.8] - 2026-11-02
 
-Network protocol **6**: both players need 0.8.8. Includes the Everelsu fork's three commits (garage systems, passenger sway
+Network protocol **6** in this integration; optional extensions negotiate support. Both players need 0.8.8. Includes the Everelsu fork's three commits (garage systems, passenger sway
 and controls, message lifetimes; native layer rebuilt).
 
 ### Changed

@@ -1,6 +1,6 @@
 -- Item containers as plain data: "path:d12:f7.5*count,..." strings (archetype + durability/fuel/battery/health per item)
 -- that both players can compare, send and apply.
--- shortcut: tints, upgrades and chart data do not travel; add them to PROPS when playtests show it matters.
+-- Paint/decal state follows the instance; upgrades and chart data remain outside this format.
 local UEHelpers = require("UEHelpers")
 
 local M = {}
@@ -33,7 +33,7 @@ local PROPS = { -- key, property asset, member name, reader, float?
     { "d", "IP_Durability", "Durability", function(b, it, w) local o = { {}, {}, {}, {}, {} }; b:GetDurability(it, w, o[1], o[2], o[3], o[4], o[5]); return o[3].Durability end },
     { "f", "IP_Fuelable", "Fuel", function(b, it, w) local o = { {}, {}, {}, {}, {}, {} }; b:GetFuelableInfo(it, w, o[1], o[2], o[3], o[4], o[5], o[6]); return o[1].Fuel end, true },
     { "b", "IP_Battery", "Battery", function(b, it, w) local o = { {}, {}, {}, {}, {} }; b:GetBattery(it, w, o[1], o[2], o[3], o[4], o[5]); return o[3].BATTERY end, true },
-    { "h", "IP_Health", "Health", function(b, it, w) local o = { {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {} }; b:GetHealth(it, w, o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8], o[9], o[10], o[11]); return o[3].Health end, true },
+    { "h", "IP_Health", "Health", function(b, it, w) local o = { {}, {}, {}, {}, {}, {}, {}, {}, {}, {} }; b:GetHealth(it, w, o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8], o[9], o[10]); return o[3].Health end, true },
 }
 -- tests only (a mutation without item state); players never set PT_MUTATE
 if os.getenv("PT_MUTATE") == "nolootsync2" then PROPS = {} end
@@ -65,6 +65,7 @@ local function spec(it, p)
             if ok and type(v) == "number" then s = s .. ":" .. pr[1] .. string.format(pr[5] and "%.5g" or "%d", v) end
         end
     end
+    if t.IP_Tintable then s=s..require("itemtint").spec(it) end
     return s
 end
 
@@ -76,6 +77,7 @@ local function setProps(it, p, s)
             lib():SetItemProperty(t[pr[2]], it, FName(pr[3]), pr[5] and (string.unpack("<i4", string.pack("<f", v))) or math.floor(v))
         end
     end
+    if t.IP_Tintable then require("itemtint").set(it,s) end
 end
 
 -- spec string -> list of item instances
@@ -172,7 +174,35 @@ local function slotKey(s)
     table.sort(keys)
     return table.concat(keys, "+"), items
 end
+local function named(c)return c:IsA(StaticFindObject('/Script/PenDriverInventory.NamedItemContainer'))end
+function M.numItems(c)
+    if not named(c)then return c:GetNumItems()end
+    local items={};c:GetAllItems(items);return #items
+end
+local function namedLayout(c)
+    local rows={}
+    c.Slots:ForEach(function(k,v)rows[#rows+1]=k:get():ToString()..'='..slotKey(v:get())end)
+    table.sort(rows);return '!'..table.concat(rows,',')
+end
+local function applyNamed(c,body)
+    local want={}
+    for name,entry in body:sub(2):gmatch('([%w_.]+)=([^,]*)')do want[name]=entry end
+    c.Slots:ForEach(function(k,v)
+        local name,slot=k:get():ToString(),v:get()
+        local entry=want[name];if entry==nil or entry==slotKey(slot)then return end
+        local items={};slot:GetItems(items)
+        for _,w in ipairs(items)do c:RemoveItem(w:get())end
+        for spec,n in entry:gmatch('([^*+]+)%*(%d+)')do
+            local p=spec:match('^[^:]+');local a=archetype(p)
+            if a then for _=1,math.min(tonumber(n),256)do
+                local inst=lib():CreateItemInstance(UEHelpers.GetWorld(),a,0)
+                setProps(inst,p,spec);c:AddItem(FName(name),inst,false)
+            end end
+        end
+    end)
+end
 function M.layout(container)
+    if named(container)then return namedLayout(container)end
     if not tiles(container) then return M.encode(M.count(container)) end
     local r = {}
     for i = 0, container:GetNumSlots() - 1 do
@@ -186,23 +216,62 @@ function M.layout(container)
     return "@" .. table.concat(r, ",")
 end
 
+-- Health changes preserve slot/item objects, including the ones an open inventory is displaying.
+function M.applyLayoutState(container, body)
+    if named(container)or not tiles(container)or body:sub(1,1)~='@'then return false end
+    local function shape(s)return(s:gsub(':[dfbh][%d%.%+%-eE]+',''))end
+    if shape(M.layout(container))~=shape(body)then return false end
+    local slots,jobs={},{}
+    for i=0,container:GetNumSlots()-1 do
+        local slot=container:GetSlot(i)
+        if slot:IsValid()and slot:GetNumItems()>0 then
+            local l=slot.Location;local list={};slot:GetItems(list)
+            local pool={};for _,w in ipairs(list)do pool[#pool+1]=w:get()end
+            slots[string.format('%d.%d.%d',l.X,l.Y,slot.bRotated and 1 or 0)]=pool
+        end
+    end
+    for cell,entry in body:sub(2):gmatch('(%d+%.%d+%.[01])=([^,]+)')do
+        local pool=slots[cell];if not pool then return false end
+        for spec,n in entry:gmatch('([^+*]+)%*(%d+)')do
+            local p=spec:match('^[^:]+')
+            for _=1,tonumber(n)do
+                local found
+                for i,it in ipairs(pool)do if path(it.Archetype)==p then found=i;break end end
+                if not found then return false end
+                jobs[#jobs+1]={it=table.remove(pool,found),path=p,spec=spec}
+            end
+        end
+    end
+    for _,job in ipairs(jobs)do setProps(job.it,job.path,job.spec)end
+    return true
+end
+
 -- make the container hold the other side's stacks at the same cells. When anything differs it is laid out again: the items are taken
 -- out and put back with the layout's own EmplaceSlot (instances of the same archetype are used again, their state set; new ones are
 -- created). A stack that does not fit its cell goes anywhere, as before.
 function M.applyLayout(container, body, steps)
+    if named(container)then if body:sub(1,1)=="!" then applyNamed(container,body)end;return end
     if not tiles(container) then return M.apply(container, M.decode(body:sub(2)), steps) end
-    if M.layout(container) == body then return end
-    local pool = {} -- archetype path -> instances taken out
+    if M.layout(container) == body or M.applyLayoutState(container,body) then return end
+    local pool, keep, wanted = {}, {}, {}
+    for row in body:sub(2):gmatch('[^,]+')do wanted[row]=true end
     step(steps, function()
-        local all = {}
-        container:GetAllItems(all)
-        for _, it in ipairs(all) do
-            local inst = it:get()
-            local p = path(inst.Archetype)
-            pool[p] = pool[p] or {}
-            table.insert(pool[p], inst)
+        local remove={}
+        for i=0,container:GetNumSlots()-1 do
+            local slot=container:GetSlot(i)
+            if slot:IsValid()and slot:GetNumItems()>0 then
+                local l=slot.Location
+                local cell=string.format('%d.%d.%d',l.X,l.Y,slot.bRotated and 1 or 0)
+                local key,items=slotKey(slot)
+                if wanted[cell..'='..key]then keep[cell]=true
+                else for _,w in ipairs(items)do remove[#remove+1]=w:get()end end
+            end
         end
-        container:RemoveAllItems()
+        -- Per-item removal delivers the inventory's slot notifications; unchanged slots stay alive.
+        for _,inst in ipairs(remove)do
+            local p=path(inst.Archetype);pool[p]=pool[p]or{};pool[p][#pool[p]+1]=inst
+            container:RemoveItem(inst)
+        end
     end)
     for x, y, r, entry in body:sub(2):gmatch("(%d+)%.(%d+)%.(%d)=([^,]+)") do
         local stack = {} -- the slot this stack's first item made; the rest go on top
@@ -213,6 +282,7 @@ function M.applyLayout(container, body, steps)
                     -- the steps run over many frames: the container or its layout can be gone or replaced meanwhile (the host's
                     -- storage expansion install; guest crash in EmplaceSlot on CL_Garage_V1, 2026-11-01)
                     if not (container:IsValid() and container.Layout:IsValid()) then return end
+                    if keep[x.."."..y.."."..r] then return end
                     local L = container.Layout
                     local inst = pool[p] and table.remove(pool[p])
                     if not inst then

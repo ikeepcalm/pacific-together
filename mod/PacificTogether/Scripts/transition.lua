@@ -34,8 +34,16 @@ end
 -- host ----------------------------------------------------------------------------------------------------------------------
 
 local expectGuest, holdSince = false, nil
-local function release(why)
+local clockGuest,clockSince
+local clock=require("worldclock")
+local function release(why,force)
     if not holdSince then return end
+    local pc=net.guests()[1]
+    if pc and net.peerSupports(pc,'world-clock') and not clock.ready(pc) and not force then
+        if not common.resolve(clockGuest) then clock.begin(pc);clockGuest,clockSince=common.lease(pc),os.clock() end
+        return
+    end
+    if pc and net.peerSupports(pc,'world-clock') then why=why..(clock.ready(pc) and ' (guest clock ready)' or ' (clock timeout)') end
     local ls = screen()
     if ls then ls.FadeGoal = 0.0; ls.FadeDirection = false end
     log("PT|trans host release after %.1f s: %s", os.clock() - holdSince, why)
@@ -85,10 +93,13 @@ end
 -- the guest's character is there (net.lua): let go, or tell a guest that joined mid-map to show the world
 net.ready = function(pc)
     if OFF then return end
-    if holdSince then release("guest ready") else net.toGuest(pc, "g.trans", "go") end
+    if net.peerSupports(pc,"world-clock") and not clock.ready(pc) then
+        clock.begin(pc);clockGuest,clockSince=common.lease(pc),os.clock()
+    elseif holdSince then release("guest ready") else net.toGuest(pc, "g.trans", "go") end
 end
 
 RegisterLoadMapPreHook(function()
+    clockGuest,clockSince=nil,nil
     pcall(function()
         if common.netMode() == "listen" and #net.guests() > 0 then
             expectGuest = true
@@ -146,7 +157,7 @@ RegisterLoadMapPostHook(function()
         local s = package.loaded["session"]
         if OFF or common.netMode() ~= "client" or not (s and s.wanted()) then return end
         -- a moment later: the engine takes its own copy down around here, ours must not sit in the viewport beside it
-        ExecuteInGameThreadWithDelay(1000, function()
+        common.defer(1000, function()
             pcall(function()
                 if common.netMode() ~= "client" then return end
                 if phase == "load" then showScreen() else setPhase("load", "map loaded, waiting for the host") end
@@ -159,6 +170,11 @@ LoopInGameThreadWithDelay(100, function()
     if OFF then return end
     local mode = common.netMode()
     if mode == "listen" then
+        local pc=common.resolve(clockGuest)
+        if pc and (clock.ready(pc) or os.clock()-clockSince>5) then
+            if holdSince then release(clock.ready(pc) and "guest clock ready" or "clock timeout",true) else net.toGuest(pc,"g.trans","go") end
+            clockGuest,clockSince=nil,nil
+        end
         hookAll()
         if holdSince and os.clock() - holdSince > HOLD_MAX then
             overlay.post(overlay.other() .. " did not load in time", "warn")
@@ -184,7 +200,8 @@ LoopInGameThreadWithDelay(100, function()
     local p = client and UEHelpers.GetPlayerController().Pawn or nil
     local char = valid(p) and p:IsA(StaticFindObject("/Script/PenDriverPro.BaseCharacter"))
     charSince = char and (charSince or os.clock()) or nil
-    if phase == "load" and charSince and os.clock() - charSince > 3 then setPhase(nil, "own character, no go") end
+    if phase == "load" and charSince and os.clock() - charSince > 3
+        and (not net.hostSupports("intents") or net.lifecycle() == "active") then setPhase(nil, "own character, no go") end
 end)
 
 function M.state() return { phase = phase, holding = holdSince ~= nil } end

@@ -112,7 +112,7 @@ local function fade(pc)
     if not valid(cm) then return end
     local black = { R = 0, G = 0, B = 0, A = 1 }
     cm:StartCameraFade(0, 1, 0.12, black, false, true)
-    ExecuteInGameThreadWithDelay(200, function()
+    common.defer(200, function()
         -- the camera manager now, not the one faded: a repossess or travel in between replaces it (left black otherwise)
         pcall(function()
             local now = UEHelpers.GetPlayerController().PlayerCameraManager

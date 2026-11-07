@@ -45,7 +45,7 @@ return function(T)
             end},
         }
     end
-    local function send(k) PTNative_MsgToHost(T.localPC():GetAddress(),k,"") end
+    local function send(k) T.intent(k,"") end
     return {
         T.onMap("RB_MainMenu",90),
         {check="client_joined",timeout=180,cond=function() return T.netMode()=="client" and T.myPawn()~=nil and T.map()=="RB_Garage" end},

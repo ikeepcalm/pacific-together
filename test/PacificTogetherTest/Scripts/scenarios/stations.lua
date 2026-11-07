@@ -97,10 +97,9 @@ return function(T)
     local function upCount(key) -- how many times the station's upgrade effect sits in its slot
         local s, sm = spawner(UP[key][1]), T.first("BP_StatusEffectManager_C")
         if not (s and sm) then return -1 end
-        local a, t = {}, {}
+        local a = {}
         s:GetUpgradeArchetype(a)
-        s:GetInstallTag(t)
-        local item = im():FindOrCreateGarageUpgradeSlot(a.Archetype, t.Station):GetItem(0)
+        local item = im():FindOrCreateGarageUpgradeSlot(a.Archetype, s.StationInstallTag):GetItem(0)
         if not (item and item:IsValid()) then return 0 end
         local n, want = 0, UP[key][2]:match("[^.]+$")
         local list = sm:GetStatusEffects(item)

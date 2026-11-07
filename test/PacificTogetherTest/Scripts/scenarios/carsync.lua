@@ -7,7 +7,7 @@
 -- Mutation nocarsync: car.lua of the shipping mod does nothing (the guest keeps its duplicate car and never gets seated).
 --   guest_view_on_car_frame  the view is rendered from where the camera is after the car moved this frame (the car was placed after
 --                            the camera: the interior shook against the view, 2026-10-30). Mutation nocartick fails it.
---   guest_head_sways         the seated guest's head moves with the car's acceleration (passenger inertia). Mutation nosway fails it.
+--   guest_cabin_reference_stable  the passenger camera adds no synthetic cabin motion. Mutation oldpassengersway fails it.
 -- Messages "t.*" between the two scenario halves use the native channel (see channel.lua).
 return function(T)
     local L = require("scenarios.carlib")(T)
@@ -18,6 +18,23 @@ return function(T)
     local FUEL, BAT, HP = 7.5, 12.5, 11.0
     local GONE = { "Body.DoorsRR", "Essentials.WheelFL" }
     local DRIVE_S = 24
+    local function motionStats()
+        local last, at, speed, deltas, frames = nil, nil, nil, {}, 0
+        return function(p, t, report)
+            if report then
+                table.sort(deltas)
+                log("PT|info drive motion %s frames=%d speed_delta_p95=%.1f uu/s", ROLE, frames,
+                    #deltas > 0 and deltas[math.ceil(#deltas * 0.95)] or -1)
+                return
+            end
+            if last and t > at then
+                local v = L.d(p, last) / (t - at)
+                if speed then deltas[#deltas + 1] = math.abs(v - speed) end
+                speed, frames = v, frames + 1
+            end
+            last, at = p, t
+        end
+    end
 
     local function cm() return T.first("BP_CarManager_C") end
     local function manif(name)
@@ -88,8 +105,14 @@ return function(T)
         local function add(s) steps[#steps + 1] = s end
         local guestPC = function() return S.remotePCs()[1] end
         local function send(kind, data) PTNative_MsgToGuest(guestPC():GetAddress(), kind, data or "") end
-        local moved, start, saved = 0, nil, {}
-        for _, s in ipairs(T.loadFixture("garage")) do add(s) end
+        local moved, start, saved, measureMotion, stoppedAt = 0, nil, {}, motionStats(), nil
+        if os.getenv("PT_VARIANT")=="motion" and (os.getenv("PT_FIXTURE") or "")=="" then
+            add(T.onMap("RB_MainMenu",90))
+            add({run=function()T.console("open "..T.GARAGE.."?listen")end})
+            add(T.onMap("RB_Garage",120))
+        else
+            for _, s in ipairs(T.loadFixture("garage")) do add(s) end
+        end
         add({ check = "host_listen_garage", timeout = 30, cond = function() return T.netMode() == "listen" and T.listening() end })
         add({ check = "host_guest_in_garage", timeout = 240, cond = function() return S.guestChar() ~= nil end })
         add({ wait = 5 })
@@ -120,11 +143,13 @@ return function(T)
                 if not L.driving then return end
                 pcall(function()
                     local p = car:K2_GetActorLocation()
+                    measureMotion(p, L.now())
                     if last then moved = moved + L.d(p, last) end
                     last = p
                     -- against a wall the car sleeps: put it back where it started (as in carride)
                     if L.d(p, still.p) > 100 then still = { t = L.now(), p = p }
                     elseif L.now() - still.t > 3 then
+                        log("PT|info drive reset after wall distance=%.1f", L.d(p, start))
                         car:K2_SetActorLocationAndRotation(start, startRot, false, {}, true)
                         still = { t = L.now(), p = start }
                     end
@@ -132,16 +157,32 @@ return function(T)
             end)
         end })
         add({ wait = DRIVE_S })
-        add({ run = function() L.driving = false; send("t.stop") end })
-        add({ wait = 5 })
         add({ run = function()
-            local p = L.car():K2_GetActorLocation()
-            send("t.settled", string.format("%.2f,%.2f,%.2f", p.X, p.Y, p.Z))
+            L.driving = false; measureMotion(nil, nil, true); send("t.stop")
+            local car = L.car()
+            car:AccelerateBrake(0); car:DriveControl(0)
+            car.VehicleController.ThrottleInput = 0
+            car:ManualActivate_Gearbox(1, true)
+            car.VehicleController:SetParkingBrakeActive(true)
+        end })
+        add({ check = "host_car_stopped", timeout = 30, cond = function()
+            local v = L.car():GetVelocity()
+            local speed = math.sqrt(v.X^2 + v.Y^2 + v.Z^2)
+            log("PT|info host stop speed %.1f uu/s", speed)
+            if speed >= 5 then stoppedAt = nil; return false end
+            stoppedAt = stoppedAt or L.now()
+            return L.now() - stoppedAt >= 1
+        end })
+        add({ run = function()
+            local p, r = L.car():K2_GetActorLocation(), L.car():K2_GetActorRotation()
+            send("t.settled", string.format("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f", p.X, p.Y, p.Z, r.Pitch, r.Yaw, r.Roll))
             L.car():K2_SetActorLocationAndRotation(L.car():K2_GetActorLocation(), L.car():K2_GetActorRotation(), false, {}, true)
         end })
+        add({ check = "host_guest_settled", timeout = 40, cond = function() return got("t.settled.ok") ~= nil end })
         add({ check = "host_drove", timeout = 1, cond = function() log("PT|info host drove %.0f uu", moved); return moved > 3000 end })
         add({ wait = 4 })
         -- C3/C4: fuel, battery, part health through the game's own setters
+        if os.getenv("PT_VARIANT")~="motion" then
         add({ run = function()
             local f = comp(manif(FUEL_SLOT), "BP_FuelableComponent.BP_FuelableComponent_C")
             f["Set Fuel"](f, FUEL)
@@ -177,6 +218,7 @@ return function(T)
         end })
         add({ check = "host_parts_back", timeout = 5, cond = function() return manif(GONE[1]) ~= nil and manif(GONE[2]) ~= nil end })
         add({ wait = 8 })
+        end
         add({ run = function() send("t.exit") end })
         add({ check = "host_guest_left_car", timeout = 30, cond = function()
             local g, car = S.guestChar(), L.car()
@@ -191,14 +233,30 @@ return function(T)
     local function add(s) steps[#steps + 1] = s end
     local KML = StaticFindObject("/Script/Engine.Default__KismetMathLibrary")
     local met = { frames = 0, stalls = 0, maxJump = 0, dist = 0, camMax = 0, lags = {}, swayMax = 0 }
+    local guestSettledAt
+    local measureMotion = motionStats()
     local function toHost(kind, data) PTNative_MsgToHost(T.localPC():GetAddress(), kind, data or "") end
     local function measure()
         local car, me = L.car(), T.myPawn()
         if not car then return end
         local t = L.now()
         local p = car:K2_GetActorLocation()
+        measureMotion(p, t)
         local rm = car.ReplicatedMovement.LinearVelocity
         local speed = math.sqrt(rm.X ^ 2 + rm.Y ^ 2)
+        if speed > 150 then
+            local a, b = car:K2_GetActorRotation(), car.ReplicatedMovement.Rotation
+            local function diff(x, y) return math.abs((x - y + 180) % 360 - 180) end
+            met.tilts[#met.tilts + 1] = math.max(diff(a.Pitch, b.Pitch), diff(a.Roll, b.Roll))
+        end
+        local rp = car.ReplicatedMovement.Location
+        if not met.raw or rp.X ~= met.raw.X or rp.Y ~= met.raw.Y or rp.Z ~= met.raw.Z then
+            if met.rawAt and speed > 150 then
+                if L.d(rp, met.raw) < 200 then met.rawGap = math.max(met.rawGap or 0, t - met.rawAt)
+                else met.rawJumps = (met.rawJumps or 0) + 1 end
+            end
+            met.raw, met.rawAt = {X=rp.X,Y=rp.Y,Z=rp.Z}, t
+        end
         local cam = T.localPC().PlayerCameraManager:GetCameraLocation()
         local cl = L.toLocal(car, cam)
         if not met.fp then
@@ -218,6 +276,7 @@ return function(T)
         met.prevXf = xf
         if met.last then
             local dt = t - met.t
+            met.sampleGap = math.max(met.sampleGap or 0, dt)
             local d = L.d(p, met.last)
             met.frames = met.frames + 1
             met.dist = met.dist + d
@@ -249,7 +308,7 @@ return function(T)
     end })
     add({ wait = 2 })
     add({ run = function()
-        if os.getenv("PT_VARIANT") == "nodoor" then toHost("g.car.enter") return end
+        if os.getenv("PT_VARIANT") == "nodoor" or os.getenv("PT_VARIANT")=="motion" then T.intent("g.car.enter", "") return end
         L.car().SLOT_FrontLeftDoor:GetItemActor({}):StartEntry(false)
     end })
     add({ check = "guest_seated", timeout = 60, cond = function()
@@ -264,15 +323,80 @@ return function(T)
         local me = T.myPawn()
         return me ~= nil and T.cls(me) == T.CHAR
     end })
+    local cosmeticStats={bobble={n=0,max=0},hanging={n=0,max=0},key={n=0,max=0}}
+    local cosmeticCache,cosmeticAt={},-1
+    LoopInGameThreadWithDelay(16,function()
+        if not L.measuring then return end
+        local car=L.car();if not car then return end
+        if os.clock()-cosmeticAt>1 then
+            cosmeticCache={};cosmeticAt=os.clock()
+            if car.SM_Wagon_01_KeyPhysics:IsValid()then cosmeticCache[#cosmeticCache+1]={a=car,body=car.SM_Wagon_01_KeyPhysics,key="key"}end
+            for _,entry in ipairs({{'BP_CarPart_Cosmetic_Bobble_Base_C','BobbleTop','bobble'}, {'BP_CarPart_Hanging_Base_C','HangingMesh','hanging'}})do
+                for _,a in ipairs(FindAllOf(entry[1])or{})do
+                    if a:IsValid()and a:GetAttachParentActor():IsValid()and a:GetAttachParentActor():GetAddress()==car:GetAddress()then
+                        cosmeticCache[#cosmeticCache+1]={a=a,body=a[entry[2]],key=entry[3]}
+                    end
+                end
+            end
+        end
+        for _,e in ipairs(cosmeticCache)do if e.a:IsValid()and e.body:IsValid()then
+            local p,q=e.a:K2_GetActorLocation(),e.body:K2_GetComponentLocation()
+            local d=math.sqrt((p.X-q.X)^2+(p.Y-q.Y)^2+(p.Z-q.Z)^2)
+            local stat=cosmeticStats[e.key];stat.n=stat.n+1;stat.max=math.max(stat.max,d)
+            local r=StaticFindObject('/Script/Engine.Default__KismetMathLibrary'):InverseTransformRotation(e.a:GetTransform(),e.body:K2_GetComponentRotation())
+            stat.first=stat.first or {Pitch=r.Pitch,Yaw=r.Yaw,Roll=r.Roll};stat.swing=stat.swing or 0
+            for _,axis in ipairs({'Pitch','Yaw','Roll'})do stat.swing=math.max(stat.swing,math.abs((r[axis]-stat.first[axis]+180)%360-180))end
+        end end
+    end)
     -- the host drives
     add({ check = "guest_drive_started", timeout = 120, cond = function() return got("t.drive") ~= nil end })
-    add({ run = function() met = { frames = 0, stalls = 0, maxJump = 0, dist = 0, camMax = 0, lags = {}, swayMax = 0 }; L.measuring = true
+    add({ run = function() met = { frames = 0, stalls = 0, maxJump = 0, dist = 0, camMax = 0, lags = {}, tilts = {}, swayMax = 0, mutesAt=PTNative_MuteCount() }; L.measuring = true
         LoopInGameThreadWithDelay(1, function() if L.measuring then pcall(measure) end end) end })
+    add({ check = "guest_chassis_not_simulating", timeout = 5, cond = function()
+        local c = L.car()
+        return c and not c.Chassis:IsSimulatingPhysics(FName("None"))
+    end })
+    add({ check = "guest_vehicle_controller_not_driving", timeout = 5, cond = function()
+        local c = L.car()
+        return c and not c.VehicleController:IsComponentTickEnabled()
+    end })
     add({ check = "guest_drive_stopped", timeout = DRIVE_S + 60, cond = function() return got("t.stop") ~= nil end })
-    add({ run = function() L.measuring = false end })
+    add({ run = function() L.measuring = false; measureMotion(nil, nil, true) end })
+    add({check="cosmetics_remain_on_car",timeout=1,cond=function()
+        local pass=true
+        for key,stat in pairs(cosmeticStats)do
+            log("PT|info cosmetic %s samples=%d maxDistance=%.2f",key,stat.n,stat.max)
+            if stat.n<30 or stat.max>(key=="key"and 300 or 100) then pass=false end
+        end
+        return pass
+    end})
+    add({check="cosmetics_wobble_in_car_frame",timeout=1,cond=function()
+        local pass=true
+        for key,stat in pairs(cosmeticStats)do
+            log("PT|info cosmetic %s swing=%.3f deg",key,stat.swing or 0)
+            if (stat.swing or 0)<0.1 then pass=false end
+        end
+        return pass
+    end})
     add({ check = "guest_car_follows", timeout = 1, cond = function()
-        log("PT|info follow frames=%d dist=%.0f maxJump=%.1f stalls=%d", met.frames, met.dist, met.maxJump, met.stalls)
+        table.sort(met.tilts)
+        log("PT|info guest tilt difference p95=%.1f deg samples=%d", #met.tilts > 0 and met.tilts[math.ceil(#met.tilts * 0.95)] or -1, #met.tilts)
+        log("PT|info follow frames=%d dist=%.0f maxJump=%.1f stalls=%d maxRawGap=%.3fs maxSampleGap=%.3fs excludedRawJumps=%d", met.frames, met.dist, met.maxJump, met.stalls, met.rawGap or 0, met.sampleGap or 0, met.rawJumps or 0)
         return met.dist > 3000 and met.maxJump < 200 and met.stalls <= met.frames * 0.03
+    end })
+    if os.getenv("PT_VARIANT")=="motion" then
+        add({check="guest_native_pose_writes_blocked",timeout=1,cond=function()
+            local n=PTNative_MuteCount()-met.mutesAt
+            log('PT|info blocked native calls during drive=%d',n)
+            return n>=10
+        end})
+        add({check="guest_received_host_timed_motion",timeout=1,cond=function()
+            local f=io.open('ue4ss/UE4SS.log','rb');if not f then return false end
+            local s=f:read('a');f:close();return s:find('PT|car host-timed motion active',1,true)~=nil
+        end})
+    end
+    add({ check = "guest_tilt_tracks_host", timeout = 1, cond = function()
+        return #met.tilts >= 30 and met.tilts[math.ceil(#met.tilts * 0.95)] < 25
     end })
     add({ check = "guest_camera_rides", timeout = 1, cond = function()
         log("PT|info camera deviation in the car %.1f uu (against the previous frame's car %.1f uu)", met.camMax, met.camPrevMax or -1)
@@ -285,19 +409,39 @@ return function(T)
         log("PT|info view against the camera after the car moved: p95 %.2f uu over %d moving frames", p95, n)
         return n > 100 and p95 < 1
     end })
-    add({ check = "guest_head_sways", timeout = 1, cond = function()
+    add({ check = "guest_cabin_reference_stable", timeout = 1, cond = function()
         log("PT|info passenger head sway max %.2f uu", met.swayMax)
-        return met.swayMax > 1.5
+        return met.swayMax < 0.25
     end })
     add({ check = "guest_car_settled", timeout = 20, cond = function()
         local m = got("t.settled")
         if not m then return false end
-        local x, y, z = m.data:match("([^,]+),([^,]+),([^,]+)")
-        local d = L.d(L.car():K2_GetActorLocation(), L.v(tonumber(x), tonumber(y), tonumber(z)))
-        log("PT|info settled distance %.1f", d)
-        return d < 30
+        local x, y, z = m.data:match("([^,]+),([^,]+),([^,]+),")
+        local car = L.car()
+        local d = L.d(car:K2_GetActorLocation(), L.v(tonumber(x), tonumber(y), tonumber(z)))
+        local v = car:GetVelocity()
+        local speed = math.sqrt(v.X^2 + v.Y^2 + v.Z^2)
+        log("PT|info settled distance %.1f speed %.1f", d, speed)
+        if d >= 30 or speed >= 20 then guestSettledAt = nil; return false end
+        guestSettledAt = guestSettledAt or L.now()
+        if L.now() - guestSettledAt < 1 then return false end
+        return true
+    end })
+    add({ check = "guest_car_orientation", timeout = 10, cond = function()
+        local m = got("t.settled")
+        if not m then return false end
+        local pitch, yaw, roll = m.data:match("^[^,]+,[^,]+,[^,]+,([^,]+),([^,]+),([^,]+)$")
+        if not pitch then return false end
+        local r = L.car():K2_GetActorRotation()
+        local function angle(a, b) return math.abs((a - tonumber(b) + 180) % 360 - 180) end
+        local p, y, z = angle(r.Pitch, pitch), angle(r.Yaw, yaw), angle(r.Roll, roll)
+        log("PT|info stopped car angle error pitch=%.1f yaw=%.1f roll=%.1f", p, y, z)
+        if math.max(p, y, z) >= 5 then return false end
+        toHost("t.settled.ok")
+        return true
     end })
     -- C3/C4: the host's fuel, battery and part health, on the guest's car and dashboard values
+    if os.getenv("PT_VARIANT")~="motion" then
     add({ check = "guest_state_matches", timeout = 60, cond = function()
         local m = got("t.state")
         if not m then return false end
@@ -318,8 +462,9 @@ return function(T)
         return manif(GONE[1]) ~= nil and manif(GONE[2]) ~= nil
     end })
     -- leaving: the key (X) and this send the same intent
+    end
     add({ check = "guest_exit_asked", timeout = 60, cond = function() return got("t.exit") ~= nil end })
-    add({ run = function() toHost("g.car.exit") end })
+    add({ run = function() T.intent("g.car.exit", "") end })
     add({ check = "guest_left_car", timeout = 30, cond = function()
         local car, me = L.car(), T.myPawn()
         return car ~= nil and me ~= nil and not attached(me, car) and T.cls(me) == T.CHAR

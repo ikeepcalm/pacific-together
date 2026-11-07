@@ -185,7 +185,8 @@ end)
 LoopInGameThreadWithDelay(16, function()
     if feel and valid(gcar) and fresh() then
         pcall(function()
-            gcar.VehicleController.ThrottleInput = feel.load
+            local car = package.loaded.car
+            if not (car and car.physicalProxyActive and car.physicalProxyActive()) then gcar.VehicleController.ThrottleInput = feel.load end
             if valid(gaudio) and math.abs(gaudio.ThrottleAccumCurrent - feel.acc) > 0.3 then gaudio.ThrottleAccumCurrent = feel.acc end
         end)
     end

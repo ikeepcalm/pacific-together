@@ -1,0 +1,22 @@
+local function extract(file,from,to)
+    local f=assert(io.open(file,'rb'));local s=f:read('*a');f:close()
+    local a=assert(s:find(from,1,true));local b=assert(s:find(to,a+#from,true))
+    return s:sub(a,b-1)
+end
+local validate=extract('mod/PacificTogether/Scripts/loot.lua','validItemSpec=function','local function validLayout')
+local validItemSpec=assert(load(validate..'return validItemSpec',nil,'t',setmetatable({},{__index=_G})))()
+local base='/Game/Items/Door'
+local tint=':p/Game/BaseArt/Palettes/Paints/BP_Palette_Paint_Gov_Gray.BP_Palette_Paint_Gov_Gray_C:t1:c/Game/BaseArt/Palettes/Decals/BP_Palette_Decal_Arda_01.BP_Palette_Decal_Arda_01_C'
+assert(validItemSpec(base..':h42'..tint,base))
+assert(not validItemSpec(base..':h42:p/Engine/Bad:t1:c-',base))
+assert(not validItemSpec(base..':h42:p-:t1:t0:c-',base))
+assert(not validItemSpec(base..':h1e999',base))
+assert(not validItemSpec(base..':d1.5',base))
+assert(not validItemSpec(base..':p-:t1',base))
+assert(not validItemSpec(base..':h 42',base))
+local legacy=extract('mod/PacificTogether/Scripts/net.lua','local function legacyItems','function M.toHost')
+local strip=assert(load(legacy..'return legacyItems'))()
+assert(strip(base..':h42'..tint)==base..':h42')
+assert(strip(base..':h42:p-:t0:c-')==base..':h42')
+assert(strip('N|'..base..'|1|2|3|'..base..tint)=='N|'..base..'|1|2|3|'..base)
+print('PASS 10 tint wire checks')

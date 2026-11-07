@@ -3,7 +3,7 @@ local common = require("common")
 local log = common.log
 
 -- One file per feature, so parallel work does not collide; each module sets itself up when required.
-local FEATURES = { "overlay", "steam", "session", "safety", "nametag", "health", "world", "anomalies", "anomalies2", "car", "loot", "backpack", "guestact", "story", "progression", "garage", "desync", "guestparts", "carfeel", "radio", "guestswap", "anomalies3", "mapmark", "ping", "upgrades", "stations", "hands", "survivor", "visual", "guestui", "radiation", "wheelflat", "pause", "transition", "cutscene", "ambient", "rescue", "heal", "perf" }
+local FEATURES = { "foliage", "overlay", "steam", "session", "safety", "nametag", "health", "world", "anomalies", "anomalies2", "car", "loot", "backpack", "guestact", "story", "progression", "garage", "junkheap", "desync", "guestparts", "carfeel", "radio", "guestswap", "anomalies3", "mapmark", "ping", "upgrades", "stations", "hands", "survivor", "visual", "guestui", "radiation", "wheelflat", "pause", "transition", "cutscene", "ambient", "rescue", "heal", "perf" }
 
 -- Status lines are for the test runner only; players never set PT_STATUS, so the mod stays silent in single player.
 local STATUS_MS = tonumber(os.getenv("PT_STATUS") or "")

@@ -124,7 +124,7 @@ return function(T)
         end },
         { check = "guest_seated", timeout = 30, cond = function() return attached(T.myPawn()) end },
         { check = "guest_told_exit", timeout = 120, cond = function() return g("t.exit") ~= nil end },
-        { run = function() PTNative_MsgToHost(T.localPC():GetAddress(), "g.car.exit", "") end },
+        { run = function() T.intent("g.car.exit", "") end },
         { check = "guest_reports", timeout = 600, cond = function()
             local me = T.myPawn()
             local l = me:K2_GetActorLocation()

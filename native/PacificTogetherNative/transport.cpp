@@ -13,6 +13,8 @@
 #include <atomic>
 #include <deque>
 #include <mutex>
+#include <map>
+#include <string>
 #include <random>
 #include <unordered_map>
 #include <vector>
@@ -51,6 +53,9 @@ static uint32_t g_lag_ms{};
 static double g_loss_pct{};
 static std::mt19937 g_rng{std::random_device{}()};
 static struct { uint64_t out, out_bytes, in, in_bytes, dropped, unmapped, expired, link_errors, probes, pongs, rtt, rtt_avg, rtt_max, rtt_min; } g_stats{};
+struct Motion { uint64_t key, sequence; std::string data; };
+static std::map<std::string, Motion> g_motion_out, g_motion_in;
+static uint64_t g_motion_sequence{}, g_motion_sent{}, g_motion_received{}, g_motion_replaced{};
 static uint64_t g_last_probe{};
 // frames with source and destination port 0 are the tunnel's own probes: [type 1 ping | 2 pong][u64 send time ms]
 static constexpr uint8_t PROBE_PING = 1, PROBE_PONG = 2;
@@ -113,11 +118,33 @@ static auto send_probe(uint64_t key, uint8_t type, uint64_t t) -> void
 static auto deliver(uint64_t key, const uint8_t* data, uint32_t size) -> void
 {
     if (size < 4) return;
+    const bool motion = size >= 5 && data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 0 && data[4] == 3;
+    if (motion && !g_key_to_fake.contains(key)) return;
     if (!g_key_to_fake.contains(key))
     {
         uint32_t fake = g_next_fake++;
         g_key_to_fake[key] = fake, g_fake_to_key[fake] = key;
         pt_log("PT|native tunnel new peer key=%llu fake=%s", key, ip_str(fake).c_str());
+    }
+    if (data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 0 && size >= 14 && data[4] == 3)
+    {
+        const size_t length = data[13];
+        if (g_key_to_fake.size() != 1 || length == 0 || length > 32 || size < 14 + length || size > 1150) return;
+        std::string kind(reinterpret_cast<const char*>(data + 14), length);
+        if (!kind.starts_with("g.motion.") && !kind.starts_with("t.motion.")) return;
+        if (!g_motion_in.contains(kind) && g_motion_in.size() >= 64) return;
+        uint64_t sequence{}; memcpy(&sequence, data + 5, sizeof(sequence));
+        std::string payload(reinterpret_cast<const char*>(data + 14 + length), size - 14 - length);
+        auto previous = g_motion_in.find(kind);
+        if (previous != g_motion_in.end())
+        {
+            auto& old = previous->second;
+            if (old.data.substr(0, old.data.find('|')) == payload.substr(0, payload.find('|')) && old.sequence >= sequence) return;
+            ++g_motion_replaced;
+        }
+        g_motion_in[kind] = {key, sequence, std::move(payload)};
+        ++g_motion_received;
+        return;
     }
     if (data[2] == 0 && data[3] == 0)
     {
@@ -139,6 +166,17 @@ static auto deliver(uint64_t key, const uint8_t* data, uint32_t size) -> void
 static auto pump() -> void
 {
     uint64_t now = GetTickCount64();
+    for (auto& [kind, motion] : g_motion_out)
+    {
+        std::vector<uint8_t> data(10 + kind.size() + motion.data.size());
+        data[0] = 3; memcpy(data.data() + 1, &motion.sequence, sizeof(motion.sequence));
+        data[9] = static_cast<uint8_t>(kind.size());
+        memcpy(data.data() + 10, kind.data(), kind.size());
+        memcpy(data.data() + 10 + kind.size(), motion.data.data(), motion.data.size());
+        queue_send(motion.key, 0, 0, data.data(), data.size());
+        ++g_motion_sent;
+    }
+    g_motion_out.clear();
     while (!g_outbox.empty() && g_outbox.front().at <= now) link_send(g_outbox.front()), g_outbox.pop_front();
     while (!g_inbox.empty() && now - g_inbox.front().at > INBOX_TTL_MS) g_inbox.pop_front(), ++g_stats.expired;
     // round trip and keep-alive per peer (Steam messages have no close notification)
@@ -283,6 +321,41 @@ static auto stats() -> std::string
 
 auto transport_register(const Lua& lua) -> void
 {
+    // Optional datagrams on the existing two-player link; no socket, port or PT1/PT1A change.
+    lua.register_function("PTNative_TunnelMotionSend", [](const Lua& l) -> int {
+        auto kind = lua_str_arg(l), data = lua_str_arg(l);
+        std::lock_guard lock(g_mx);
+        const bool ok = g_link != Link::None && g_key_to_fake.size() == 1 && data.size() <= 1050 && kind.size() <= 32 &&
+            (kind.starts_with("g.motion.") || kind.starts_with("t.motion."));
+        if (ok)
+        {
+            if (!g_motion_out.contains(kind) && g_motion_out.size() >= 64) { l.set_bool(false); return 1; }
+            if (g_motion_out.contains(kind)) ++g_motion_replaced;
+            g_motion_out[kind] = {g_key_to_fake.begin()->first, ++g_motion_sequence, std::move(data)};
+        }
+        l.set_bool(ok); return 1;
+    });
+    lua.register_function("PTNative_TunnelMotionPoll", [](const Lua& l) -> int {
+        auto prefix = lua_str_arg(l);
+        std::lock_guard lock(g_mx);
+        if (g_link == Link::None || g_key_to_fake.size() != 1) return 0;
+        pump();
+        for (auto it = g_motion_in.begin(); it != g_motion_in.end(); ++it)
+        {
+            if (!it->first.starts_with(prefix)) continue;
+            l.set_string(it->first); l.set_string(it->second.data); l.set_integer(static_cast<int64_t>(it->second.sequence));
+            g_motion_in.erase(it); return 3;
+        }
+        return 0;
+    });
+    lua.register_function("PTNative_TunnelMotionReset", [](const Lua&) -> int {
+        std::lock_guard lock(g_mx); g_motion_in.clear(); g_motion_out.clear(); return 0;
+    });
+    lua.register_function("PTNative_TunnelMotionStats", [](const Lua& l) -> int {
+        std::lock_guard lock(g_mx);
+        l.set_string("sent=" + std::to_string(g_motion_sent) + " received=" + std::to_string(g_motion_received) + " replaced=" + std::to_string(g_motion_replaced));
+        return 1;
+    });
     // PTNative_TunnelUdp(port): link = loopback UDP socket on 127.0.0.1:port (0 = any free port); turns the tunnel on
     lua.register_function("PTNative_TunnelUdp", [](const Lua& l) -> int {
         int port = l.get_stack_size() >= 1 && l.is_number() ? int(l.get_number()) : 0;

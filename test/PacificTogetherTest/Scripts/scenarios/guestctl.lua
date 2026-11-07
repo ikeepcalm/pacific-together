@@ -17,7 +17,7 @@ return function(T)
         return got[kind] ~= nil
     end
     local function sendGuest(kind, data) PTNative_MsgToGuest(L.remotePCs()[1]:GetAddress(), kind, data or "") end
-    local function sendHost(kind, data) PTNative_MsgToHost(T.localPC():GetAddress(), kind, data or "") end
+    local function sendHost(kind, data) T.intent(kind, data or "") end
     local function theCar()
         for _, c in ipairs(FindAllOf("BP_PlayerCarNew_C") or {}) do
             local l = c:IsValid() and c:K2_GetActorLocation()

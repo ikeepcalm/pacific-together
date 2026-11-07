@@ -73,10 +73,10 @@ local function die(h, pre, why)
         local cam = pc.PlayerCameraManager
         if valid(cam) then cam:StartCameraFade(0, 1, 1, { R = 0, G = 0, B = 0, A = 1 }, false, true) end
     end
-    ExecuteInGameThreadWithDelay(M.DEAD_MS, function()
+    common.defer(M.DEAD_MS, function()
         if not dying then return end
         net.toHost("g.health.respawn", "")
-        ExecuteInGameThreadWithDelay(M.FALLBACK_MS, function() pcall(revive) end)
+        common.defer(M.FALLBACK_MS, function() pcall(revive) end)
     end)
 end
 

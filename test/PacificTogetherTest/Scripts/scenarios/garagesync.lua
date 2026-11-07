@@ -43,10 +43,9 @@ return function(T)
     local function hasUp(key)
         local s, im, sm = spawner(UP[key][1]), T.first("BP_InventoryManager_C"), T.first("BP_StatusEffectManager_C")
         if not (s and im and sm) then return false end
-        local a, t = {}, {}
+        local a = {}
         s:GetUpgradeArchetype(a)
-        s:GetInstallTag(t)
-        local item = im:FindOrCreateGarageUpgradeSlot(a.Archetype, t.Station):GetItem(0)
+        local item = im:FindOrCreateGarageUpgradeSlot(a.Archetype, s.StationInstallTag):GetItem(0)
         if not (item and item:IsValid()) then return false end
         local want = UP[key][2]:match("[^.]+$")
         local list = sm:GetStatusEffects(item)

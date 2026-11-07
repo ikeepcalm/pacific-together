@@ -41,22 +41,39 @@ end
 -- UEHelpers.GetPlayerController/GetWorld run FindAllOf("PlayerController") per call (0.26 ms in a zone, measured 2026-10-22),
 -- and every module calls them per item and per tick: keep the local controller and its world while they stay valid.
 -- A new map makes new ones, so the old ones fail IsValid and are looked up again.
+local worldGeneration = 0
+function M.identity(o)
+    if not (o and o:IsValid()) or o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) then return nil end
+    if PTNative_ObjectIdentity then return PTNative_ObjectIdentity(o:GetAddress()) end
+    return o:GetFullName()
+end
+function M.lease(o)
+    local key = M.identity(o)
+    return key and { object = o, key = key, world = worldGeneration } or nil
+end
+function M.resolve(lease)
+    if not lease or lease.world ~= worldGeneration then return nil end
+    if PTNative_ObjectMatches then
+        if PTNative_ObjectMatches(lease.key) then return lease.object end
+    elseif M.identity(lease.object) == lease.key then return lease.object end
+end
 local cachedPC, cachedWorld = nil, nil
+local pcLease, worldLease
 local function live(pc) return pc and pc:IsValid() and not pc:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) end
 -- the stock helper returns the first player controller, on a host possibly a guest's: the local one is looked for here
 function UEHelpers.GetPlayerController()
-    if live(cachedPC) then return cachedPC end
+    if M.resolve(pcLease) then return cachedPC end
     for _, pc in ipairs(FindAllOf("PlayerController") or {}) do
-        if live(pc) and pc:IsLocalController() then cachedPC, cachedWorld = pc, nil; return pc end
+        if live(pc) and pc:IsLocalController() then cachedPC, cachedWorld, pcLease, worldLease = pc, nil, M.lease(pc), nil; return pc end
     end
     return CreateInvalidObject() -- no local controller yet (travel): not a guest's
 end
 local rawWorld = UEHelpers.GetWorld
 function UEHelpers.GetWorld()
-    if live(cachedPC) and live(cachedWorld) then return cachedWorld end
+    if M.resolve(pcLease) and M.resolve(worldLease) then return cachedWorld end
     local w = rawWorld()
-    if live(cachedPC) and live(w) then cachedWorld = w end
-    return w
+    if M.resolve(pcLease) and live(w) then cachedWorld, worldLease = w, M.lease(w) end
+    return w or CreateInvalidObject()
 end
 
 -- A StaticFindObject or RegisterHook path that is not loaded makes UE4SS scan every object (25-45 ms in a zone, 2026-10-22),
@@ -98,10 +115,10 @@ local singles = {}
 local rawFirst = FindFirstOf
 function FindFirstOf(class)
     if not SINGLE[class] then return rawFirst(class) end
-    local o = singles[class]
-    if live(o) then return o end
+    local o = M.resolve(singles[class])
+    if o then return o end
     o = rawFirst(class)
-    if live(o) then singles[class] = o end
+    if live(o) then singles[class] = M.lease(o) end
     return o
 end
 -- the cached singleton or nil: module-local first() helpers looped FindAllOf (26 CarManager lookups a second on the host)
@@ -139,11 +156,10 @@ function M.first(class)
     for _, x in ipairs(FindAllOf(class) or {}) do if live(x) then return x end end
 end
 -- the cached controller and world too: a freed object's address can come back as another object, which IsValid cannot tell
-local function forget() singles, cachedPC, cachedWorld = {}, nil, nil end
+local function forget() singles, cachedPC, cachedWorld, pcLease, worldLease = {}, nil, nil, nil, nil end
 RegisterLoadMapPreHook(forget)
 RegisterLoadMapPostHook(forget)
 
-local worldGeneration = 0
 RegisterLoadMapPreHook(function() worldGeneration = worldGeneration + 1 end)
 -- A still-valid handle may belong to the world we just left; do not even enter its callback.
 function M.defer(ms, fn)
@@ -175,7 +191,7 @@ end
 
 function M.netMode()
     local ksl, wco = UEHelpers.GetKismetSystemLibrary(), UEHelpers.GetWorldContextObject()
-    if not wco:IsValid() then return "none" end
+    if not wco or not wco:IsValid() then return "none" end
     if ksl:IsStandalone(wco) then return "standalone" end
     return ksl:IsServer(wco) and "listen" or "client"
 end
