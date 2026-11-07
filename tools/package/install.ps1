@@ -52,7 +52,16 @@ if ((Get-FileHash $exe).Hash -ne $ExeSha -and -not $Force) {
 
 $stamp = "ue4ss\Mods\PacificTogether\version.txt"
 $installed = Get-Content (Join-Path $bin $stamp) -ErrorAction SilentlyContinue
-if ($installed -ne (Get-Content (Join-Path $PSScriptRoot "game\$stamp"))) {
+$source = Join-Path $PSScriptRoot "game"
+$required = @('dwmapi.dll', 'ue4ss\UE4SS.dll')
+foreach ($mod in @('PacificTogether', 'PacificTogetherNative')) {
+    $required += Get-ChildItem (Join-Path $source "ue4ss\Mods\$mod") -Recurse -File | ForEach-Object { $_.FullName.Substring($source.Length + 1) }
+}
+$missing = @($required | Where-Object {
+    $target = Join-Path $bin $_
+    -not (Test-Path -LiteralPath $target -PathType Leaf) -or (Get-Item -LiteralPath $target).Length -ne (Get-Item -LiteralPath (Join-Path $source $_)).Length
+})
+if ($installed -ne (Get-Content (Join-Path $PSScriptRoot "game\$stamp")) -or $missing.Count -gt 0) {
     # one backup per install of a new build, before the modded game ever runs
     $saved = Join-Path $env:LOCALAPPDATA "PenDriverPro\Saved"
     if (Test-Path $saved) {

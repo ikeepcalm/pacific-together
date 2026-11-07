@@ -2,10 +2,10 @@ Pacific Together 0.8.9 - co-op for Pacific Drive
 ================================================
 
 Play Pacific Drive with a friend: one drives, one rides shotgun, both scavenge.
-Development tree: protocol 6; both players need the same development build.
+Development tree: protocol 7; both players need the same development build.
 Early access: fully playable, still being polished. If something breaks mid-run, press F9 for the rescue menu.
 
-Both players need this same mod version (0.8.9, protocol 7) and Pacific Drive on Steam, v1.15.0 (build 21896301), on Windows.
+Both players need this same mod version (0.8.9, protocol 7) and the supported Pacific Drive build, v1.15.0 (build 21896301), on Windows.
 
 Features
 - One car, two players: the host drives, the guest rides in the passenger seat and can start the engine or shift gears.
@@ -30,7 +30,7 @@ Play with a friend
   or picks Join game on the host in the Steam friends list.
 - IP address: in the launcher the host picks Host, the guest picks Join and types the host's IP. The host loads a save,
   the guest connects from the main menu. The host may need to forward UDP port 7777 (or use a LAN or VPN).
-Install & play starts the game through Steam when Steam is installed.
+Install & play starts the selected copy directly. Enable Launch through Steam to use the Steam library instead.
 Command line instead of the launcher (in %LOCALAPPDATA%\PacificTogether\app\<version>): install.cmd (Host/Steam), install.cmd -Join <host IP>, install.cmd -Uninstall.
 
 Controls

@@ -5,53 +5,29 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [Unreleased]
 
-- Updated peers keep the host's day clock through loading, with latency compensation and a clock acknowledgement before the loading-screen release.
-- Car-part paint and decals follow removal, remote hand presentation, storage, drops, pickup and reinstallation on updated peers.
-
-- Updated peers interpolate loose-item flight using host snapshot times and retain the motion buffer across short delivery gaps.
-
-- Updated guests replay the host's bobblehead, hanging ornament and ignition-key motion without detached cosmetic bodies.
-
-- Synchronize damaged car-part health, wreck paint, trunk opening and item positions; remove host-cleared vegetation on updated guests and hide the hood highlight while riding.
-
-- Keep the guest cabin steady by disabling synthetic passenger head sway; negotiated car motion owns its visual pose without competing native movement notifications.
-- Broken host foliage is removed on the guest even when represented by a mesh instance instead of a separate shrub actor.
-- Capture foliage breaks at the game's break event and match the original swapped instance transform, including actors removed between polls.
-- Updated peers interpolate car snapshots using the host's timestamps; older peers retain the previous vehicle follower.
-
-### Fixed in the vehicle experiment
-
-- Guest hood open/close follows the host using the panel's own interaction path.
-- Loose items retain durability, health, fuel and battery when copied, picked up and dropped by an updated guest.
-- Shared custom music pauses its built-in carrier without repeatedly finishing and restarting the song.
-- Loose-item presentation uses a delayed snapshot buffer for movement between network updates.
-
-Validation and remaining limits: [client sync report](docs/spikes/client-sync-fixes-20261104.md).
-
 ### Added
 
-- Share the host's current custom radio song automatically with an updated guest. Missing MP3/WAV/OGG files use a
-  SHA-256-verified cache; matching local files need no download, and different files with the same name stay distinct.
-  A newly available track restarts together on both sides. Protocol remains 6; older peers retain the previous behavior.
+- Automatic sharing of the host's custom MP3, WAV and OGG radio tracks; guests no longer need to copy matching files manually.
+
+### Changed
+
+- Smoother car movement, wheel rotation, steering and suspension on the guest, with a steady passenger view.
+- The bobblehead, hanging ornament and ignition key follow the host's motion.
+- Smoother thrown-item movement, preserving throw velocity and rotation.
+- The guest's day clock follows the host through loading; time synchronization is confirmed before the loading screen clears.
 
 ### Fixed
 
-- Preserve author protocol 6 and keyed drop adoption; optional motion, heap and intent extensions activate only after negotiation.
-- Bind cached actors/controllers to UE weak identities and the current world; reject replayed or previous-pawn actions.
-- Shared item IDs have tombstones, newest-wins poses and a reliable settled pose; creation stays before dependent updates.
-- Motion can use independent datagrams on the existing Steam/UDP tunnel, with reliable fallback on ordinary direct IP.
-- Loading waits for applied car, loot and prop baselines; control traffic gets priority over bulk state.
-
-- Wheel rolling uses unwrapped native phase/velocity with a render clock independent of packet arrival; steering keeps its native axle.
-- Native motion queues replace obsolete snapshots and drain before bulk state; wheel packets follow the current car identity.
-- Passenger radio gets its native highlight and host-authoritative power, volume and station controls using game action bindings.
-- Lucky Junk Heap interactions, prizes, animations and presentation sounds follow the host, with cancellation and duplicate/stale-request guards.
-
-- Thrown items stream host-authoritative movement at 20 Hz with interpolation; guest throws retain their velocity and rotation.
-- Garage part lockers use their own installation tags instead of sharing an empty upgrade-slot tag.
-- Remote wheels follow the host's rolling, steering and suspension poses while guest vehicle physics stays disabled.
-- A seated guest cannot highlight the windshield; ignition, shifter and on-foot selection remain available.
-
+- Removed car parts keep their paint and decals in hands, on the ground, after pickup and when installed again. Other players see the same appearance.
+- Dropped items and car parts retain health, durability, fuel and battery charge instead of returning to full condition.
+- Part lockers and shared containers load their contents on joining and synchronize item placement and changes.
+- Abandoned cars match the host's paint, decals, part condition, trunk state and stored-item layout.
+- Car doors, hood and trunk follow the host's opening and closing actions. Passengers cannot select the hood or windshield from inside.
+- Bushes and small trees cleared by the host no longer remain standing on the guest.
+- Lucky Junk Heap interactions, rewards, animations, sounds and lid position follow the host.
+- Corrected the other player's bio-lantern light color, intensity and range.
+- Prevented repeated custom-song restarts and overlapping radio playback.
+- The installer restores missing files. The launcher supports direct launch of the selected copy or launch through Steam.
 
 ## [0.8.9] - 2026-11-04
 

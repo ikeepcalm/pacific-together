@@ -1,19 +1,19 @@
 # Playtester guide
 
-Developer/friend preview **0.8.9**, development protocol **7**. Both players need the same download and Pacific Drive on Steam,
+Developer/friend preview **0.8.9**, development protocol **7**. Both players need the same download and the supported Pacific Drive build,
 v1.15.0 (build 21896301). The host owns the world and saves. Mixed DLC ownership is not yet verified.
 
 ## Install and connect
 
 Close the game, open `PacificTogether-<version>.exe` (one file; it unpacks itself to `%LOCALAPPDATA%\PacificTogether\app`), and
-check the game folder. **Install & play** starts the game through Steam when Steam is installed.
+check the game folder. **Install & play** starts the selected copy directly. Enable **Launch through Steam** to use the Steam library instead.
 
-**Steam:** both players select **Host** to install without a saved IP, then **Install & play**. The actual host loads
+**Steam:** both players select **Host** to install without a saved IP, enable **Launch through Steam**, then **Install & play**. The actual host loads
 a save; the guest starts the game and uses Steam's **Join game** or accepts an invite. This path was verified between
 two accounts on October 23. A cold-start invite is a separate path and still needs validation.
 
 **Direct IP:** the host selects **Host**, the guest selects **Join** and enters the host's address. After installation,
-the host loads a save and the guest waits at the main menu. Use a reachable LAN/VPN address or forward UDP 7777 on the
+leave **Launch through Steam** off to start the selected copy directly. The host loads a save and the guest waits at the main menu. Use a reachable LAN/VPN address or forward UDP 7777 on the
 host's router. Allow the game through Windows Firewall on the network used for the session. A saved join address takes
 precedence over Steam joining; reinstall in Host mode to clear it.
 
