@@ -1,6 +1,6 @@
 # Releases
 
-Current preview: **0.8.9**, protocol **7** (2026-11-04). Version constants live in
+Current preview: **0.9.0**, protocol **7** (2026-11-07). Version constants live in
 `mod/PacificTogether/Scripts/common.lua`; the native runtime version is `NATIVE_VERSION` in `dllmain.cpp`.
 The UE4SS-facing `ModVersion` label still says 0.0.5; reconcile that metadata before packaging a public build. Changes go in
 [../CHANGELOG.md](../CHANGELOG.md).

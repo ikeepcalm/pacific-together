@@ -34,7 +34,7 @@ auto pt_blackbox_install() -> void;
 auto pt_blackbox_set_game_thread() -> void;
 auto pt_background_install() -> void; // background.cpp
 
-static constexpr const char* NATIVE_VERSION = "0.8.1";
+static constexpr const char* NATIVE_VERSION = "0.9.0";
 
 // Lua hot reload (test runs): UE4SS uninstalls a Lua mod on its event loop thread while the game thread keeps firing
 // that mod's hooks (a host with a guest died on the first RestartMod). The game thread waits in an engine tick instead.

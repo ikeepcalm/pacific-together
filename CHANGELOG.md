@@ -3,7 +3,9 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
-## [Unreleased]
+## [0.9.0] - 2026-11-07
+
+Network protocol **7**; the Everelsu fork's additions are negotiated between the two games. Both players should use 0.9.0.
 
 ### Added
 
@@ -28,6 +30,12 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 - Corrected the other player's bio-lantern light color, intensity and range.
 - Prevented repeated custom-song restarts and overlapping radio playback.
 - The installer restores missing files. The launcher supports direct launch of the selected copy or launch through Steam.
+- Less stutter: the guest's game froze for about a tenth of a second every 2 s for the whole session (wreck parts looking for
+  their car body); a few other per-frame and twice-a-second costs on both sides are smaller.
+- What the guest does in the first ~40 s of a zone join (taking from a car trunk, scrapping a part, picking things up) is no
+  longer lost: it is sent once the guest's world has loaded.
+- A new guest sees what is inside abandoned cars' trunks and storage soon after loading instead of up to a minute later.
+- F9 > 3 (Reset controls) also clears a stuck ARC screen: interaction prompts, hands and HUD come back.
 
 ## [0.8.9] - 2026-11-04
 
