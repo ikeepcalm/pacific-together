@@ -22,6 +22,7 @@ if os.getenv("PT_MUTATE")=="nodoormotion" then offered=offered:gsub(",door%-moti
 if os.getenv("PT_MUTATE") == "physicalcar" then offered = offered .. ",physical-car" end
 if PTNative_MusicFinish then offered = offered .. ",music-files" end
 local hostFeatures, hostEpoch, hostTicket, serial, baselineComplete = {}, nil, nil, 0, false
+local held = {} -- guest intents waiting for the baseline (M.toHost)
 local peers = {}
 local baselineParts, motionSeen = {}, {}
 local worldEpoch = string.format("%x-%x", os.time(), math.random(1, 0x7fffffff))
@@ -49,7 +50,7 @@ local function permitted(pc, kind, data)
     return info and (info.caps ~= "mv" or (kind == "g.loot.b" and data == "H"))
 end
 RegisterLoadMapPreHook(function()
-    hostFeatures, hostEpoch, hostTicket, serial, peers, baselineComplete, baselineParts = {}, nil, nil, 0, {}, false, {}
+    hostFeatures, hostEpoch, hostTicket, serial, peers, baselineComplete, baselineParts, held = {}, nil, nil, 0, {}, false, {}, {}
     worldEpoch = string.format("%x-%x", os.time(), math.random(1, 0x7fffffff))
     motionSeen = {}
     if PTNative_TunnelMotionReset then PTNative_TunnelMotionReset() end
@@ -94,6 +95,12 @@ function M.toHost(kind, data)
     if kind:sub(1, 13) == "g.radio.file." and not M.hostSupports("music-files") then return false end
     if kind == "g.heap.intent" and not M.hostSupports("heap") then return false end
     if protected(kind) and M.hostSupports("intents") then
+        -- the host drops intents until our baseline (~40 s after a zone join): a scrap, pickup or trunk take in that window was
+        -- lost (lootcar/lootsync2 2026-11-07). They wait here and go out right after g.net.baseline, in order.
+        if not baselineComplete and not (kind == "g.loot.b" and data == "H") then
+            if #held < 2000 then held[#held + 1] = { kind, data } end
+            return true
+        end
         serial = serial + 1
         local pawn = pc and pc.Pawn
         if not (pawn and pawn:IsValid()) then return false end
@@ -218,7 +225,7 @@ M.on("g.net.cap", function(pc, data)
     if not epoch or #epoch > 64 or #ticket > 128 then return end
     if common.netMode() == "client" then
         if hostEpoch ~= epoch then motionSeen = {} end
-        if hostEpoch ~= epoch or hostTicket ~= ticket then serial, baselineComplete = 0, false end
+        if hostEpoch ~= epoch or hostTicket ~= ticket then serial, baselineComplete, held = 0, false, {} end
         hostEpoch, hostTicket, hostFeatures = epoch, ticket, features(list)
         M.toHost("g.net.cap", epoch .. "|" .. offered .. "|" .. ticket)
         M.baselineComplete()
@@ -250,8 +257,14 @@ end)
 function M.baselineComplete(part)
     if part then baselineParts[part] = true end
     local complete = baselineParts.loot and baselineParts.car and (baselineParts.visual or not M.hostSupports("intents"))
-    if complete and not baselineComplete and M.hostSupports("intents") then M.toHost("g.net.baseline", hostEpoch) end
+    local sendHeld = complete and not baselineComplete and M.hostSupports("intents")
+    if sendHeld then M.toHost("g.net.baseline", hostEpoch) end
     baselineComplete = complete and true or false
+    if sendHeld then
+        local list = held
+        held = {}
+        for _, h in ipairs(list) do M.toHost(h[1], h[2]) end
+    end
 end
 function M.lifecycle(pc)
     if common.netMode() == "client" then return baselineComplete and "active" or "loading" end

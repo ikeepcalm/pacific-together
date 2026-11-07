@@ -1281,8 +1281,8 @@ function M.actorOf(id)
 end
 
 -- Wreck presentation/layout extends the author's inventory messages only for negotiated peers.
-local wreckPending,wreckSent,wreckBodies={},{},{}
-RegisterLoadMapPreHook(function()wreckPending,wreckSent,wreckBodies={},{},{} end)
+local wreckPending,wreckSent,wreckBodies,wreckActive={},{},{},false
+RegisterLoadMapPreHook(function()wreckPending,wreckSent,wreckBodies,wreckActive={},{},{},false end)
 local VEHICLE='/Game/Gameplay/Vehicles/Templates/BaseActors/BP_Template_BaseVehicle.BP_Template_BaseVehicle_C'
 local TRUNK='/Game/Gameplay/Vehicles/Templates/BaseActors/BP_TemplatePart_Trunk.BP_TemplatePart_Trunk_C'
 local function assetName(o)return alive(o) and ids.path2(o) or '-' end
@@ -1378,6 +1378,14 @@ LoopInGameThreadWithDelay(500,function()
     local guests=mode=='listen' and net.guests() or {}
     local vehicle,trunk=StaticFindObject(VEHICLE),StaticFindObject(TRUNK)
     local spots,far,now=playerSpots(),3,os.clock()
+    -- a guest's copy of a part with storage stays empty until its first C row. The round robin ran (and stamped wreckAt) while no
+    -- guest could take rows yet, then sent 3 parts per tick: a far trunk stayed empty 20-30 s after the guest went active
+    -- (lootcar 2026-11-07). Now each part's first row goes out as soon as a guest is active, 4 ms of layouts per tick.
+    local active=false
+    for _,pc in ipairs(guests)do active=active or (net.peerSupports(pc,'wreck-state')and net.lifecycle(pc)=='active')end
+    if active and not wreckActive then for _,x in pairs(ents)do x.wreckAt=nil end end
+    wreckActive=active
+    local firstBudget=now+0.004
     local function send(id,kind,body)
         local data=net.worldToken()..'|'..id..'|'..kind..'|'..body
         for _,pc in ipairs(guests)do
@@ -1404,9 +1412,10 @@ LoopInGameThreadWithDelay(500,function()
                         local state,strength={},{};a:GetTrunkState(state);a.BP_LockedComponent:GetLockStrength(strength)
                         send(id,'T',state['Current State']..','..strength.Strength..','..(a.AnimStateOpened and '1'or '0'))
                     end
-                                        local near=inReach(a,spots)
-                    if near or (far>0 and now-(e.wreckAt or 0)>10)then
-                        if not near then far=far-1 end;e.wreckAt=now
+                    local near=active and inReach(a,spots)
+                    local first=active and not e.wreckAt and os.clock()<firstBudget
+                    if near or first or (active and far>0 and now-(e.wreckAt or 0)>10)then
+                        if not near and not first then far=far-1 end;e.wreckAt=now
                         local c=partBox(a);if c then local body=ids.layout(c);if validLayout(body)then send(id,'C',body)end end
                     end
                 end

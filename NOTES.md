@@ -1238,5 +1238,22 @@ every 250 ms (native keeps them); world `live()` caches the transient test per o
 Checks on the merge + these changes, headless: anomtesla 20/20, lootcar 22/24, damagefeedback 21/22. Both failures also
 fail on the merge alone (A/B with the file reverted): lootcar guest trunk copy gets an empty contents field
 (`S P247 (...TrunkContents,)`), damagefeedback `reused_payload_delivers_each_hit_once` (guest lost 30, wants 12-23).
-Fork regressions, open. Unmeasured: in-game FPS before/after; PassesFilter hooks (car.lua, junkheap.lua) are not timed.
+Fork regressions; fixed later the same day (below). Unmeasured: in-game FPS before/after; PassesFilter hooks (car.lua, junkheap.lua) are not timed.
 `tools/test-radio-music.ps1` needed vswhere on PATH (fixed); its music-test.exe step still failed once here.
+
+Later (fork regressions fixed):
+- Cause, both: the host drops a guest intent until it has the guest's baseline (`g.net.baseline`, 38-48 s after a zone join
+  here: ~1230 visual props stream first). Guest actions in that window (scrap, trunk take, pickup) were lost silently.
+  Evidence: lootsync2 guest scrap 7:34:41, host baseline 7:35:07; temporary DIAG logging in `loot.lua`/`net.lua` showed the
+  take sent and never received. Fix: `net.toHost` holds protected intents until the baseline is sent, then sends them in order.
+- Host wreck C rows (part contents) were round-robined 3 per tick even before any guest could receive them; the first row of
+  every part now goes out once a guest is active (4 ms per tick).
+- damagefeedback `reused_payload` failure was NOT looked at further (fails on the merge alone).
+- Tests: lootcar copy check 30 -> 60 s, `taken >= 1` (one-slot fixture bag, flaky since 2026-11-01); lootsync2 scrap 30 -> 90 s.
+  Results: lootcar 24/24 x2, lootsync2 33/33 (an earlier 32/33: part-state round robin missed its 30 s window), rescue 22/22.
+- ARC focus (owner 2026-11-07: host in the ARC while the guest joined, could not interact, F9 3 no help): not reproduced.
+  Game code (`local/atlas/bp/BP_InteractCameraComponent.txt`): focus disables highlights (`BP_HighlightManager.Enabled`),
+  may force a holster, hides the HUD; only the unfocus end restores them. `UpdateSettingsBasedOnPlayerState` (screen's
+  PlayerEntering/LeavingCar) flips `Holster While Focused` mid-focus. Guess: an enter/leave event or the guest-join `moveArc`
+  slot shift interrupts the unfocus. F9 3 now unfocuses any still-focused screen and restores highlights/holster/HUD, and logs
+  `PT|rescue focus cleared: ...` naming what was stuck. Next: live repro to find the trigger.

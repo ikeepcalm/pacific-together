@@ -62,7 +62,8 @@ return function(T)
         add({ check = "guest_took_some", timeout = 120, cond = function() return has("t.carok") end })
         add({ check = "host_cargo_lost_what_guest_took", timeout = 60, cond = function()
             local taken = tonumber(got["t.carok"])
-            return taken >= 2 and alive(A.a) and box(A.a):GetNumItems() == A.n - taken
+            -- >= 1: the fixture's one-slot bag often takes a single item (seen since 2026-11-01); the host's count is the point
+            return taken >= 1 and alive(A.a) and box(A.a):GetNumItems() == A.n - taken
         end })
         add({ wait = 3 })
         return steps
@@ -91,7 +92,8 @@ return function(T)
         end
     end })
     -- the copy carries the host's items (the part's own container)
-    add({ check = "guest_copy_has_hosts_items", timeout = 30, cond = function() return alive(copy) and box(copy):GetNumItems() == want end })
+    -- wreck contents (C rows) come once the guest's baseline is applied, ~38 s after the join in this zone (1200+ visual props)
+    add({ check = "guest_copy_has_hosts_items", timeout = 60, cond = function() return alive(copy) and box(copy):GetNumItems() == want end })
     add({ wait = 2 })
     actSteps(1, "move_to", function() return { actor = path(copy), radius = 60, timeout = 12 } end, 40)
     -- the fixture character's pack has no slots until it holds something

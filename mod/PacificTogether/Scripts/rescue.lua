@@ -99,7 +99,28 @@ net.on("g.rescue.sync", function()
     log("PT|rescue resync asked by the %s", safety.guest() and "host" or "guest")
 end)
 
+-- An interact-camera screen (the ARC) turns highlights off, can force a holster and hides the HUD while focused; only its
+-- unfocus end turns them back. Host in the ARC while the guest joined: no interaction prompts afterwards and 3 did not help
+-- (owner 2026-11-07). Cause not reproduced yet; this undoes what a broken unfocus leaves and logs which part was stuck.
+local function clearFocus()
+    local fixed = {}
+    for _, c in ipairs(FindAllOf("BP_InteractCameraComponent_C") or {}) do
+        local ok, p = pcall(function() return c["Focused Player"] end)
+        if valid(c) and ok and valid(p) then pcall(function() c:UnfocusPlayer() end); fixed[#fixed + 1] = "focus" end
+    end
+    local hm = FindFirstOf("BP_HighlightManager_C")
+    if valid(hm) and not hm.Enabled then pcall(function() hm:EnableHighlights() end); fixed[#fixed + 1] = "highlights" end
+    local cm = FindFirstOf("BP_MainCharacterManager_C")
+    if valid(cm) and cm.ForcedHolsterActive then pcall(function() cm:EndForcedHolster() end); fixed[#fixed + 1] = "holster" end
+    pcall(function()
+        local w = FindObject("BFL_Widget_Utils_C", "Default__BFL_Widget_Utils_C")
+        w["Set Player HUD Hidden"](w, false, cm)
+    end)
+    log("PT|rescue focus cleared: %s", #fixed > 0 and table.concat(fixed, " ") or "nothing stuck")
+end
+
 local function unstick()
+    pcall(clearFocus)
     local car = package.loaded["car"]
     if safety.guest() then
         if car and car.unstick then car.unstick() end
