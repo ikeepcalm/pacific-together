@@ -630,15 +630,23 @@ end
 
 -- guest: a wreck part copy goes on its wreck body copy (the host's parts are attached to theirs). Standalone, a trunk lid
 -- could not be opened (hand playtest 2026-10-23). The body is the nearest body copy within 6 m.
-local function attachToBody(e)
-    if e.attached or not entityAlive(e) then return end
-    local l, best, bd = e.actor:K2_GetActorLocation(), nil, 600 ^ 2
+-- body positions read once per pass: per part it walked all ~1500 entities and read every body's location, 115-130 ms on the
+-- guest every 2 s for the whole session (parts lying away from any body retry forever; live1 2026-11-04 PT|slow loot.lua:960)
+local function bodySpots()
+    local l = {}
     for _, b in pairs(ents) do
-        if b.kind == "B" and alive(b.actor) then
-            local p = b.actor:K2_GetActorLocation()
-            local d = (p.X - l.X) ^ 2 + (p.Y - l.Y) ^ 2 + (p.Z - l.Z) ^ 2
-            if d < bd then best, bd = b.actor, d end
-        end
+        if b.kind == "B" and alive(b.actor) then l[#l + 1] = { b.actor, b.actor:K2_GetActorLocation() } end
+    end
+    return l
+end
+local function attachToBody(e, bodies)
+    if e.attached or not entityAlive(e) then return end
+    bodies = bodies or bodySpots()
+    local l, best, bd = e.actor:K2_GetActorLocation(), nil, 600 ^ 2
+    for _, b in ipairs(bodies) do
+        local p = b[2]
+        local d = (p.X - l.X) ^ 2 + (p.Y - l.Y) ^ 2 + (p.Z - l.Z) ^ 2
+        if d < bd and alive(b[1]) then best, bd = b[1], d end
     end
     if not best then return end
     e.attached = pcall(function() e.actor:K2_AttachToActor(best, FName("None"), 1, 1, 1, false) end)
@@ -708,6 +716,7 @@ end
 
 local PURGE = { "BP_Lootable_Base_C", "LootableTemplatePart", "LootableTemplate", "BP_Spawn_ResourceBase_C" }
 local function scanGuest()
+    local bodies
     for id, e in pairs(ents) do
         if e.kind == "W" and not entityAlive(e) then
             -- picked up here (the item sits in a slot now): tell the host once
@@ -725,7 +734,10 @@ local function scanGuest()
             replica.remove(replicas, id)
             ents[id] = nil
         elseif e.pending then applyState(e, e.pending) end
-        if e.kind == "P" and not e.attached and tickN % 4 == 0 then attachToBody(e) end
+        if e.kind == "P" and not e.attached and tickN % 4 == 0 then
+            bodies = bodies or bodySpots()
+            attachToBody(e, bodies)
+        end
     end
     -- ask for the full list until one has come through to its end (F): a host that was not ready yet sent nothing. Not while
     -- lines still come in or wait in the inbox (a second list would flood the channel)

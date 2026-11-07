@@ -16,7 +16,17 @@ local clock = require("worldclock")
 local M = { enabled = os.getenv("PT_MUTATE") ~= "noworldsync", mutate = os.getenv("PT_MUTATE") } -- the test mutation switches the module off
 
 local function first(c) for _, o in ipairs(FindAllOf(c) or {}) do if o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) then return o end end end
-local function live(o) return o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) and not o:GetFullName():find("/Engine/Transient", 1, true) end
+-- an object's package does not change: GetFullName once per object, not on every hazard and prop every 500 ms (guest cleanup
+-- 6 ms a call, 0.8.8 sessions). shortcut: keyed by address, cleared per map; a freed address reused within a map inherits the answer.
+local transient = {}
+RegisterLoadMapPreHook(function() transient = {} end)
+local function live(o)
+    if not (o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill)) then return false end
+    local a = o:GetAddress()
+    local t = transient[a]
+    if t == nil then t = o:GetFullName():find("/Engine/Transient", 1, true) ~= nil; transient[a] = t end
+    return not t
+end
 local function firstLive(c) for _, o in ipairs(FindAllOf(c) or {}) do if live(o) then return o end end end
 local function each(class, fn) for _, o in ipairs(FindAllOf(class) or {}) do if live(o) then fn(o) end end end
 local function try(what, fn, ...)

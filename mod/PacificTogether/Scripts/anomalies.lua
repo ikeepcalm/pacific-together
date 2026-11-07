@@ -121,14 +121,20 @@ for _, fn in ipairs(BINDS) do
     end)
 end
 
-RegisterLoadMapPreHook(function() if PTNative_DamageClear then PTNative_DamageClear() end end)
+local receiversAt = -1
+RegisterLoadMapPreHook(function() receiversAt = -1; if PTNative_DamageClear then PTNative_DamageClear() end end)
 LoopInGameThreadWithDelay(16, function()
     if not PTNative_DamagePoll then return end
-    if not (M.enabled and safety.active()) or os.getenv("PT_MUTATE") == "nodamageguard" then PTNative_DamageClear(); return end
+    if not (M.enabled and safety.active()) or os.getenv("PT_MUTATE") == "nodamageguard" then PTNative_DamageClear(); receiversAt = -1; return end
     try("receiver guard", function()
-        for _, rec in ipairs(FindAllOf("AC_PlayerHealthReceiverHelper_C") or {}) do
-            if valid(rec) and (safety.guest() and isHostBody(rec) or not safety.guest() and isGuestPawn(rec)) then
-                PTNative_DamageReceiver(rec:GetAddress())
+        -- the native side keeps receivers (weak pointers) until cleared, so the FindAllOf runs 4x a second, not every frame
+        -- (0.4-0.8 ms a frame on both sides, 0.8.8 sessions); only the queue is polled every frame
+        if os.clock() - receiversAt >= 0.25 then
+            receiversAt = os.clock()
+            for _, rec in ipairs(FindAllOf("AC_PlayerHealthReceiverHelper_C") or {}) do
+                if valid(rec) and (safety.guest() and isHostBody(rec) or not safety.guest() and isGuestPawn(rec)) then
+                    PTNative_DamageReceiver(rec:GetAddress())
+                end
             end
         end
         while true do

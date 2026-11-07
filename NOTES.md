@@ -1225,3 +1225,18 @@ Logs: `local/playtest-20261104-live1` (first session; the second one is in the t
   instead of off for the run; a currency the host no longer lists is 0 on the guest; map icons: default materials not sent,
   sizes/colors rounded, missing assets cached, the guest's own icons come back and the copies go when the session ends;
   README controls. Not changed: the icon list's size beyond that (measure in a session first).
+
+## 2026-11-07: Everelsu fork merged (483cbf2), FPS pass from PT|perf logs
+
+Observed (0.8.8 logs: `local/playtest-20261104-live1/{host,guest}`, `local/playtest-20261103-225113/ue4ss/run-02.log`):
+- Guest `loot.lua` 500 ms tick 40.8 ms avg, max 532, `PT|slow` 115-130 ms every 2 s all session; `PT|loot time` scanGuest
+  3.7 s/min. Cause in code: `attachToBody` walked all ~1535 entities and read every body's location per unattached part.
+- Host anomalies3 `wake` 17.5 ms per 500 ms call; damage-guard 16 ms loop 0.4-0.8 ms per frame (FindAllOf each frame);
+  guest world cleanup 6 ms per 500 ms call. The profiler lists the top 8 sites a minute only: lower bounds.
+Changed: body positions once per pass; wake uses IsValid and GetFullName only before acting; damage receivers registered
+every 250 ms (native keeps them); world `live()` caches the transient test per object per map.
+Checks on the merge + these changes, headless: anomtesla 20/20, lootcar 22/24, damagefeedback 21/22. Both failures also
+fail on the merge alone (A/B with the file reverted): lootcar guest trunk copy gets an empty contents field
+(`S P247 (...TrunkContents,)`), damagefeedback `reused_payload_delivers_each_hit_once` (guest lost 30, wants 12-23).
+Fork regressions, open. Unmeasured: in-game FPS before/after; PassesFilter hooks (car.lua, junkheap.lua) are not timed.
+`tools/test-radio-music.ps1` needed vswhere on PATH (fixed); its music-test.exe step still failed once here.

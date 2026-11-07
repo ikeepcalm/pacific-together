@@ -11,6 +11,8 @@ $lua = Join-Path $repo 'native/RE-UE4SS/deps/first/LuaRaw'
 $sources = (Get-ChildItem "$lua/src/*.c" | Where-Object Name -ne 'luac.c' | ForEach-Object { '"' + $_.FullName + '"' }) -join ' '
 $batch = @"
 @echo off
+rem vcvars64 looks for vswhere on PATH
+set "PATH=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer;%PATH%"
 call "$vs/VC/Auxiliary/Build/vcvars64.bat" >nul || exit /b 1
 cd /d "$out"
 cl /nologo /std:c++20 /EHsc /O2 /DPT_MUSIC_SELF_TEST /Fe:music-test.exe "$repo/native/PacificTogetherNative/music.cpp" || exit /b 1

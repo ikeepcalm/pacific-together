@@ -69,27 +69,33 @@ LoopInGameThreadWithDelay(500, function()
             local p = pc:IsValid() and pc.Pawn or nil
             if p and p:IsValid() then pawns[#pawns + 1] = p:K2_GetActorLocation() end
         end
+        if #pawns == 0 and not next(awake) then return end
         local ctl = FindFirstOf("SpatialTickController")
         if not (ctl and ctl:IsValid()) then return end
-        each("ManagedTickComponent", function(c)
-            local o = c:GetOwner()
-            if not alive(o) then return end
-            local l, r2, near = o:K2_GetActorLocation(), c:GetSquaredMaxTickDistance(), false
-            for _, g in ipairs(pawns) do
-                if (l.X - g.X) ^ 2 + (l.Y - g.Y) ^ 2 + (l.Z - g.Z) ^ 2 < r2 then near = true break end
+        -- plain IsValid while measuring: alive()'s GetFullName on every component and owner took 17.5 ms a call (host, live1
+        -- 2026-11-04); the full check only before a component is taken from the controller
+        for _, c in ipairs(FindAllOf("ManagedTickComponent") or {}) do
+            local o = c:IsValid() and c:GetOwner()
+            if o and o:IsValid() then
+                local l, r2, near = o:K2_GetActorLocation(), c:GetSquaredMaxTickDistance(), false
+                for _, g in ipairs(pawns) do
+                    if (l.X - g.X) ^ 2 + (l.Y - g.Y) ^ 2 + (l.Z - g.Z) ^ 2 < r2 then near = true break end
+                end
+                local key = c:GetAddress()
+                if near and not awake[key] then
+                    if not o:IsActorTickEnabled() and alive(c) and alive(o) then
+                        ctl:RemoveManagedTick(c) -- else its next Tick switches the owner off again (host far away)
+                        c:SetOwnerTickEnabled(true)
+                        awake[key] = c
+                        M.woken = M.woken + 1
+                        log("PT|anom3 woke %s for the guest", o:GetFName():ToString())
+                    end
+                elseif awake[key] and not near then
+                    awake[key] = nil
+                    ctl:AddManagedTick(c)
+                end
             end
-            local key = c:GetAddress()
-            if near and not awake[key] and not o:IsActorTickEnabled() then
-                ctl:RemoveManagedTick(c) -- else its next Tick switches the owner off again (host far away)
-                c:SetOwnerTickEnabled(true)
-                awake[key] = c
-                M.woken = M.woken + 1
-                log("PT|anom3 woke %s for the guest", o:GetFName():ToString())
-            elseif awake[key] and not near then
-                awake[key] = nil
-                ctl:AddManagedTick(c)
-            end
-        end)
+        end
     end)
 end)
 
