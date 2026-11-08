@@ -124,19 +124,25 @@ end
 -- guest is seated by car.lua, so its car audio stayed "outside, doors shut" and muffled the radio and engine (playtests
 -- 2026-11-01 and 2026-11-03). Only the audio events run here, not the game's enter or exit.
 local cabinRetryAt = 0 -- after an error (a pawn or controller gone during a load), try again 10 s later
+local function seatedIn(pawn) local seat = pawn:GetAttachParentActor(); return valid(gcar) and valid(seat) and seat:GetAddress() == gcar:GetAddress() end
+-- the game's in-car share (set only by its own entry timeline): BP_CarManager.WillCarProtectPlayer needs it > 0.33, so a
+-- sealed car did not shield the seated guest from radiation (playtest 2026-11-08); storm, black hole and stealer read it too.
+-- Every 100 ms on its own, not behind the cabin audio's checks and 10 s error pause: a shield must not outlast the seat.
+local function guestInCar()
+    if os.getenv("PT_MUTATE") == "noincar" then return end
+    local pawn = UEHelpers.GetPlayerController().Pawn
+    if not valid(pawn) then return end
+    local pct = seatedIn(pawn) and 1 or 0
+    if pawn.PercentInCar ~= pct then
+        pawn.PercentInCar = pct
+        log("PT|feel in-car percent %d", pct)
+    end
+end
 local function guestCabin()
     if not valid(gaudio) then return end
     local pawn = UEHelpers.GetPlayerController().Pawn
     if not valid(pawn) then return end
-    local seat = pawn:GetAttachParentActor()
-    local inside = valid(seat) and seat:GetAddress() == gcar:GetAddress()
-    -- the game's in-car share (set only by its own entry timeline): BP_CarManager.WillCarProtectPlayer needs it > 0.33, so a
-    -- sealed car did not shield the seated guest from radiation (playtest 2026-11-08); storm, black hole and stealer read it too
-    local pct = inside and 1 or 0
-    if os.getenv("PT_MUTATE") ~= "noincar" and pawn.PercentInCar ~= pct then
-        pawn.PercentInCar = pct
-        log("PT|feel in-car percent %d", pct)
-    end
+    local inside = seatedIn(pawn)
     if gaudio.PlayerInsideCar == inside then return end
     if inside then gaudio:OnPlayerStartEnterCar(false) else gaudio:OnPlayerStartExitCar(false) end
     log("PT|feel cabin audio inside=%s", tostring(inside))
@@ -146,6 +152,7 @@ local function refreshGuest()
     gcar = carCar()
     gaudio = gcar and ownedBy("AC_CarAudio_C", gcar) or nil
     gsp = gcar and ownedBy("BP_CarPart_Internal_Speedometer_C", gcar) or nil
+    pcall(guestInCar)
     if os.clock() < cabinRetryAt then return end
     local ok, err = pcall(guestCabin)
     if not ok then cabinRetryAt = os.clock() + 10 log("PT|error feel cabin %s (again in 10 s)", tostring(err)) end

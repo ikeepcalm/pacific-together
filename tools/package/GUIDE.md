@@ -1,6 +1,6 @@
 # Playtester guide
 
-Developer/friend preview **0.9.1**, development protocol **7**. Both players need the same download and the supported Pacific Drive build,
+Developer/friend preview **0.9.2**, development protocol **7**. Both players need the same download and the supported Pacific Drive build,
 v1.15.0 (build 21896301). The host owns the world and saves. Mixed DLC ownership is not yet verified.
 
 ## Install and connect

@@ -18,7 +18,7 @@ using System.Windows.Forms;
 [assembly: System.Reflection.AssemblyTitle("Pacific Together launcher")]
 [assembly: System.Reflection.AssemblyProduct("Pacific Together")]
 [assembly: System.Reflection.AssemblyDescription("Installs the Pacific Together co-op mod for Pacific Drive")]
-[assembly: System.Reflection.AssemblyVersion("0.9.1.0")]
+[assembly: System.Reflection.AssemblyVersion("0.9.2.0")]
 
 static class Pal
 {

@@ -3,9 +3,9 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
-## [Unreleased]
+## [0.9.2] - 2026-11-08
 
-Test build. Network protocol **7**. Both players need the same build.
+Guest driving test build. Network protocol **7**, as in 0.9.1. Both players should use 0.9.2.
 
 ### Added
 
