@@ -3,6 +3,22 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
+## [Unreleased]
+
+Test build. Network protocol **7**. Both players need the same build.
+
+### Added
+
+- Guest driving: whoever sits at the wheel drives. The guest gets in by the driver's door (when the host is not driving)
+  and drives with W/S/A/D, Space for the handbrake; E on the key and the shifter as before. The host can ride as passenger
+  with E on the passenger door, and E on that door again (or E at nothing) gets out. If the host gets in by the driver's
+  door, they take the wheel and the guest moves to the passenger seat. The host's game still runs the car, so the guest
+  driver feels their ping. Keyboard only for now.
+
+### Fixed
+
+- A sealed car now shields a seated guest from radiation as it does the host (the game only counted the host as inside).
+
 ## [0.9.1] - 2026-11-08
 
 Quick fix. Network protocol **7**, as in 0.9.0. Both players should use 0.9.1.

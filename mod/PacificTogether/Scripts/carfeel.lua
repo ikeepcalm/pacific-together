@@ -130,6 +130,13 @@ local function guestCabin()
     if not valid(pawn) then return end
     local seat = pawn:GetAttachParentActor()
     local inside = valid(seat) and seat:GetAddress() == gcar:GetAddress()
+    -- the game's in-car share (set only by its own entry timeline): BP_CarManager.WillCarProtectPlayer needs it > 0.33, so a
+    -- sealed car did not shield the seated guest from radiation (playtest 2026-11-08); storm, black hole and stealer read it too
+    local pct = inside and 1 or 0
+    if os.getenv("PT_MUTATE") ~= "noincar" and pawn.PercentInCar ~= pct then
+        pawn.PercentInCar = pct
+        log("PT|feel in-car percent %d", pct)
+    end
     if gaudio.PlayerInsideCar == inside then return end
     if inside then gaudio:OnPlayerStartEnterCar(false) else gaudio:OnPlayerStartExitCar(false) end
     log("PT|feel cabin audio inside=%s", tostring(inside))
