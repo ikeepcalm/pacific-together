@@ -1506,7 +1506,8 @@ local function hookAll()
                 local me = localPC() and localPC().Pawn
                 -- the driver's door only for the guest at the wheel (car-local Y < 0): a passenger is not put out by that door moving
                 local atWheel = slot == "SLOT_FrontLeftDoor" and valid(me) and toLocal(car, me:K2_GetActorLocation()).Y < 0
-                if (slot == "SLOT_FrontRightDoor" or atWheel) and riding and os.getenv("PT_MUTATE") ~= "nopassdoorexit" then
+                -- an open only: the host shuts the door behind a guest it just seated, and that shut put the guest out (live 2026-11-08)
+                if suffix == "" and (slot == "SLOT_FrontRightDoor" or atWheel) and riding and os.getenv("PT_MUTATE") ~= "nopassdoorexit" then
                     sendExit()
                     return
                 end
@@ -1550,21 +1551,32 @@ local DRIVE_KEYS = { W = true, S = true, A = true, D = true, SpaceBar = true }
 local keyStructs = {}
 for k in pairs(DRIVE_KEYS) do keyStructs[k] = { KeyName = FName(k) } end
 local sentDrive, sentDriveAt = "0 0 0 0", 0
+local whyAt = {} -- reason -> os.clock() of its last log line (diagnostics at most every 3 s each)
+local function why(reason, ...)
+    if os.clock() - (whyAt[reason] or -99) < 3 then return end
+    whyAt[reason] = os.clock()
+    log("PT|car drive " .. reason, ...)
+end
 LoopInGameThreadWithDelay(50, function()
     if common.netMode() ~= "client" or not riding or os.getenv("PT_MUTATE") == "noguestdrive" then return end
     local pc = localPC()
     if not pc then return end
     local ok, d = pcall(function()
+        local function down(k) return pc:IsInputKeyDown(keyStructs[k]) and 1 or 0 end
+        local keys = string.format("%d %d %d %d", down("W"), down("S"), down("D") - down("A"), down("SpaceBar"))
+        if keys == "0 0 0 0" then return keys end
         -- only the seat at the wheel (car-local Y < 0) drives: a passenger's keys are not sent
         local me, car = pc.Pawn, theCar(false)
-        if not (valid(me) and car) or toLocal(car, me:K2_GetActorLocation()).Y >= 0 then return "0 0 0 0" end
-        if pc.bShowMouseCursor then return "0 0 0 0" end -- a menu or the ARC screen is open: its keys are not driving
-        local function down(k) return pc:IsInputKeyDown(keyStructs[k]) and 1 or 0 end
-        return string.format("%d %d %d %d", down("W"), down("S"), down("D") - down("A"), down("SpaceBar"))
+        local y = valid(me) and car and toLocal(car, me:K2_GetActorLocation()).Y or nil
+        if not y or y >= 0 then why("keys held in the passenger seat (y=%s): not sent", tostring(y)); return "0 0 0 0" end
+        -- shortcut: keys in a menu still drive (a cursor check may have blocked all driving, live 2026-11-08); find a real menu flag
+        if pc.bShowMouseCursor then why("keys held with the mouse cursor shown: sent anyway") end
+        return keys
     end)
-    if not ok then return end
+    if not ok then why("error %s", tostring(d)); return end
     -- on change, and every 200 ms while held (the host lets go of inputs it has not heard for 500 ms)
     if d ~= sentDrive or (d ~= "0 0 0 0" and os.clock() - sentDriveAt > 0.2) then
+        if sentDrive == "0 0 0 0" then why("keys sent %s", d) end
         sentDrive, sentDriveAt = d, os.clock()
         net.toHost("g.car.drive", d)
     end
@@ -1574,11 +1586,16 @@ local guestDrive = nil -- host: { th, br, st, hb, at }
 net.on("g.car.drive", function(pc, data)
     if common.netMode() ~= "listen" or os.getenv("PT_MUTATE") == "noguestdrive" then return end
     local char, car, cm = guestChar(pc), theCar(true), carManager()
-    if not (char and car and cm and same(char:GetAttachParentActor(), car)) then return end
-    if cm.PlayerCarState ~= 0 or driverGuest ~= char:GetFullName() then return end -- the one at the wheel drives
+    if not (char and car and cm and same(char:GetAttachParentActor(), car)) then why("from a guest not in the car: ignored"); return end
+    -- the one at the wheel drives
+    if cm.PlayerCarState ~= 0 then why("ignored: the host is in the car (PlayerCarState %d)", cm.PlayerCarState); return end
+    if driverGuest ~= char:GetFullName() then why("ignored: the guest is not at the wheel (driver %s)", tostring(driverGuest)); return end
     local th, br, st, hb = data:match("^(%d) (%d) (%-?%d) (%d)$")
     if not th then return end
-    if not guestDrive then log("PT|car guest drives") end
+    if not guestDrive then
+        local okb, pb = pcall(function() return car.VehicleController:GetParkingBrakeActive() end)
+        log("PT|car guest drives: ignition %d gear %d parking brake %s", cm.CarIgnitionState, cm.MyCarGearBox, okb and tostring(pb) or "?")
+    end
     guestDrive = { th = tonumber(th), br = tonumber(br), st = tonumber(st), hb = tonumber(hb) == 1, at = os.clock() }
 end)
 LoopInGameThreadWithDelay(16, function()
