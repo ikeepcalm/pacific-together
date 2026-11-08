@@ -1,11 +1,11 @@
 # Playtester guide
 
-Developer/friend preview **0.9.0**, development protocol **7**. Both players need the same download and the supported Pacific Drive build,
+Developer/friend preview **0.9.1**, development protocol **7**. Both players need the same download and the supported Pacific Drive build,
 v1.15.0 (build 21896301). The host owns the world and saves. Mixed DLC ownership is not yet verified.
 
 ## Install and connect
 
-Close the game, open `PacificTogether-<version>.exe` (one file; it unpacks itself to `%LOCALAPPDATA%\PacificTogether\app`), and
+Close the game, extract `PacificTogether-<version>.zip` to a folder, open `PacificTogether.exe` inside it and
 check the game folder. **Install & play** starts the selected copy directly. Enable **Launch through Steam** to use the Steam library instead.
 
 **Steam:** both players select **Host** to install without a saved IP, enable **Launch through Steam**, then **Install & play**. The actual host loads
@@ -17,7 +17,7 @@ leave **Launch through Steam** off to start the selected copy directly. The host
 host's router. Allow the game through Windows Firewall on the network used for the session. A saved join address takes
 precedence over Steam joining; reinstall in Host mode to clear it.
 
-Without the launcher (in `%LOCALAPPDATA%\PacificTogether\app\<version>`): `install.cmd` for host/Steam, `install.cmd -Join <host IP>` for direct IP, then start `PenDriverPro\Binaries\Win64\PenDriverPro-Win64-Shipping.exe` (or through Steam).
+Without the launcher (in the extracted folder): `install.cmd` for host/Steam, `install.cmd -Join <host IP>` for direct IP, then start `PenDriverPro\Binaries\Win64\PenDriverPro-Win64-Shipping.exe` (or through Steam).
 A game or mod version mismatch refuses the join; a different build number is only logged, and such a pair is untested. See `README.txt` for features and known issues.
 
 ## Custom music

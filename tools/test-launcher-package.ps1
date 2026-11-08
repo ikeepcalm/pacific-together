@@ -1,51 +1,30 @@
-# Run with Windows PowerShell: validates the actual embedded installer without touching an installed game or real saves.
+# Run with Windows PowerShell: validates the release zip (-Installer) without touching an installed game or real saves.
 param([Parameter(Mandatory)][string]$Installer, [Parameter(Mandatory)][string]$GameExe)
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-Add-Type -AssemblyName System.IO.Compression
 $Repo = (Resolve-Path "$PSScriptRoot\..").Path
 $root = Join-Path $Repo ('local\launcher-package-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root | Out-Null
 $env:LOCALAPPDATA = Join-Path $root 'localappdata'
 $env:APPDATA = Join-Path $root 'appdata'
 function Check($ok, $name) { if (-not $ok) { throw "FAIL $name" }; Write-Output "PASS $name" }
-$asm = [Reflection.Assembly]::LoadFile((Resolve-Path $Installer).Path)
+# the release zip unpacks to one folder: the launcher next to install.ps1, the docs and game/
+$unzipped = Join-Path $root 'unzipped'
+New-Item -ItemType Directory -Path $unzipped | Out-Null
+tar -x -f (Resolve-Path $Installer).Path -C $unzipped
+if ($LASTEXITCODE) { throw 'unzip failed' }
+$cache = (Get-ChildItem -Directory $unzipped | Select-Object -First 1).FullName
+Check (-not ((tar -t -f (Resolve-Path $Installer).Path) -like '*\*')) 'zip paths use forward slashes'
+foreach ($f in 'PacificTogether.exe', 'install.ps1', 'README.txt', 'GUIDE.md', 'CHANGELOG.md', 'game\ue4ss\Mods\PacificTogether\version.txt', 'game\ue4ss\Mods\PacificTogetherNative\dlls\main.dll') {
+    Check (Test-Path "$cache\$f") "package has $f"
+}
+$asm = [Reflection.Assembly]::LoadFile("$cache\PacificTogether.exe")
+Check ($null -eq $asm.GetManifestResourceStream('payload.zip')) 'launcher carries no embedded payload'
 $app = $asm.GetType('App', $true)
 $flags = [Reflection.BindingFlags]'Static,NonPublic'
 function Call($name, $params) {
     $values = @($params | ForEach-Object { $_.PSObject.BaseObject })
     $app.GetMethod($name, $flags).Invoke($null, [object[]]$values)
 }
-$stream = $asm.GetManifestResourceStream('payload.zip')
-$zip = [IO.Compression.ZipArchive]::new($stream)
-try {
-    $stampEntry = $zip.Entries | Where-Object { $_.FullName.Replace('\','/') -eq 'game/ue4ss/Mods/PacificTogether/version.txt' }
-    $reader = [IO.StreamReader]::new($stampEntry.Open())
-    try { $version = $reader.ReadToEnd().Trim() } finally { $reader.Dispose() }
-    $cache = Join-Path "$env:LOCALAPPDATA\PacificTogether\app" $version
-    $stamp = Join-Path $cache 'game\ue4ss\Mods\PacificTogether\version.txt'
-    New-Item -ItemType Directory -Force (Split-Path $stamp) | Out-Null
-    [IO.File]::WriteAllText($stamp, $version)
-    Call 'Unpack' @()
-    Check (Test-Path "$cache\install.ps1") 'partial cache with a valid stamp is repaired'
-    Remove-Item -LiteralPath "$cache\install.ps1"
-    Call 'Unpack' @()
-    Check (Test-Path "$cache\install.ps1") 'deleted installer is restored'
-    $dll = Join-Path $cache 'game\ue4ss\Mods\PacificTogetherNative\dlls\main.dll'
-    $length = (Get-Item $dll).Length
-    [IO.File]::WriteAllBytes($dll, [byte[]]@(0))
-    Call 'Unpack' @()
-    Check ((Get-Item $dll).Length -eq $length) 'truncated DLL is restored'
-    $time = (Get-Item "$cache\install.ps1").LastWriteTimeUtc
-    Call 'Unpack' @()
-    Check ((Get-Item "$cache\install.ps1").LastWriteTimeUtc -eq $time) 'complete cache is reused'
-    foreach ($entry in $zip.Entries) {
-        if ($entry.FullName.EndsWith('/')) { continue }
-        $file = Join-Path $cache $entry.FullName
-        if (-not (Test-Path -LiteralPath $file) -or (Get-Item -LiteralPath $file).Length -ne $entry.Length) { throw "payload differs: $($entry.FullName)" }
-    }
-    Write-Output 'PASS all embedded files extracted'
-} finally { $zip.Dispose(); $stream.Dispose() }
 
 $bin = Join-Path $root 'launch-probe'
 New-Item -ItemType Directory -Path $bin | Out-Null

@@ -3,6 +3,23 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
+## [0.9.1] - 2026-11-08
+
+Quick fix. Network protocol **7**, as in 0.9.0. Both players should use 0.9.1.
+
+### Changed
+
+- The download is now a zip: extract it and open `PacificTogether.exe` inside. The 0.9.0 single exe carried the whole mod
+  inside itself, and Microsoft Defender flagged it as `Trojan:Win32/Wacatac.C!ml` (a machine-learning guess, not a real
+  trojan). The new launcher is a small program without anything packed inside it.
+- A joining guest's loading screen waits at most 30 s for the host's world props (it waited 55-80 s); the remaining props
+  appear during play, nearest first.
+
+### Fixed
+
+- The launcher no longer fails to open when its unpacked files were left incomplete.
+- A guest who dies while sitting in the car is revived in their own seat instead of the driver's seat.
+
 ## [0.9.0] - 2026-11-07
 
 Network protocol **7**; the Everelsu fork's additions are negotiated between the two games. Both players should use 0.9.0.

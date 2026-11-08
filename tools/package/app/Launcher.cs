@@ -1,6 +1,6 @@
 // Pacific Together launcher. C# 5 (the .NET Framework csc every Windows has), WinForms, no dependencies.
-// Install logic stays in install.ps1; this app only drives it and shows the bundled texts. A release is this one exe: the whole
-// package (install.ps1, the docs, game/) is embedded as payload.zip and unpacked once per version to %LOCALAPPDATA%\PacificTogether\app.
+// Install logic stays in install.ps1; this app only drives it and shows the bundled texts. A release is a zip: this exe next to
+// install.ps1, the docs and game/. No embedded payload: Defender flagged the 0.9.0 exe that unpacked DLLs (Wacatac.C!ml).
 // Test flags: --shot <png> [--tab 0-3] [--scale 1.5] renders the window to a PNG and exits.
 using System;
 using System.Collections.Generic;
@@ -14,6 +14,11 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
+
+[assembly: System.Reflection.AssemblyTitle("Pacific Together launcher")]
+[assembly: System.Reflection.AssemblyProduct("Pacific Together")]
+[assembly: System.Reflection.AssemblyDescription("Installs the Pacific Together co-op mod for Pacific Drive")]
+[assembly: System.Reflection.AssemblyVersion("0.9.1.0")]
 
 static class Pal
 {
@@ -149,7 +154,7 @@ class DocView : RichTextBox
 
 class App : Form
 {
-    public static string baseDir = AppDomain.CurrentDomain.BaseDirectory;  // the unpacked payload, or the exe's folder in a dev build
+    static readonly string baseDir = AppDomain.CurrentDomain.BaseDirectory;  // the unzipped package
     static readonly string Data = Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? "", "PacificTogether");
     static readonly string Archive = Path.Combine(Data, "logs");  // UE4SS.log of earlier runs (the game empties it at every start)
     readonly string settingsFile = Path.Combine(Environment.GetEnvironmentVariable("APPDATA") ?? "", @"PacificTogether\launcher.txt");  // line 1 folder, 2 IP, 3 host|join
@@ -366,7 +371,7 @@ class App : Form
     void Execute(string extra, string doneOk, bool launch)
     {
         var script = Path.Combine(baseDir, "install.ps1");
-        if (!File.Exists(script)) { Fail("Installer files are missing. Reopen the complete Pacific Together installer."); return; }
+        if (!File.Exists(script)) { Fail("Installer files are missing. Extract the whole Pacific Together zip to a folder and start PacificTogether.exe from there."); return; }
         if (!GameOk) { Fail("Pick the folder that contains PenDriverPro first."); return; }
         output.Clear(); SetBusy(true);
         var path = folder.Text.Trim();
@@ -556,45 +561,6 @@ class App : Form
     }
 
     // ---- entry ----
-    // the release exe carries the package as the resource payload.zip: unpacked once per version (its version.txt names the folder)
-    static bool CompletePayload(string dir, ZipArchive z)
-    {
-        foreach (var e in z.Entries)
-        {
-            if (e.FullName.EndsWith("/")) continue;
-            var file = Path.Combine(dir, e.FullName.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(file) || new FileInfo(file).Length != e.Length) return false;
-        }
-        return true;
-    }
-    static void Unpack()
-    {
-        var res = typeof(App).Assembly.GetManifestResourceStream("payload.zip");
-        if (res == null) return;  // dev build: the package sits next to the exe
-        using (res)
-        using (var z = new ZipArchive(res, ZipArchiveMode.Read))
-        {
-            var stamp = z.Entries.FirstOrDefault(e => e.FullName.Replace('\\', '/') == "game/ue4ss/Mods/PacificTogether/version.txt");
-            if (stamp == null) throw new InvalidDataException("payload has no version.txt");
-            string ver;
-            using (var r = new StreamReader(stamp.Open())) ver = r.ReadToEnd().Trim();
-            if (z.GetEntry("install.ps1") == null) throw new InvalidDataException("payload has no install.ps1");
-            var root = Path.GetFullPath(Path.Combine(Data, "app"));
-            var dir = Path.GetFullPath(Path.Combine(root, Regex.Replace(ver, @"[^\w.\-]", "_")));
-            if (!dir.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("invalid package version");
-            if (!CompletePayload(dir, z))
-            {
-                var part = dir + ".part";
-                if (Directory.Exists(part)) Directory.Delete(part, true);
-                z.ExtractToDirectory(part);
-                if (!CompletePayload(part, z)) throw new InvalidDataException("package extraction is incomplete");
-                if (Directory.Exists(dir)) Directory.Delete(dir, true);
-                Directory.Move(part, dir);
-            }
-            baseDir = dir;
-        }
-    }
-
     [STAThread]
     static void Main(string[] a)
     {
@@ -610,8 +576,6 @@ class App : Form
         Application.SetCompatibleTextRenderingDefault(false);
         using (var g = Graphics.FromHwnd(IntPtr.Zero)) UI.Px = g.DpiX / 96f * scale;
         UI.Pt = scale;
-        try { Unpack(); }
-        catch (Exception ex) { MessageBox.Show("Could not unpack the mod: " + ex.Message, "Pacific Together", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
         var f = new App(tab);
         if (doCollect) f.Shown += delegate { f.collect.PerformClick(); f.Close(); };  // test hook
         if (shot != null)

@@ -1257,3 +1257,19 @@ Later (fork regressions fixed):
   PlayerEntering/LeavingCar) flips `Holster While Focused` mid-focus. Guess: an enter/leave event or the guest-join `moveArc`
   slot shift interrupts the unfocus. F9 3 now unfocuses any still-focused screen and restores highlights/holster/HUD, and logs
   `PT|rescue focus cleared: ...` naming what was stuck. Next: live repro to find the trigger.
+
+## 2026-11-08: 0.9.1 quick fix (friend session, owner = guest)
+
+Logs: `local/playtest-2026-11-08` (owner's launcher log zip; run-04 is this session, host Steam lobby at line 69).
+- Defender: `Get-MpThreatDetection` shows `Trojan:Win32/Wacatac.C!ml` on the downloaded 0.9.0 exe; a local `MpCmdRun -Scan`
+  of `dist/PacificTogether-0.9.0-dev-3e5abe1.exe` reproduces it, the payload-free launcher scans clean. Guess: the ML model
+  scores an unsigned exe that unpacks DLLs (UE4SS dwmapi proxy) and runs hidden PowerShell. Release is now a zip; signing is
+  the real fix if the zip gets flagged too.
+- Slow zone load: run-04:747-1054 Forest_14 80 s, the last 55 s with the guest's character present, ending at visual
+  `copies=1289 queued=0` (run-04:1055). Both sides limit: host sends one 2.5 KB message per 500 ms, guest build queue
+  peaked at 353. 0.9.1 caps the visual part of the baseline at 30 s after the map change (`visual.lua` guestTick).
+- Seated death: guest died in the passenger seat (run-04:4642, 6574), no seat exit; host `g.health.respawn` teleported the
+  still-attached pawn -> driver's seat. Fix: an attached guest is revived where it sits (`health.lua`). Not hand-tested.
+- Stairs missing on the guest in a zone: cause NOT found. No stair lines, `failed=0`. Guesses: (a) late visual copy,
+  (b) `smaLine` skips `Mobility == 2` static meshes, so movable stair meshes are never copied. Next: live pair, compare
+  StaticMeshActors with "Stair" in the mesh path on both sides and the host's Mobility.

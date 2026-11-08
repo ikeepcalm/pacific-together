@@ -1,6 +1,6 @@
 # Releases
 
-Current preview: **0.9.0**, protocol **7** (2026-11-07). Version constants live in
+Current preview: **0.9.1**, protocol **7** (2026-11-08). Version constants live in
 `mod/PacificTogether/Scripts/common.lua`; the native runtime version is `NATIVE_VERSION` in `dllmain.cpp`.
 The UE4SS-facing `ModVersion` label still says 0.0.5; reconcile that metadata before packaging a public build. Changes go in
 [../CHANGELOG.md](../CHANGELOG.md).
@@ -38,12 +38,14 @@ tools\package\package.ps1
 ```
 
 The script requires a clean `mod/` tree and the pinned UE4SS zip (override with `-UE4SSZip`). It produces
-`dist/PacificTogether-<version>-dev-<commit>.exe` and `dist/SHA256SUMS.txt`: one file, the launcher with the package below
-embedded as `payload.zip` and unpacked on first start to `%LOCALAPPDATA%\PacificTogether\app\<version>`
-(`dist/PacificTogether-<version>-dev-<commit>/` is the same package unpacked).
+`dist/PacificTogether-<version>-dev-<commit>.zip` and `dist/SHA256SUMS.txt`: the folder below with the launcher
+`PacificTogether.exe` at its top (`dist/PacificTogether-<version>-dev-<commit>/` is the same package unpacked). The launcher
+no longer embeds the package: Defender's ML heuristic flagged the 0.9.0 single exe as `Trojan:Win32/Wacatac.C!ml`.
+Check a candidate with `tools\test-launcher-package.ps1 -Installer <zip> -GameExe <tested exe>`.
 It copies the existing native DLL; it does not prove that DLL was rebuilt from the current commit.
 
 ```text
+PacificTogether.exe                 launcher
 install.cmd / install.ps1           command-line installer
 README.txt / GUIDE.md / CHANGELOG.md player documentation
 game/                               payload installed into PenDriverPro/Binaries/Win64/

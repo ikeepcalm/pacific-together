@@ -839,7 +839,9 @@ local function guestTick()
     -- a new list, and every 10 s for parts installed since (each pass reads every part's tint)
     if wantPaint and (wantPaint ~= paintDone or beat % 40 == 0) then paintDone = wantPaint; try("paint", applyPaint, wantPaint) end
     if #todo > 0 then try("props", applyProps) end
-    if baselineReceived and #todo == 0 then net.baselineComplete("visual") end
+    -- shortcut: the loading screen waits at most 30 s for the copies (1300+ took 55 s, friend session 2026-11-08); the rest, nearest
+    -- first, arrive in play. Upgrade: faster copy build or send if guests see props popping in.
+    if (baselineReceived and #todo == 0) or os.clock() - mapSince > 30 then net.baselineComplete("visual") end
     if beat % 40 == 3 then try("doorhooks", hookPlacedDoors) end -- map-placed doors (garage)
     if beat % 40 == 5 then try("anchorhook", hookAnchors) end -- ARC anchor structures (zones)
     for name, a in pairs(mine) do if not live(a) then mine[name], specs[name] = nil, nil end end

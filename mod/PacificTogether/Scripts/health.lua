@@ -129,6 +129,12 @@ end
 net.on("g.health.respawn", function(pc)
     local g, a = pc.Pawn, anchor()
     if not (valid(g) and valid(a)) then log("PT|error health respawn: no guest pawn or anchor"); return end
+    -- a move on a seated (attached) guest left it attached at the car's centre: the driver's seat (friend session 2026-11-08)
+    if valid(g:GetAttachParentActor()) then
+        log("PT|health respawn guest stays seated")
+        net.toGuest(pc, "g.health.revive", "")
+        return
+    end
     local l, r = a:K2_GetActorLocation(), a:GetActorRightVector()
     local placed = false
     for _, d in ipairs({ 350, -350, 600, -600 }) do

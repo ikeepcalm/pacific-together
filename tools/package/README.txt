@@ -1,11 +1,11 @@
-Pacific Together 0.9.0 - co-op for Pacific Drive
+Pacific Together 0.9.1 - co-op for Pacific Drive
 ================================================
 
 Play Pacific Drive with a friend: one drives, one rides shotgun, both scavenge.
 Development tree: protocol 7; both players need the same development build.
 Early access: fully playable, still being polished. If something breaks mid-run, press F9 for the rescue menu.
 
-Both players need this same mod version (0.9.0, protocol 7) and the supported Pacific Drive build, v1.15.0 (build 21896301), on Windows.
+Both players need this same mod version (0.9.1, protocol 7) and the supported Pacific Drive build, v1.15.0 (build 21896301), on Windows.
 
 Features
 - One car, two players: the host drives, the guest rides in the passenger seat and can start the engine or shift gears.
@@ -21,7 +21,8 @@ Features
 - Join through Steam invites or by IP address. The host owns the world and save; the guest's own saves are protected.
 
 Install
-1. Close the game. Open PacificTogether-<version>.exe (one file, nothing to unpack). Check the game folder it found.
+1. Close the game. Extract PacificTogether-<version>.zip to a folder (right-click, Extract All) and open
+   PacificTogether.exe inside it. Check the game folder it found.
 2. Choose Host and click Install & play. (Both players choose Host when joining through Steam: it just means "no IP".)
    Windows may warn about an unknown publisher: More info, Run anyway.
 
@@ -31,7 +32,7 @@ Play with a friend
 - IP address: in the launcher the host picks Host, the guest picks Join and types the host's IP. The host loads a save,
   the guest connects from the main menu. The host may need to forward UDP port 7777 (or use a LAN or VPN).
 Install & play starts the selected copy directly. Enable Launch through Steam to use the Steam library instead.
-Command line instead of the launcher (in %LOCALAPPDATA%\PacificTogether\app\<version>): install.cmd (Host/Steam), install.cmd -Join <host IP>, install.cmd -Uninstall.
+Command line instead of the launcher (in the extracted folder): install.cmd (Host/Steam), install.cmd -Join <host IP>, install.cmd -Uninstall.
 
 Controls
 - E on the passenger door: get in (guest). X: get out.

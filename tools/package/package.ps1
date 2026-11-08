@@ -1,5 +1,5 @@
-# Builds dist\PacificTogether-<mod version>-dev-<commit>.exe for the owner and friends (pre-1.0: never published, D18): one file with
-# the launcher and the whole package inside.
+# Builds dist\PacificTogether-<mod version>-dev-<commit>.zip for the owner and friends (pre-1.0: never published, D18): the launcher
+# PacificTogether.exe next to the package. Not one exe with the package embedded: Defender flagged that as Wacatac.C!ml (0.9.0).
 # Bundles the exact UE4SS build the tests run on (MIT, its LICENSE goes along) minus its debug symbols and docs.
 param([string]$UE4SSZip = "$PSScriptRoot\..\..\local\cache\ue4ss\zDEV-UE4SS_v3.0.1-1181-g83330635.zip")
 $ErrorActionPreference = "Stop"
@@ -29,13 +29,11 @@ Copy-Item "$native\enabled.txt", "$native\dlls" $ndst -Recurse
 Set-Content "$dst\version.txt" $name -Encoding ascii  # install.ps1 skips the copy and backup when this matches
 Copy-Item "$PSScriptRoot\install.ps1", "$PSScriptRoot\install.cmd", "$PSScriptRoot\README.txt", "$PSScriptRoot\GUIDE.md", "$Repo\CHANGELOG.md" $stage
 
-# the release is one exe: the staged package goes inside it as payload.zip (the app unpacks it to %LOCALAPPDATA%\PacificTogether\app)
-$payload = "$stage.payload.zip"
-Remove-Item $payload -Force -ErrorAction SilentlyContinue
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-[IO.Compression.ZipFile]::CreateFromDirectory($stage, $payload, [IO.Compression.CompressionLevel]::Optimal, $false)
-$exe = "$stage.exe"
-& "$PSScriptRoot\build-app.ps1" -Out $exe -Payload $payload
-Remove-Item $payload -Force
-"$((Get-FileHash $exe).Hash.ToLower())  $(Split-Path $exe -Leaf)" | Set-Content "$Repo\dist\SHA256SUMS.txt" -Encoding ascii
-Write-Host "Built $exe ($([math]::Round((Get-Item $exe).Length / 1MB, 1)) MB)"
+& "$PSScriptRoot\build-app.ps1" -Out "$stage\PacificTogether.exe"
+# tar (bsdtar, in Windows 10+) writes '/' separators; PowerShell 5.1's zip writes backslashes, which some unzip tools mangle
+$zip = "$stage.zip"
+Remove-Item $zip -Force -ErrorAction SilentlyContinue
+tar -a -c -f $zip -C (Split-Path $stage) $name
+if ($LASTEXITCODE) { throw "tar failed ($LASTEXITCODE)" }
+"$((Get-FileHash $zip).Hash.ToLower())  $(Split-Path $zip -Leaf)" | Set-Content "$Repo\dist\SHA256SUMS.txt" -Encoding ascii
+Write-Host "Built $zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB)"
