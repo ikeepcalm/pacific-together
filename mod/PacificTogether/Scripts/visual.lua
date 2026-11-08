@@ -164,6 +164,10 @@ local ALLOW = { "BP_Destruct_", "BP_Door_", "BP_Prop_", "BP_Poster_", "BP_Decal_
     -- shortcut: the Zone's fuel barrels (BP_Spawn_GasBarrel) are missing on the guest too; mirrored copies blocked the guest's way
     -- to a container in playpath (2026-11-01), so they wait for a proper fix
     "BP_ZoneTrader",
+    -- grab clusters the host's spawn pass makes (Salamander nest eggs, coal, grav, biolum): the guest runs no spawn pass and had no
+    -- eggs at the mid zone junction (friend session 2026-11-08). shortcut: harvests are not mirrored (each side can take a cluster
+    -- once, a copy starts full); send the cluster count if the double take matters
+    "BP_Spawn_Resource_Grab_Multi_",
     -- door keypads and hand-dryer locks (the red light by a locked door): without a copy the guest had nothing to press and its E on the
     -- locked door went to the host's door, which stayed locked (friend session 2026-11-01, "red doors do not open for the guest")
     "BP_ExternalDoorLock_" }

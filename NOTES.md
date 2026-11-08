@@ -1273,3 +1273,42 @@ Logs: `local/playtest-2026-11-08` (owner's launcher log zip; run-04 is this sess
 - Stairs missing on the guest in a zone: cause NOT found. No stair lines, `failed=0`. Guesses: (a) late visual copy,
   (b) `smaLine` skips `Mobility == 2` static meshes, so movable stair meshes are never copied. Next: live pair, compare
   StaticMeshActors with "Stair" in the mesh path on both sides and the host's Mobility.
+
+## 2026-11-08 evening: friend session on 0.9.1, 2+ h to the mid zone (owner = guest)
+
+Logs: `local/pt16/` (friend = host, clock 1 h behind; owner = guest). Session runs: friend run-05/run-08, owner run-05/run-07.
+Guest minidump copied next to its crash marker. No `PT|error` lines in any session run.
+
+Observations
+- Guest crash at 22:12:04 (guest clock), ~10 s after the zone -> garage load (Q05 mid wall return). Access violation
+  0xffffffffffffffff; `tools/dmpstack.py` + UE4SS.pdb: Lua `obj.Property` read -> `UObjectBase::IsA` in
+  `auto_construct_object` (an object property whose pointer is freed), inside a Lua loop (blackbox depth 0). Last game calls:
+  visual prop copies (road signs, roadside T-pole) spawned into RB_Garage. Same class as the 2026-10-24 rejoin crash; which
+  loop is unknown (stack-only dump). The "NULL class" spawn warnings in that frame are the game's own (100+ per log).
+- No Salamander nest eggs on the guest at the mid zone junction. Eggs are `BP_Spawn_Resource_Grab_Multi_MacrophageCluster_*`
+  that `BP_Template_StrippedCar_SalamanderNest` spawns at random sockets once the spawn manager completes; their chain is
+  `..._Grab_Multi_Base_C -> BP_Spawn_Resource_GrabBase_C`, not `BP_Spawn_ResourceBase_C` (loot kind R). Host 415 spawn passes,
+  guest 0, so nothing made them on the guest. Coal/grav/biolum clusters share the base (not checked in play).
+- Host FPS: loop `loot.lua:1375` (wreck rows) 200 s over 58 min, 3636 ticks over 30 ms (about one hitch a second): paint,
+  socket and trunk state read for every body and part every 500 ms although sends are deduplicated.
+- Guest `net g.rad.vols` slow 124 times (max 303 ms): entries x volumes `K2_GetActorLocation` reads.
+- Desync guard put the guest back 3 times in 15 s inside a science trailer (host 21:36-37): guest z 809, host's copy of the
+  guest ~700. Not investigated.
+- Owner report: props the car hits (fences, small trees, floating boulders) do not fall on the guest; the guest still takes
+  the crash damage. Not investigated: map-placed destructibles/foliage hit on the host are not mirrored (visual copies cover
+  run-time spawned `BP_Destruct_` only).
+- Owner report: host upgraded the trunk (cupboards -> Tier 2, bigger grid). Right after, the guest could not use the trunk;
+  in the zone the guest saw the old layout, and closing it spilled the items. Logs: guest `car part installed
+  Internal.InventoryStorageTierTwo .../IA_Trunk_Storage_Tier2` (21:18:39) - `car.lua` applyState only swaps the part item in
+  its slot; the guest's `I:Inventory_Trunk` grid was not rebuilt, while the host's layouts use the new cells (`@14.12.0`,
+  `@16.10.0`). Closing the trunk in the zone: `loot guest drop ... told the host` x7 (21:26:44). Guess: the game swaps the
+  trunk container layout on its own install path (garage upgrade) that the part-slot swap skips. Next: live pair, host
+  installs Tier 2, compare `Inventory_Trunk` Layout/size on both sides and find the call that resizes it.
+
+Fixes (for 0.9.2; lootcar 24/24 `20261108-230548`, radiation 22/22 `20261108-230639`, fixture zone; not played in a session yet)
+- Crash breadcrumb: the crash marker now says which Lua loop (`file:line`) or net message started last (`common.crumb`
+  through `PTNative_SetCrashInfo`, no native change). The next crash of this kind names its loop.
+- Eggs: `BP_Spawn_Resource_Grab_Multi_` added to the visual prop list (host's run-time clusters copied to the guest).
+  shortcut: harvests are not mirrored, each side can take a cluster once.
+- Host wreck loop: paint/socket/trunk rows behind the same near/first/round-robin gate as the contents row.
+- Guest radiation volumes: each location read once per message.

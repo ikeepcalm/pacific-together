@@ -54,6 +54,7 @@ local function account(where, d)
 end
 local function timed(fn, where)
     return function(...)
+        common.crumb(where)
         local t = os.clock()
         local r = table.pack(pcall(fn, ...))
         local d = os.clock() - t

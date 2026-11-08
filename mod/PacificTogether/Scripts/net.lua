@@ -370,6 +370,7 @@ local function dispatch()
         if not fn then
             log("PT|error net no handler for %s", kind)
         elseif pc and permitted(pc, kind, data) then
+            common.crumb("net " .. kind)
             local t0 = os.clock()
             local ok, err = pcall(fn, pc, data)
             if not ok then log("PT|error net %s %s", kind, tostring(err)) end

@@ -52,12 +52,14 @@ net.on("g.rad.vols", function(_, data)
     local cls, hm = StaticFindObject(CLS), FindFirstOf("BP_HazardManager_C")
     if not (cls and cls:IsValid() and valid(hm)) then return end
     local have, matched, missing = volumes(), {}, {}
+    -- each location read once: per entry it was entries x volumes native reads, up to 303 ms (friend session 2026-11-08)
+    local locs = {}
+    for i, o in ipairs(have) do locs[i] = o:K2_GetActorLocation() end
     for entry in data:gmatch("[^;]+") do
         local n = {}
         for v in entry:gmatch("%S+") do n[#n + 1] = tonumber(v) end
         local known = false
-        for i, o in ipairs(have) do
-            local l = o:K2_GetActorLocation()
+        for i, l in ipairs(locs) do
             if math.abs(l.X - n[1]) < 100 and math.abs(l.Y - n[2]) < 100 and math.abs(l.Z - n[3]) < 100 then known = true; matched[i] = true break end
         end
         if not known then missing[#missing + 1] = n end
@@ -84,7 +86,7 @@ net.on("g.rad.vols", function(_, data)
     -- what the host no longer has (Hot Dust gone or moved, the guest's own local spots) stops radiating here too
     for i, o in ipairs(have) do
         if not matched[i] then
-            local l = o:K2_GetActorLocation()
+            local l = locs[i]
             if mine[o:GetAddress()] then
                 -- ours: gone with its dust (zeroed copies stayed in the world as dust fields)
                 mine[o:GetAddress()] = nil

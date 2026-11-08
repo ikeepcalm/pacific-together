@@ -18,6 +18,11 @@ Guest driving test build. Network protocol **7**, as in 0.9.1. Both players shou
 ### Fixed
 
 - A sealed car now shields a seated guest from radiation as it does the host (the game only counted the host as inside).
+- The guest now sees Salamander nest eggs and the other grab clusters the zone spawns (they existed on the host only).
+  Each player can harvest a cluster once for now.
+- Less stutter on the host near many wrecks (wreck paint and trunk state were re-read every half second), and on the
+  guest when radiation zones update.
+- A crash report now names the part of the mod that was running, to find the rare crash after returning to the garage.
 
 ## [0.9.1] - 2026-11-08
 

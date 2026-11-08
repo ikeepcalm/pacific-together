@@ -27,6 +27,13 @@ function M.log(fmt, ...)
     if runLog then runLog:write(os.date("[%H:%M:%S] "), s, "\n"); runLog:flush() end
 end
 
+-- the crash marker names the last Lua loop or net message started: a Lua read of a freed object leaves only UE4SS frames in the
+-- dump (guest crash on the garage return, friend session 2026-11-08)
+M.crashBase = ""
+function M.crumb(where)
+    if PTNative_SetCrashInfo then PTNative_SetCrashInfo(M.crashBase .. "\r\nLast Lua started: " .. where) end
+end
+
 function M.replicateActor(o)
     if not o:HasAuthority() then return false end
     if o.bReplicates and o.RemoteRole ~= 0 and o.bReplicateMovement and o.bAlwaysRelevant and o.NetUpdateFrequency == 10 then return false end

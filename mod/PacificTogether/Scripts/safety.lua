@@ -35,7 +35,8 @@ end
 -- Saved/SaveGames and Content/Bookmarks, on while we are a guest (set around every map load: joining and leaving are map loads)
 local function guard(on)
     if PTNative_SetSaveGuard then PTNative_SetSaveGuard(on) end
-    if PTNative_SetCrashInfo then PTNative_SetCrashInfo(string.format("mod=%s guest=%s", common.MOD_VERSION, tostring(on))) end
+    common.crashBase = string.format("mod=%s guest=%s", common.MOD_VERSION, tostring(on))
+    common.crumb("map load")
 end
 RegisterLoadMapPreHook(function(engine, world, url, pending)
     if pending:get():IsValid() then guard(true) end

@@ -1402,7 +1402,12 @@ LoopInGameThreadWithDelay(500,function()
                 local c=partBox(a)
                 if c and not menuShows(c)then local s=e.pendingPartState;e.pendingPartState=nil;applyState(e,s)end
             end
-            if mode=='listen' then
+            -- paint, socket and trunk rows read only when the contents row is due: read for every body and part every 500 ms they
+            -- were ~3.4 s of each minute on the host and a 30-77 ms hitch about every second (friend session 2026-11-08, loot.lua:1375)
+            local near=mode=='listen' and active and inReach(a,spots)
+            local first=mode=='listen' and active and not e.wreckAt and os.clock()<firstBudget
+            if mode=='listen' and (near or first or (active and far>0 and now-(e.wreckAt or 0)>10)) then
+                if not near and not first then far=far-1 end;e.wreckAt=now
                 if e.kind=='B' and alive(vehicle)and a:IsA(vehicle)then
                     send(id,'B',assetName(a.SelectedPaintPalette)..'|'..assetName(a.SelectedDecalPalette))
                 elseif e.kind=='P' then
@@ -1412,14 +1417,9 @@ LoopInGameThreadWithDelay(500,function()
                         local state,strength={},{};a:GetTrunkState(state);a.BP_LockedComponent:GetLockStrength(strength)
                         send(id,'T',state['Current State']..','..strength.Strength..','..(a.AnimStateOpened and '1'or '0'))
                     end
-                    local near=active and inReach(a,spots)
-                    local first=active and not e.wreckAt and os.clock()<firstBudget
-                    if near or first or (active and far>0 and now-(e.wreckAt or 0)>10)then
-                        if not near and not first then far=far-1 end;e.wreckAt=now
-                        local c=partBox(a);if c then local body=ids.layout(c);if validLayout(body)then send(id,'C',body)end end
-                    end
+                    local c=partBox(a);if c then local body=ids.layout(c);if validLayout(body)then send(id,'C',body)end end
                 end
-            elseif e.kind=='P' and e.wreckLayout and not wreckPending[id..'C']then
+            elseif mode=='client' and e.kind=='P' and e.wreckLayout and not wreckPending[id..'C']then
                 local c=partBox(a)
                 if c then local body=ids.layout(c);if body~=e.wreckLayout then
                     e.wreckLayout=body;net.toHost('g.loot.b','S|'..id..'|'..partState(a,true))
