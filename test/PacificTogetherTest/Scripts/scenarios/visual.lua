@@ -2,6 +2,7 @@
 -- never runs on a guest). Fixture zone, the guest joins by itself. The host picks a sample of what is not placed in the map file and sends it
 -- (t.sample); the guest looks for each in its own world, then the host changes things and the guest's copies follow within 3 s:
 --   guest_mirrors_*            static meshes (90 %), every sampled building frame, door and destructible exists on the guest
+--   guest_buildings_same_meshes every sampled building shows the host's visible meshes (its foundation variant: the stairs)
 --   guest_door_follows_host    the host swings a door open (the game's own "Set Door from State"): the guest's copy has the same state
 --   host_door_used_by_guest    the guest presses its copy of a closed door (Highlight, as E does): the host's door opens
 --   guest_destructible_breaks  the host breaks a destructible: the guest's copy breaks or is gone
@@ -28,6 +29,18 @@ return function(T)
     local function plainSMA(o)
         local par = o:GetAttachParentActor()
         return o.StaticMeshComponent.Mobility ~= 2 and not (par and par:IsValid() and cn(par):find("^BP_Template_")) and meshOf(o) ~= "-"
+    end
+    -- a building's visible meshes (its foundation is rolled per side: stairs, dirt piles), sorted
+    local function frameMeshes(o)
+        local t = {}
+        for _, w in ipairs(o:K2_GetComponentsByClass(StaticFindObject("/Script/Engine.StaticMeshComponent"))) do
+            local c = w:get()
+            local m = c.StaticMesh
+            -- dirt piles a guest copy's roll removed cannot come back (visual.lua shortcut): not compared
+            if c:IsVisible() and m and m:IsValid() and m:GetFName():ToString() ~= "SM_StormChest_DirtPile" then t[#t + 1] = m:GetFName():ToString() end
+        end
+        table.sort(t)
+        return table.concat(t, ",")
     end
     local function isFrame(o) return cn(o):find("^BP_BuildingFrame_") ~= nil end
     local function isDoor(o) return cn(o):find("^BP_Door_") ~= nil end
@@ -83,7 +96,7 @@ return function(T)
             table.sort(sma, function(a, b) return a:GetFName():ToString() < b:GetFName():ToString() end)
             for i = 1, #sma, math.max(1, math.floor(#sma / 60)) do S[#S + 1] = ser("S", sma[i]) end
             mesh = sma[1]
-            for _, o in ipairs(all(isFrame)) do S[#S + 1] = ser("F", o) end
+            for _, o in ipairs(all(isFrame)) do S[#S + 1] = ser("F", o, frameMeshes(o)) end
             local doors = all(function(o) return isDoor(o) and o.CurrentState == 0 end)
             table.sort(doors, function(a, b) return a:GetFName():ToString() < b:GetFName():ToString() end)
             for i = 1, math.min(4, #doors) do S[#S + 1] = ser("D", doors[i], tostring(doors[i].CurrentState)) end
@@ -177,6 +190,19 @@ return function(T)
         { check = "guest_got_sample", timeout = to(240), cond = function() poll(); return got["t.sample"] ~= nil end },
         { check = "guest_mirrors_static_meshes", timeout = to(400), cond = mirrored(0.9, { S = true }) },
         { check = "guest_mirrors_buildings", timeout = to(120), cond = mirrored(1.0, { F = true }) },
+        { check = "guest_buildings_same_meshes", timeout = to(60), cond = function()
+            local same, total = 0, 0
+            for _, e in ipairs(parse(got["t.sample"])) do
+                if e.k == "F" then
+                    total = total + 1
+                    local o = copyOf("B", e.n, e.p)
+                    local mine = o and frameMeshes(o) or "none"
+                    if mine == e.e then same = same + 1 else T.log("PT|info guest building %s host=%s guest=%s", e.n, e.e, mine) end
+                end
+            end
+            T.log("PT|info guest buildings with the host's meshes %d/%d", same, total)
+            return total > 0 and same == total
+        end },
         { check = "guest_mirrors_doors", timeout = to(120), cond = mirrored(1.0, { D = true }) },
         { check = "guest_mirrors_destructibles", timeout = to(120), cond = mirrored(1.0, { X = true }) },
         { run = function() PTNative_MsgToHost(T.localPC():GetAddress(), "t.mirrored", "1") end },

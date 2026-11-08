@@ -22,6 +22,8 @@ Guest driving test build. Network protocol **7**, as in 0.9.1. Both players shou
   Each player can harvest a cluster once for now.
 - Less stutter on the host near many wrecks (wreck paint and trunk state were re-read every half second), and on the
   guest when radiation zones update.
+- Buildings such as the science trailers look the same for the guest as for the host: the guest's copy rolled its own
+  foundation, so the stairs could be missing or different, and walking into the trailer pulled the guest back.
 - A crash report now names the part of the mod that was running, to find the rare crash after returning to the garage.
 
 ## [0.9.1] - 2026-11-08

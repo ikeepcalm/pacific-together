@@ -1293,7 +1293,11 @@ Observations
   socket and trunk state read for every body and part every 500 ms although sends are deduplicated.
 - Guest `net g.rad.vols` slow 124 times (max 303 ms): entries x volumes `K2_GetActorLocation` reads.
 - Desync guard put the guest back 3 times in 15 s inside a science trailer (host 21:36-37): guest z 809, host's copy of the
-  guest ~700. Not investigated.
+  guest ~700. Cause found headless (game MCP, coop-zone, trailer at 6601,-1768): the building frame rolls its foundation per
+  side - host `SM_OutpostFoundation_02`, guest copy `SM_OutpostFoundation_02C` + two `SM_StormChest_DirtPile` (same component
+  transform). The foundation carries the steps: the guest's stairs differ or are missing (also the open "stairs missing"
+  item from 0.9.1; the Mobility guess was wrong, all prefab meshes near the trailer were copied). Live check: SetMobility(2) +
+  SetStaticMesh on the guest's foundation to the host's mesh worked (ok=true, same spot).
 - Owner report: props the car hits (fences, small trees, floating boulders) do not fall on the guest; the guest still takes
   the crash damage. Not investigated: map-placed destructibles/foliage hit on the host are not mirrored (visual copies cover
   run-time spawned `BP_Destruct_` only).
@@ -1312,3 +1316,8 @@ Fixes (for 0.9.2; lootcar 24/24 `20261108-230548`, radiation 22/22 `20261108-230
   shortcut: harvests are not mirrored, each side can take a cluster once.
 - Host wreck loop: paint/socket/trunk rows behind the same near/first/round-robin gate as the contents row.
 - Guest radiation volumes: each location read once per message.
+- Buildings: the host's `BP_BuildingFrame_` lines carry their visible meshes (`sm=a|b`); the guest sets the missing ones on
+  the closest-named spare component and hides the rest (`PT|visual building ... meshes as the host's`). Scenario visual has
+  `guest_buildings_same_meshes`. visual 28/29 (`20261108-232218`, zone): buildings 10/10, the fix changed 2-4 trailers a run;
+  the only failure `guest_door_follows_host` (door follows in 4 s, limit 3 s) failed the same in the 3 visual runs before.
+  shortcut: dirt piles the guest's roll destroyed stay missing (not compared). No mutation run for the new check.

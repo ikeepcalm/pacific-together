@@ -227,9 +227,26 @@ local function smaLine(o, name)
     local l, r, s = xform(o)
     return table.concat({ "S", (name:gsub("^StaticMeshActor_", "#")), intern(fpath(mesh)), l, r, s, intern(sm:GetCollisionProfileName():ToString()), table.concat(ov, ";") }, "\t")
 end
+-- A building rolls its foundation per side (science trailer: host SM_OutpostFoundation_02, guest 02C and dirt piles): the guest's
+-- stairs were missing or other, and the desync guard put it back from the host's copy (friend session 2026-11-08). The host's
+-- visible meshes go along ("sm=a|b"); the guest's copy is made to match.
+local SMC
+local function meshList(o)
+    SMC = SMC or StaticFindObject("/Script/Engine.StaticMeshComponent")
+    local t = {}
+    for _, w in ipairs(o:K2_GetComponentsByClass(SMC)) do
+        local c = w:get()
+        local m = c.StaticMesh
+        if c:IsVisible() and m and m:IsValid() then t[#t + 1] = fpath(m) end
+    end
+    table.sort(t)
+    return "sm=" .. table.concat(t, "|")
+end
 local function bpLine(o, cn, name)
     local l, r, s = xform(o)
-    return table.concat({ "B", name, intern(fpath(o:GetClass())), l, r, s, "", state(o) }, "\t")
+    local st = state(o)
+    if cn:sub(1, 17) == "BP_BuildingFrame_" then st = (st ~= "" and st .. ";" or "") .. meshList(o) end
+    return table.concat({ "B", name, intern(fpath(o:GetClass())), l, r, s, "", st }, "\t")
 end
 
 local cache = {} -- host: actor name -> { addr, line } of static meshes (they never change)
@@ -423,7 +440,55 @@ LoopInGameThreadWithDelay(16, function()
     end
 end)
 
+-- guest: the host's meshes on our building copy. A missing one goes on the spare component whose mesh name is closest (the
+-- other foundation variant sits at the same spot, checked live 2026-11-08); spares left over are hidden without collision. A
+-- component the roll hid here but the host shows (dirt piles) is shown again first.
+-- shortcut: a dirt pile the guest's roll destroyed stays missing (low ground clutter); add components if players notice
+local function applyMeshes(a, list)
+    SMC = SMC or StaticFindObject("/Script/Engine.StaticMeshComponent")
+    local want, spare, hidden, set = {}, {}, {}, 0
+    for p in list:gmatch("[^|]+") do want[#want + 1] = p end
+    for _, w in ipairs(a:K2_GetComponentsByClass(SMC)) do
+        local c = w:get()
+        local m = c.StaticMesh
+        if m and m:IsValid() and not c:IsVisible() then hidden[#hidden + 1] = c
+        elseif m and m:IsValid() then
+            local p, hit = fpath(m), nil
+            for i, q in ipairs(want) do if q == p then hit = i; break end end
+            if hit then table.remove(want, hit) else spare[#spare + 1] = c end
+        end
+    end
+    for i = #want, 1, -1 do
+        for j, c in ipairs(hidden) do
+            if fpath(c.StaticMesh) == want[i] then
+                c:SetVisibility(true, false); c:SetCollisionEnabled(3) -- query and physics, as the host's dirt piles
+                table.remove(hidden, j); table.remove(want, i); set = set + 1
+                break
+            end
+        end
+    end
+    local function shared(x, y) local n = 0; while n < #x and x:byte(n + 1) == y:byte(n + 1) do n = n + 1 end; return n end
+    for _, p in ipairs(want) do
+        local best, bi = -1, nil
+        for i, c in ipairs(spare) do
+            local s = shared(fpath(c.StaticMesh):match("[^.]+$"), p:match("[^.]+$"))
+            if s > best then best, bi = s, i end
+        end
+        local m = bi and loadObj(p)
+        if m then
+            local c = table.remove(spare, bi)
+            c:SetMobility(2) -- a static component refuses a new mesh at run time
+            c:SetStaticMesh(m)
+            set = set + 1
+        end
+    end
+    for _, c in ipairs(spare) do c:SetVisibility(false, false); c:SetCollisionEnabled(0) end
+    if set + #spare > 0 then log("PT|visual building %s meshes as the host's: %d set, %d hidden", a:GetFName():ToString(), set, #spare) end
+end
+
 local function applyState(a, st)
+    local sm = st:match("sm=([^;]*)")
+    if sm then pcall(applyMeshes, a, sm) end
     if st:find("tk=1", 1, true) then
         -- already taken here by the host's g.vis.anchortaken (its sound and fade still playing): left as the game leaves a pulled one
         local ok, taken = pcall(function() return a.SuccessfullyGrabbed == true end)
