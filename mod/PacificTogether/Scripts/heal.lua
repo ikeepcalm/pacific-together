@@ -66,4 +66,88 @@ net.on("g.heal.full", function()
     ov.post(ov.other() .. " is already at full health", "info", "heal")
 end)
 
+-- ARC Doc (the Doctor ARC's car ability, class AP_Tether_Basic): the game heals only the player who activates it (the host:
+-- a seated guest is not natively in the car and gets no ability menu). While it is active, a guest seated in the car heals at
+-- the ability's own rate (TUNE_TetherHealthPerSecond, 10 HP/s) and the host's batteries pay the ability's exchange rate
+-- (TUNE_BatteryHealthScale, 0.4 battery per HP) for what the guest gained (owner's choice 2026-11-09).
+--   g.doc     host -> guests  "<hp per s>" while active (every 0.5 s), "0" when it ends
+--   g.doc.hp  guest -> host   HP the guest gained since its last report (about once a second)
+local DOC = "/Game/Gameplay/Abilities/AP_Tether_Basic.AP_Tether_Basic_C"
+local function seated(pc)
+    local me = valid(pc) and pc.Pawn
+    local car = valid(me) and me:GetAttachParentActor()
+    return valid(car) and car:GetClass():GetFName():ToString() == "BP_PlayerCarNew_C"
+end
+local function docAbility() -- host: the ARC Doc ability while it is active, else nil
+    for _, p in ipairs(FindAllOf("BP_AbilityProviderComponent_C") or {}) do
+        if valid(p) and p.AbilityIsActive and valid(p.CachedAbilityClass) and p.CachedAbilityClass:GetFullName():find(DOC, 1, true) then
+            local a = FindFirstOf("AP_Tether_Basic_C")
+            if valid(a) then return a end
+        end
+    end
+end
+local function tuning(t)
+    local lib = StaticFindObject("/Script/PenDriverUtils.Default__TuningFloatLibrary")
+    local ok, v = pcall(function() return lib:Conv_TuningFloatToFloat(t) end)
+    return ok and tonumber(v) or nil
+end
+
+local docSent, docScale, docAllowed, docAt = false, 0.4, 0, os.clock()
+LoopInGameThreadWithDelay(500, function()
+    if common.netMode() ~= "listen" or not safety.active() or os.getenv("PT_MUTATE") == "nodocshare" then return end
+    local a = docAbility()
+    local hps = a and tuning(a.TUNE_TetherHealthPerSecond)
+    local dt = os.clock() - docAt
+    docAt = os.clock()
+    if hps and hps > 0 then
+        docScale = tuning(a.TUNE_BatteryHealthScale) or docScale
+        docAllowed = math.min(docAllowed + hps * dt * 1.5, hps * 5) -- the most a guest's reports may claim (lag, batching)
+        net.toGuests("g.doc", string.format("%.3f", hps))
+        if not docSent then log("PT|heal doc on %.1f HP/s, battery %.2f per HP", hps, docScale) end
+        docSent = true
+    elseif docSent then
+        net.toGuests("g.doc", "0")
+        docSent = false
+        log("PT|heal doc off")
+    end
+end)
+
+net.on("g.doc.hp", function(_, data)
+    if common.netMode() ~= "listen" then return end
+    local hp = math.min(tonumber(data) or 0, docAllowed)
+    if hp <= 0 then return end
+    docAllowed = docAllowed - hp
+    local cm = FindFirstOf("BP_CarManager_C")
+    if not valid(cm) then return end
+    local e, empty = {}, {}
+    cm["Drain All Batteries"](cm, hp * docScale, e, empty)
+    log("PT|heal doc guest +%.1f HP, battery -%.2f", hp, hp * docScale)
+end)
+
+-- guest
+local docRate, docUntil, docGained, docReportAt, docTick = 0, 0, 0, 0, os.clock()
+net.on("g.doc", function(_, data)
+    if common.netMode() ~= "client" then return end
+    docRate = tonumber(data) or 0
+    docUntil = docRate > 0 and os.clock() + 1.5 or 0 -- a lost "0" ends it 1.5 s after the last "on"
+end)
+LoopInGameThreadWithDelay(100, function()
+    local dt = math.min(os.clock() - docTick, 0.5)
+    docTick = os.clock()
+    if common.netMode() ~= "client" or not safety.active() then return end
+    -- the report runs after the ability ended too: the last second's HP are paid as well
+    if docGained > 0 and os.clock() >= docReportAt then
+        net.toHost("g.doc.hp", string.format("%.2f", docGained))
+        docGained, docReportAt = 0, os.clock() + 1
+    end
+    if docRate <= 0 or os.clock() > docUntil then return end
+    local pc = UEHelpers.GetPlayerController()
+    if not seated(pc) then return end
+    local m = FindFirstOf("BP_ResourceManager_C")
+    local h = valid(m) and m.PlayerHealth
+    if not valid(h) then return end
+    local add = math.min(docRate * dt, h.Maximum - h.Current)
+    if add > 0 then h:Adjust(m, add); docGained = docGained + add end
+end)
+
 return M

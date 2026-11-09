@@ -1325,8 +1325,8 @@ Fixes (for 0.9.2; lootcar 24/24 `20261108-230548`, radiation 22/22 `20261108-230
 ## 2026-11-09: ARC on the passenger seat, rack attachments without outline on the guest (live, fixture pt16-doctor)
 
 Fixture `local/fixtures/pt16-doctor`: the friend's slot 2 save from 2026-11-08 21:11 (`local/pt16/friend/saves/odsave2.sav`),
-RB_Garage, full ARC (`Internal.Gobbler`) and a side rack with a small fuel tank. Slot 1 of that folder still has the
-story's early `Internal.DoctorGobbler` (its body sits in `NODE_AddSlotSceneComponent-1`, not `SLOT_Internal_Gobbler`).
+RB_Garage, full ARC (`Internal.Gobbler`) and a side rack with a small fuel tank. Slot 1 of that folder (fixture `pt16-docarc`) has the
+Doctor ARC `Internal.DoctorGobbler` (the upgrade with the ARC Doc ability, not an early-story ARC) (its body sits in `NODE_AddSlotSceneComponent-1`, not `SLOT_Internal_Gobbler`).
 
 Observed (game MCP, actor collision bounds in car-local cm; guest seated at 46,46,-12):
 - Unmoved, both ARC parts sit on the passenger seat: body centre 56,43 (74x80 cm), screen unit 76-85,28-34 (36x48 cm).
@@ -1349,3 +1349,14 @@ Fixes (car.lua):
   check (the built-in fixtures have no rack attachment).
 - Tests: arckey 25/25 (`20261109-103810-arckey`, fixture garage: driver key trace clear, guest highlights the ARC);
   mutation `arcold` 23/25 (both checks fail). No other scenario run.
+
+ARC Doc for the seated guest (owner request, same day; fixture `pt16-docarc`):
+- Observed: the Doctor ARC's part carries a `BP_AbilityProviderComponent` with `CachedAbilityClass` = `AP_Tether_Basic`
+  (the ability behind "ARC Doc" despite its name; props `Healing`, `AmountToHeal`), `OverrideCostPerTick` 4.0.
+  `TUNE_TetherHealthPerSecond` 10.0, `TUNE_BatteryHealthScale` 0.4. Vanilla heals only the activating player (the host; a
+  seated guest has no ability menu).
+- Fix (heal.lua): while the host's provider is active, the host sends `g.doc <HP/s>` every 0.5 s; a seated guest heals itself
+  at that rate and reports gained HP (`g.doc.hp`, about 1/s, protected kind); the host drains `HP x 0.4` with the car manager's
+  `Drain All Batteries`, capped at what the rate allows. Mutation `nodocshare`.
+- Live (owner activated ARC Doc on the host): guest 50 -> 97.8 HP over two activations, host charged for 47.6 HP
+  (`PT|heal doc guest +...`), about 10 HP/s. No scenario check: activating the ability from a test script is not known.

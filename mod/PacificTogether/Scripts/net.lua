@@ -42,7 +42,7 @@ local function protected(kind)
     return kind == "g.heap.intent" or kind:find("^g%.parts%.") or kind == "g.rescue.do" or kind == "g.story.task"
         or kind:find("^g%.act%.") or kind:find("^g%.st%.") or kind == "g.loot.b" or kind == "g.swap.set"
         or kind == "g.garage.btn" or kind == "g.garage.charge" or kind == "g.car.ctl" or kind == "g.car.drive"
-        or kind == "g.vis.keypad" or kind == "g.car.enter" or kind == "g.car.exit" or kind == "g.car.door"
+        or kind == "g.vis.keypad" or kind == "g.car.enter" or kind == "g.car.exit" or kind == "g.car.door" or kind == "g.doc.hp"
 end
 local function permitted(pc, kind, data)
     if common.netMode() ~= "listen" or not protected(kind) then return true end
