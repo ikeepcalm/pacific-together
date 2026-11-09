@@ -1321,3 +1321,31 @@ Fixes (for 0.9.2; lootcar 24/24 `20261108-230548`, radiation 22/22 `20261108-230
   `guest_buildings_same_meshes`. visual 28/29 (`20261108-232218`, zone): buildings 10/10, the fix changed 2-4 trailers a run;
   the only failure `guest_door_follows_host` (door follows in 4 s, limit 3 s) failed the same in the 3 visual runs before.
   shortcut: dirt piles the guest's roll destroyed stay missing (not compared). No mutation run for the new check.
+
+## 2026-11-09: ARC on the passenger seat, rack attachments without outline on the guest (live, fixture pt16-doctor)
+
+Fixture `local/fixtures/pt16-doctor`: the friend's slot 2 save from 2026-11-08 21:11 (`local/pt16/friend/saves/odsave2.sav`),
+RB_Garage, full ARC (`Internal.Gobbler`) and a side rack with a small fuel tank. Slot 1 of that folder still has the
+story's early `Internal.DoctorGobbler` (its body sits in `NODE_AddSlotSceneComponent-1`, not `SLOT_Internal_Gobbler`).
+
+Observed (game MCP, actor collision bounds in car-local cm; guest seated at 46,46,-12):
+- Unmoved, both ARC parts sit on the passenger seat: body centre 56,43 (74x80 cm), screen unit 76-85,28-34 (36x48 cm).
+- With the old fixed -70 X shift: body -14,43 and screen 15,34,32, still in the guest's back and torso (host screenshot:
+  the screen unit beside the guest's head). Same on the guest's copies.
+- In the garage the guest got no outline on the side rack's fuel tank; the host did. The slot actor
+  (`BP_CarPart_Interactive_C` on `SLOT_Attach_Side_FR`) has its `Box` collision 1 on the host, 0 on the guest. Calling
+  `UpdateInteractEnabled`, `UpdateSlotHighlightData`, `OnSlotItemAdded` or re-installing the part on the guest left it 0.
+  Forcing it to 1 gave the guest the outline, and it stayed. The trunk storage and ARC slot boxes were also 1 on the host
+  and 0 on the guest. Owner: in a run the outline worked. Guess (not proven): the rack upgrade's install logic sets the
+  boxes, and on the guest it only runs when the car is rebuilt on a map load.
+
+Fixes (car.lua):
+- ARC parts are placed by their measured bounds (`ARC_AT`): screen unit between the front seats (25,0), body on the rear seat
+  behind the guest (-45,43). Re-checked every 5 s, so either ARC version and a part swapped mid-session land there. Live:
+  both sides moved (`PT|car arc slot moved ... from 56,43 to -45,43`); the seated guest sees the screen beside them, map
+  readable and highlighted. Not seen: the driver's view (the in-car camera ignores scripted look).
+- The host's car state has a `B` line (slot boxes switched on); the guest sets its slot boxes to match (`PT|car slot box`).
+  Older builds ignore the line. Live: guest outline on the side fuel tank in the garage. Mutation `noslotbox`; no scenario
+  check (the built-in fixtures have no rack attachment).
+- Tests: arckey 25/25 (`20261109-103810-arckey`, fixture garage: driver key trace clear, guest highlights the ARC);
+  mutation `arcold` 23/25 (both checks fail). No other scenario run.

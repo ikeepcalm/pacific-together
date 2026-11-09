@@ -28,8 +28,14 @@ local PREFIX = "/Game/Gameplay/Inventory/Items/"
 local COMP = "/Game/Gameplay/Inventory/GenericItemProperties/Components/"
 local PASSENGER = { X = 46.2, Y = 45.8, Z = -12.3 } -- X8: the driver's seat mirrored across the car's centre line
 local DRIVER = { X = 46.2, Y = -45.8, Z = -12.3 } -- a guest at the wheel (guest driving, 2026-11-08)
-local ARC_SHIFT = { X = -70, Y = 0 } -- both ARC slots, car-local: behind the seats (the old X8 spot between them hid the starter key)
-if os.getenv("PT_MUTATE") == "arcold" then ARC_SHIFT = { X = 0, Y = -42.5 } end -- test mutation: the old spot
+-- where the ARC's parts are put, car-local centre of their collision bounds. The game puts both on the passenger seat (full ARC
+-- body 74x80 cm centred 56,43; screen unit 36x48 cm centred 85,34): the guest sat inside them, also after the old fixed -70 shift
+-- (measured 2026-11-09, friend's save). Screen: the gap between the front seats, behind the dash (X8's spot by the dash hid the
+-- starter key); body (anchor slot): the rear seat behind the guest.
+local ARC_AT = { BP_Carpart_Internal_GobblerScreen_C = { X = 25, Y = 0 }, BP_Carpart_Internal_Gobbler_C = { X = -45, Y = 43 } }
+if os.getenv("PT_MUTATE") == "arcold" then -- test mutation: the old X8 spot by the dash
+    ARC_AT = { BP_Carpart_Internal_GobblerScreen_C = { X = 85, Y = -8 }, BP_Carpart_Internal_Gobbler_C = { X = 56, Y = 0 } }
+end
 
 -- helpers -------------------------------------------------------------------------------------------------------------
 
@@ -170,25 +176,26 @@ local function readPart(c)
 end
 local function num(v) return v and string.format("%.1f", v) or "-" end
 
--- ARC (D12): both of its slots slide between the seats; nothing about it replicates, each side moves its own pair
-local arcDone = {}
+-- ARC (D12): its parts are moved off the passenger seat (ARC_AT); nothing about it replicates, each side moves its own copies.
+-- Placed by measured bounds, so both ARC versions (the story's early Doctor ARC sits in another slot) and a part re-installed or
+-- swapped mid-session land on the same spot.
 local arcAt = {} -- car address -> os.clock() of the next look (two FindAllOf scans every 250 ms before, on both sides)
 local function moveArc(car)
     local k = car:GetAddress()
     if (arcAt[k] or 0) > os.clock() then return end
     arcAt[k] = os.clock() + 5 -- a re-installed ARC part is moved within 5 s
-    for _, class in ipairs({ "BP_Carpart_Internal_Gobbler_C", "BP_Carpart_Internal_GobblerScreen_C" }) do
+    for class, at in pairs(ARC_AT) do
         for _, a in ipairs(FindAllOf(class) or {}) do
             if inWorld(a) and same(a:GetAttachParentActor(), car) then
                 local slot = a.RootComponent:GetAttachParent()
-                if valid(slot) and not arcDone[slot:GetFullName()] then
-                    local r = slot.RelativeLocation
-                    -- not yet moved: the slot is still on the near side of the half-way point along the shift
-                    if r.X * ARC_SHIFT.X + r.Y * ARC_SHIFT.Y < (ARC_SHIFT.X ^ 2 + ARC_SHIFT.Y ^ 2) / 2 then
-                        slot:K2_SetRelativeLocation(vec(r.X + ARC_SHIFT.X, r.Y + ARC_SHIFT.Y, r.Z), false, {}, true)
-                        log("PT|car arc slot moved %s", slot:GetFullName())
-                    end
-                    arcDone[slot:GetFullName()] = true
+                local o, e = {}, {}
+                a:GetActorBounds(true, o, e, false)
+                local c = toLocal(car, o)
+                -- no collision yet (bounds empty): next look; within 2 cm: already there
+                if valid(slot) and e.X > 1 and (math.abs(c.X - at.X) > 2 or math.abs(c.Y - at.Y) > 2) then
+                    local w = toWorld(car, vec(at.X, at.Y, c.Z))
+                    slot:K2_AddWorldOffset(vec(w.X - o.X, w.Y - o.Y, w.Z - o.Z), false, {}, true)
+                    log("PT|car arc slot moved %s from %.0f,%.0f to %.0f,%.0f", slot:GetFullName(), c.X, c.Y, at.X, at.Y)
                 end
             end
         end
@@ -239,6 +246,22 @@ RegisterLoadMapPreHook(function() doorCache, doorCacheCar, partsAt, partsCar = {
 -- for up to 1 s and the guest's repair flickered away (guestparts "door stays repaired" broke)
 net.tap = function(kind) if kind:find("^g%.parts%.") or kind:find("^g%.act%.") or kind:find("^g%.swap%.") then partsAt = -1 end end
 
+-- the car's per-slot interaction actors (BP_CarPart_Interactive_C), slot scene name -> actor, kept 5 s
+local interCache, interAt, interCar = {}, -10, nil
+local function interactives(car)
+    if interCar == car:GetAddress() and os.clock() - interAt < 5 then return interCache end
+    interCache, interAt, interCar = {}, os.clock(), car:GetAddress()
+    for _, a in ipairs(FindAllOf("BP_CarPart_Interactive_C") or {}) do
+        pcall(function()
+            if not same(a:GetAttachParentActor(), car) then return end
+            local s = {}; a:GetSlotComponent(s)
+            if valid(s.SlotSceneComponent) and valid(a.Box) then interCache[s.SlotSceneComponent:GetFName():ToString()] = a end
+        end)
+    end
+    return interCache
+end
+RegisterLoadMapPreHook(function() interCache, interCar = {}, nil end)
+
 local function sample(car, cm)
     local cont = equipped()
     if not cont then return end
@@ -271,6 +294,14 @@ local function sample(car, cm)
                 pl[#pl + 1] = string.format("P\t%s\t%s\t%s\t%s\t%s", name, archPath(it), num(h), num(f), num(b))
             end
         end)
+        -- B: the slot boxes the host's game switched on. A rack attachment the host installed in the garage stayed without one
+        -- on the guest (no outline, live 2026-11-09; the guest's game does not switch it on, also after a re-install)
+        local on = {}
+        for slot, a in pairs(interactives(car)) do
+            pcall(function() local c = a.Box:GetCollisionEnabled(); if c ~= 0 then on[#on + 1] = slot .. "=" .. c end end)
+        end
+        table.sort(on)
+        pl[#pl + 1] = "B\t" .. table.concat(on, ",")
         partLines, partCount, partsAt, partsCar = pl, n, os.clock(), car:GetAddress()
     end
     for _, l in ipairs(partLines) do lines[#lines + 1] = l end
@@ -1341,7 +1372,7 @@ local function applyState(data)
     local cm, cont = carManager(), equipped()
     if not cm or not cont then return end
     local car = theCar(false)
-    local head, parts, count, n, swing, hostKey = nil, {}, 0, nil, {}, nil
+    local head, parts, count, n, swing, hostKey, boxes = nil, {}, 0, nil, {}, nil, nil
     for line in data:gmatch("[^\n]+") do
         local f = {}
         for x in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = x end
@@ -1349,6 +1380,9 @@ local function applyState(data)
         elseif f[1] == "C" then hostKey = f[2]
         elseif f[1] == "P" then parts[f[2]] = { arch = f[3], h = tonumber(f[4]), f = tonumber(f[5]), b = tonumber(f[6]) }; count = count + 1
         elseif f[1] == "R" then swing[f[2]] = { vec(tonumber(f[3]), tonumber(f[4]), tonumber(f[5])), { Pitch = tonumber(f[6]), Yaw = tonumber(f[7]), Roll = tonumber(f[8]) } }
+        elseif f[1] == "B" then
+            boxes = {}
+            for slot, c in (f[2] or ""):gmatch("([^,=]+)=(%d+)") do boxes[slot] = tonumber(c) end
         elseif f[1] == "E" then n = tonumber(f[2]) end
     end
     -- a truncated message must never look like "the host has no parts"
@@ -1391,6 +1425,15 @@ local function applyState(data)
     if changed > 0 then
         pcall(function() cm:UpdateAggregateFuel() end)
         pcall(function() cm:UpdateAggregateBattery() end)
+    end
+    -- the host's slot boxes (B line; an older host sends none: leave the guest's game alone)
+    if boxes and car and os.getenv("PT_MUTATE") ~= "noslotbox" then
+        for slot, a in pairs(interactives(car)) do
+            pcall(function()
+                local want, c = boxes[slot] or 0, a.Box:GetCollisionEnabled()
+                if c ~= want then a.Box:SetCollisionEnabled(want); log("PT|car slot box %s %d -> %d", slot, c, want) end
+            end)
+        end
     end
     -- car-level state
     local ign, gear, lights, hb, doors = tonumber(head[2]), tonumber(head[3]), head[4] == "1", head[5] == "1", tonumber(head[6])

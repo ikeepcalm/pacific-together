@@ -25,6 +25,10 @@ Guest driving test build. Network protocol **7**, as in 0.9.1. Both players shou
 - Buildings such as the science trailers look the same for the guest as for the host: the guest's copy rolled its own
   foundation, so the stairs could be missing or different, and walking into the trailer pulled the guest back.
 - A crash report now names the part of the mod that was running, to find the rare crash after returning to the garage.
+- The ARC no longer sits inside the guest in the passenger seat: its screen unit is between the front seats and its body
+  (where anchors go) on the rear seat behind the guest. The game puts both on the passenger seat.
+- In the garage the guest can now use attachments the host installed on racks (side tanks, roof and seat storage): they had
+  no outline for the guest until the next zone.
 
 ## [0.9.1] - 2026-11-08
 

@@ -19,7 +19,7 @@ Current player-facing behavior: [../README.md](../README.md). Results and remain
 | D9 | Team: ikeepcalm (owner) and Djecka. Two Steam accounts, both with the game and the DLC. |
 | D10 | Public repo https://github.com/ikeepcalm/pacific-together, MIT license. |
 | D11 | **Only the host drives in v1.0.** Guest driving is v1.1 (C8). |
-| D12 | **Passenger seat** for the guest; the ARC now sits behind the front seats (C7). |
+| D12 | **Passenger seat** for the guest; the ARC screen unit sits between the front seats and its body (anchor slot) on the rear seat behind the guest (C7). |
 | D13 | **Shared ARC actions**: either player can summon a gateway and use ARC energy; route planning stays host-only (D22). |
 | D14 | **Steam sessions** open a friends-only lobby while a save is loaded, unless a direct-IP join is configured (S1, S2). |
 | D15 | **Host crash or disconnect**: the guest's backpack rolls back to the host's last save, same as the host's own progress. |
