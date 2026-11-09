@@ -699,6 +699,16 @@ net.on("g.car.ctl", function(pc, what)
         local to = cm.MyCarGearBox == 1 and 0 or 1
         pcall(function() car:ManualActivate_Gearbox(to, true) end)
         log("PT|car ctl gear -> %d now %d", to, cm.MyCarGearBox)
+    elseif what == "lights" then
+        pcall(function() car:ToggleHeadlights() end)
+        log("PT|car ctl lights now %s", tostring(cm.CarLightsOn))
+    elseif what == "wipers" then
+        pcall(function() car:ToggleWiperBlades() end)
+        log("PT|car ctl wipers toggled")
+    elseif what == "horn" then
+        -- the controller's quick honk: start, end after 0.5 s (a key release is not sent)
+        pcall(function() cm:StartHornHonk(FName("Player")) end)
+        common.defer(500, function() pcall(function() cm:EndHornHonk(FName("Player")) end) end)
     end
 end)
 
@@ -1494,7 +1504,8 @@ net.on("g.car.door", function(pc, data)
     local part = car and doorParts(car)[slot]
     if not valid(part) then log("PT|car door intent: no door at %s", tostring(slot)); return end
     pcall(function() if shut then part:AttemptShut() else part:AttemptOpen() end end)
-    entryDoor = not shut and slot == "SLOT_FrontRightDoor" and { part = part, at = now() } or nil
+    -- either front door: the guest also gets in by the driver's door now (guest driving), which stayed open (owner 2026-11-09)
+    entryDoor = not shut and (slot == "SLOT_FrontRightDoor" or slot == "SLOT_FrontLeftDoor") and { part = part, at = now() } or nil
     log("PT|car door intent %s %s applied", slot, shut and "shut" or "open")
 end)
 
@@ -1570,8 +1581,10 @@ local function hookAll()
     common.onKey("E", function() ctlWanted = true end)
 end
 
--- Use the game's current action mappings for passenger radio controls, including controller bindings.
-local radioActions = { ToggleRadio = "radio", Radio_ChannelUp = "radio_next", Radio_ChannelDown = "radio_prev", Radio_VolumeUp = "radio_louder", Radio_VolumeDown = "radio_quieter" }
+-- Use the game's current action mappings for a seated guest's car controls (radio, headlights, wipers, horn; owner 2026-11-09),
+-- including controller bindings.
+local radioActions = { ToggleRadio = "radio", Radio_ChannelUp = "radio_next", Radio_ChannelDown = "radio_prev", Radio_VolumeUp = "radio_louder", Radio_VolumeDown = "radio_quieter",
+    ToggleHeadlights = "lights", ToggleWipers = "wipers", HonkHorn = "horn" }
 StaticFindObject("/Script/Engine.Default__InputSettings").ActionMappings:ForEach(function(_, wrapped)
     local binding = wrapped:get()
     local action, key = radioActions[binding.ActionName:ToString()], binding.Key.KeyName:ToString()
@@ -1600,7 +1613,9 @@ local function why(reason, ...)
     whyAt[reason] = os.clock()
     log("PT|car drive " .. reason, ...)
 end
-LoopInGameThreadWithDelay(50, function()
+-- every frame: a 50 ms poll added up to 50 ms to the guest driver's input delay (owner 2026-11-09: "a delay between I press
+-- my buttons and the car reacts"); five key reads a frame, sent only on change or every 200 ms while held
+LoopInGameThreadWithDelay(16, function()
     if common.netMode() ~= "client" or not riding or os.getenv("PT_MUTATE") == "noguestdrive" then return end
     local pc = localPC()
     if not pc then return end
@@ -1641,22 +1656,59 @@ net.on("g.car.drive", function(pc, data)
     end
     guestDrive = { th = tonumber(th), br = tonumber(br), st = tonumber(st), hb = tonumber(hb) == 1, at = os.clock() }
 end)
+-- Every controller's tick (BP_Controller_PlayerCar "Input Car Throttle Brake", the host's and the guest's controller on the
+-- host) calls the car's AccelerateBrake with the HOST's CarThrottle - CarBrake axes: 0 with the host on foot, twice a frame,
+-- between our calls. The throttle eases down 12x faster than up (ThrottleSpeedDown 12, Up 1), so the guest's W barely moved
+-- the car and S never reversed (live 2026-11-09: 232 of 336 DriveControl calls got 0 while W was held). The guest's axis is
+-- applied again right after each of those calls (UE4SS runs Blueprint hooks after the function).
+-- one table: car.lua's main chunk is at Lua's 200-locals limit (one more local broke the whole module, 2026-11-09)
+local thr = { axis = nil, hooked = false } -- axis: host, throttle - brake the guest at the wheel holds, nil when no guest drives
 LoopInGameThreadWithDelay(16, function()
-    if not guestDrive then return end
+    if not guestDrive then thr.axis = nil; return end
+    if not thr.hooked and os.getenv("PT_MUTATE") ~= "nothrottlehook" then
+        thr.hooked = probe("/Game/Systems/Controller/BP_Controller_PlayerCar.BP_Controller_PlayerCar_C:Input Car Throttle Brake", function()
+            local car = thr.axis and theCar(true)
+            if car then pcall(function() car:AccelerateBrake(thr.axis) end) end
+        end)
+    end
     local car, cm = theCar(true), carManager()
-    local stale = os.clock() - guestDrive.at > 0.5 or not (car and cm) or cm.PlayerCarState ~= 0 or common.netMode() ~= "listen" or not driverGuest
-    local g = stale and { th = 0, br = 0, st = 0, hb = false } or guestDrive
+    local stale = not (car and cm) or cm.PlayerCarState ~= 0 or common.netMode() ~= "listen" or not driverGuest
+    -- keys not heard for 0.5 s count as released, but the zeros keep going while the guest sits at the wheel: the game's
+    -- steering and throttle only ease back to rest while their events are called (a seated player's axes call them with 0)
+    local g = (stale or os.clock() - guestDrive.at > 0.5) and { th = 0, br = 0, st = 0, hb = false } or guestDrive
+    thr.axis = not stale and (g.th - g.br) or nil
     if car then
+        -- only the car's own input events, as a seated player's axes call them each frame: they smooth throttle and steering,
+        -- brake then reverse on S (DriveControl), and the car's tick writes the VehicleController. Writing vc.Throttle/Brake/
+        -- SteerInput here as well overrode that smoothing (stiff steering) and held the brake on S (no reverse), 2026-11-09.
         pcall(function()
             car:AccelerateBrake(g.th - g.br)
             car:SteerLeftRight(g.st)
-            local vc = car.VehicleController
-            vc.ThrottleInput, vc.BrakeInput, vc.SteerInput = g.th, g.br, g.st
-            vc:SetHandbrakeInput(g.hb)
+            car:Handbrake(g.hb and 1 or 0)
         end)
     end
     if stale then guestDrive = nil; log("PT|car guest stops driving") end
 end)
+
+-- The steering wheel model turns to SteeringWheelRotationTarget, which only the car's SteerLeftRight sets: on the guest's copy
+-- nobody steers, so its wheel stood still whoever drove (owner 2026-11-09). The host sends its target when it changes.
+--   g.car.wheel  host -> guests  "<target>"
+do
+local wheelSent = 0
+LoopInGameThreadWithDelay(50, function()
+    if common.netMode() ~= "listen" or #net.guests() == 0 then return end
+    local car = theCar(true)
+    local ok, v = pcall(function() return car and car.SteeringWheelRotationTarget end)
+    if not (ok and v) or math.abs(v - wheelSent) < 0.01 then return end
+    wheelSent = v
+    net.toGuests("g.car.wheel", string.format("%.3f", v))
+end)
+net.on("g.car.wheel", function(_, data)
+    if common.netMode() ~= "client" or os.getenv("PT_MUTATE") == "nowheelmirror" then return end
+    local v, car = tonumber(data), theCar(false)
+    if v and math.abs(v) <= 3 and car then pcall(function() car.SteeringWheelRotationTarget = v end) end
+end)
+end -- do
 
 -- The host as passenger: E on the passenger door (from outside: sit down; inside: get out, also E with nothing highlighted).
 -- The game only enters through the driver's door, so the host is seated like a guest: attached, movement and collision off,

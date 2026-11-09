@@ -15,11 +15,16 @@ Guest driving test build. Network protocol **7**, as in 0.9.1. Both players shou
   door, they take the wheel and the guest moves to the passenger seat. The host's game still runs the car, so the guest
   driver feels their ping. Keyboard only for now.
 
+- A seated guest can use the headlights, wipers and horn with their usual keys.
 - ARC Doc (the Doctor ARC's car ability) now heals a guest sitting in the car too, at the ability's own rate (10 HP/s),
   and the car battery pays the ability's own price for it (0.4 battery per HP the guest gains).
 
 ### Fixed
 
+- Guest driving: the car now speeds up, steers smoothly and reverses on S as when the host drives (the host's own idle
+  controls cancelled the guest's throttle every frame, and the steering skipped the game's smoothing). The steering wheel
+  turns for the guest, keys react sooner, and the driver's door shuts behind a guest who gets in by it.
+- The guest's headlights and dashboard no longer flicker as if the car could not start: they follow the host's car.
 - A sealed car now shields a seated guest from radiation as it does the host (the game only counted the host as inside).
 - The guest now sees Salamander nest eggs and the other grab clusters the zone spawns (they existed on the host only).
   Each player can harvest a cluster once for now.

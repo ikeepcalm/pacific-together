@@ -1360,3 +1360,33 @@ ARC Doc for the seated guest (owner request, same day; fixture `pt16-docarc`):
   `Drain All Batteries`, capped at what the rate allows. Mutation `nodocshare`.
 - Live (owner activated ARC Doc on the host): guest 50 -> 97.8 HP over two activations, host charged for 47.6 HP
   (`PT|heal doc guest +...`), about 10 HP/s. No scenario check: activating the ability from a test script is not known.
+
+## 2026-11-09 afternoon: guest driving (stiff, no reverse, wheel still), seated car keys (live, coop-zone)
+
+Observed (host-side hooks on BP_PlayerCarNew, game MCP; decompiled local/atlas/bp/BP_PlayerCarNew.txt, BP_Controller_PlayerCar.txt):
+- car.lua's host loop wrote vc.ThrottleInput/BrakeInput/SteerInput every frame besides calling the car's events: steering lost
+  the game's smoothing and S held the brake (no reverse). With only AccelerateBrake/SteerLeftRight/Handbrake, UserSteerInput
+  eases 0.05 -> 0.91 like a player's.
+- Throttle still died: every BP_Controller_PlayerCar tick ("Input Car Throttle Brake", host's and guest's controller on the
+  host) calls AccelerateBrake(host CarThrottle - CarBrake) = 0 with the host on foot, about twice a frame (232 of 336
+  DriveControl calls were 0 while the guest held W). ThrottleSpeedDown 12 vs Up 1: ThrottleCurrent stayed ~0.01. In reverse
+  mode ThrottleTarget -1, ThrottleCurrent 0.00.
+- SteeringWheelRotationTarget is only set by SteerLeftRight: the guest's copy never steered, its wheel stood still.
+- Guest flicker of headlights/dash ("ignition stuck"): the guest's BP_FeedbackManager CarElectrical CurrentAmbient ~0.37
+  (host 0.00), no ambient source in its map, no Car Burst Feedback calls in 3 s; capping the guest's max to 0 stopped it
+  (owner). Source unknown. Dash Health/Maintenance warnings are the car's real state (same entries on the host).
+
+Fixes:
+- car.lua: host applies only the car's input events; a post-hook on the controller's "Input Car Throttle Brake" re-applies the
+  guest's axis after each reset (mutation nothrottlehook); zeros keep going while the guest sits at the wheel so throttle and
+  steering ease back; host sends SteeringWheelRotationTarget (g.car.wheel, mutation nowheelmirror); guest keys polled every
+  frame; driver's-door entry shuts that door too; seated guest's lights/wipers/horn through g.car.ctl (game's action mappings).
+- carfeel.lua: g.feel.elec, the guest's car electrical feedback = the host's (max + PTHost source; mutation noelecmirror).
+- car.lua's main chunk is at Lua's 200-locals limit: a new top-level local broke the module on both sides (guest stuck
+  loading); new state goes into tables or do-blocks.
+- Live after the fixes (scripted guest intents): forward 380 uu/s in 3 s with ThrottleCurrent 0.93, turned ~50 deg, S braked
+  then reversed to -450 uu/s. Owner: wheel turns, no flicker, lights/wipers/horn work, delay better but "rather alien to
+  control, not really immersive". Remaining: follow delay 100-250 ms + ping (host physics), guest uses the character camera,
+  not the car's driving camera. Guest-side prediction or the car camera are the next options (not started).
+- Tests: new scenario guestdrive (coop-zone) 34/34 (`20261109-114139-guestdrive`); mutation nothrottlehook 31/34 (forward, turn, reverse fail);
+  guestctl 52/52 (`20261109-114555-guestctl`). Door-shut after driver's-door entry checked by guestdrive; flicker mirror only by the owner's eye.

@@ -208,4 +208,50 @@ end)
 LoopInGameThreadWithDelay(200, function()
     if mode() == "standalone" or mode() == "none" then feel, hornApplied = nil, nil end
 end)
+
+-- Car electrical feedback (BP_FeedbackManager CarElectrical, the game's electrical-fault flicker of headlights and dash): the
+-- guest's own copy held ~0.37 while the host's car read 0, so the guest's lights and dash flickered all the time, parked too
+-- (owner 2026-11-09, "like the ignition could not finish"; capping the guest's to 0 stopped it). What feeds the guest's value
+-- was not found (no ambient source in its map, no burst calls). The guest now shows the host's: its feedback max is set to the
+-- host's value and the host's value is added as a source, so the highest source clamped to the max is exactly the host's.
+--   g.feel.elec  host -> guests  "<current ambient>"
+local ELEC = 0 -- the feedback type index of CarElectrical
+local function elecAmbient(fm)
+    local v
+    pcall(function()
+        local s = fm.CarElectrical
+        s:ForEachProperty(function(p) local n = p:GetFName():ToString(); if n:find("^CurrentAmbient") then v = s[n] end end)
+    end)
+    return v
+end
+local elecSent, elecSentAt, elecSet = -1, 0, false
+LoopInGameThreadWithDelay(100, function()
+    if mode() ~= "listen" or #net.guests() == 0 then return end
+    local fm = first("BP_FeedbackManager_C")
+    local v = fm and elecAmbient(fm)
+    if not v then return end
+    v = math.floor(v * 50 + 0.5) / 50
+    if v ~= elecSent or os.clock() - elecSentAt > 2 then
+        elecSent, elecSentAt = v, os.clock()
+        net.toGuests("g.feel.elec", string.format("%.2f", v))
+    end
+end)
+net.on("g.feel.elec", function(_, data)
+    if mode() ~= "client" or os.getenv("PT_MUTATE") == "noelecmirror" then return end
+    local v, fm = tonumber(data), first("BP_FeedbackManager_C")
+    if not (v and v >= 0 and v <= 1 and fm) then return end
+    pcall(function()
+        fm:SetCarFeedbackMax(ELEC, v)
+        fm["Add Car Feedback Ambient Source"](fm, ELEC, v, FName("PTHost"))
+    end)
+    if not elecSet then elecSet = true; log("PT|carfeel electrical feedback follows the host (%.2f)", v) end
+end)
+-- the managers live in the game instance: every map change gives back the game's own maximum (1); in a session the host's next
+-- message (within 2 s) sets it again, back in single player it stays the game's
+RegisterLoadMapPreHook(function()
+    if not elecSet then return end
+    elecSet = false
+    local fm = first("BP_FeedbackManager_C")
+    if fm then pcall(function() fm:SetCarFeedbackMax(ELEC, 1.0); fm:RemoveCarFeedbackAmbientSource(ELEC, FName("PTHost")) end) end
+end)
 return M
