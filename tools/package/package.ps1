@@ -1,5 +1,6 @@
-# Builds dist\PacificTogether-<mod version>-dev-<commit>.zip for the owner and friends (pre-1.0: never published, D18): the launcher
-# PacificTogether.exe next to the package. Not one exe with the package embedded: Defender flagged that as Wacatac.C!ml (0.9.0).
+# Builds dist\PacificTogether-<mod version>-dev-<commit>.zip (GitHub): the launcher PacificTogether.exe next to the package, and
+# ...-nexus.zip, the same without the launcher: VirusTotal flags the launcher (10/61 MSILHeracles, Bitdefender engines), not the rest (0/66).
+# Not one exe with the package embedded: Defender flagged that as Wacatac.C!ml (0.9.0).
 # Bundles the exact UE4SS build the tests run on (MIT, its LICENSE goes along) minus its debug symbols and docs.
 param([string]$UE4SSZip = "$PSScriptRoot\..\..\local\cache\ue4ss\zDEV-UE4SS_v3.0.1-1181-g83330635.zip")
 $ErrorActionPreference = "Stop"
@@ -35,5 +36,9 @@ $zip = "$stage.zip"
 Remove-Item $zip -Force -ErrorAction SilentlyContinue
 tar -a -c -f $zip -C (Split-Path $stage) $name
 if ($LASTEXITCODE) { throw "tar failed ($LASTEXITCODE)" }
-"$((Get-FileHash $zip).Hash.ToLower())  $(Split-Path $zip -Leaf)" | Set-Content "$Repo\dist\SHA256SUMS.txt" -Encoding ascii
-Write-Host "Built $zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB)"
+$nexus = "$stage-nexus.zip"
+Remove-Item $nexus -Force -ErrorAction SilentlyContinue
+tar -a -c -f $nexus --exclude "$name/PacificTogether.exe" -C (Split-Path $stage) $name
+if ($LASTEXITCODE) { throw "tar failed ($LASTEXITCODE)" }
+$zip, $nexus | ForEach-Object { "$((Get-FileHash $_).Hash.ToLower())  $(Split-Path $_ -Leaf)" } | Set-Content "$Repo\dist\SHA256SUMS.txt" -Encoding ascii
+$zip, $nexus | ForEach-Object { Write-Host "Built $_ ($([math]::Round((Get-Item $_).Length / 1MB, 1)) MB)" }

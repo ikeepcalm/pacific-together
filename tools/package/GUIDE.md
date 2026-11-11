@@ -17,7 +17,7 @@ leave **Launch through Steam** off to start the selected copy directly. The host
 host's router. Allow the game through Windows Firewall on the network used for the session. A saved join address takes
 precedence over Steam joining; reinstall in Host mode to clear it.
 
-Without the launcher (in the extracted folder): `install.cmd` for host/Steam, `install.cmd -Join <host IP>` for direct IP, then start `PenDriverPro\Binaries\Win64\PenDriverPro-Win64-Shipping.exe` (or through Steam).
+Without the launcher (the Nexus Mods download has none; in the extracted folder): `install.cmd` for host/Steam, `install.cmd -Join <host IP>` for direct IP, then start `PenDriverPro\Binaries\Win64\PenDriverPro-Win64-Shipping.exe` (or through Steam).
 A game or mod version mismatch refuses the join; a different build number is only logged, and such a pair is untested. See `README.txt` for features and known issues.
 
 ## Custom music

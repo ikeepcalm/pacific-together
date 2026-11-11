@@ -22,7 +22,8 @@ Features
 
 Install
 1. Close the game. Extract PacificTogether-<version>.zip to a folder (right-click, Extract All) and open
-   PacificTogether.exe inside it. Check the game folder it found.
+   PacificTogether.exe inside it. Check the game folder it found. The Nexus Mods download has no PacificTogether.exe:
+   use install.cmd instead (see "Command line" below).
 2. Choose Host and click Install & play. (Both players choose Host when joining through Steam: it just means "no IP".)
    Windows may warn about an unknown publisher: More info, Run anyway.
 

@@ -3,7 +3,7 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
-## [0.9.2] - 2026-11-08
+## [0.9.2] - 2026-11-11
 
 Guest driving test build. Network protocol **7**, as in 0.9.1. Both players should use 0.9.2.
 
@@ -16,6 +16,8 @@ Guest driving test build. Network protocol **7**, as in 0.9.1. Both players shou
   driver feels their ping. Keyboard only for now.
 
 - A seated guest can use the headlights, wipers and horn with their usual keys.
+- A second download without the launcher, for Nexus Mods: install it with `install.cmd`. Antivirus scanners on
+  VirusTotal flagged the launcher as `MSILHeracles` (10 of 61, a heuristic guess); the mod without it scans clean.
 - ARC Doc (the Doctor ARC's car ability) now heals a guest sitting in the car too, at the ability's own rate (10 HP/s),
   and the car battery pays the ability's own price for it (0.4 battery per HP the guest gains).
 
