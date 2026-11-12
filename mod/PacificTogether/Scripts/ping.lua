@@ -1,6 +1,8 @@
 -- PT2 ping: look at something, press middle mouse (G if UE4SS cannot bind the mouse), and both players see a marker there for
--- ~8 s and hear a short HUD sound. The marker is a local TextRenderActor (like nametag.lua): "Name / item / distance",
--- turned to our camera each frame. One ping per player: a new one replaces the old. The guest's ping goes to the host
+-- ~8 s and hear a short HUD sound. The marker (owner's friend 2026-11-12: the flat yellow text was hard to see) is the game's own
+-- objective marker (SC_GenericObjective -> UMG_GenericObjective, as in mapmark.lua: screen space, clamped to the screen edge)
+-- with "Name / item / distance", plus a tall thin glowing beam and a light at the spot (readable at night and in fog), all in the
+-- pinger's colour (host blue, guest green: the map pins' colours). One ping per player: a new one replaces the old. The guest's ping goes to the host
 -- (g.ping.send), the host shows it and tells every guest (g.ping.show); the host's own ping goes straight to the guests.
 -- Message data: "name\tx\ty\tz\tlabel". Inert in single player: the key does nothing without a session.
 local UEHelpers = require("UEHelpers")
@@ -11,7 +13,16 @@ local log = common.log
 
 local M = { LIFE = tonumber(os.getenv("PT_PING_LIFE") or "") or 8, REACH = 30000 }
 local OFF = os.getenv("PT_MUTATE") == "noping" -- tests only
-local MAT = "/Engine/EngineMaterials/AntiAliasedTextMaterialTranslucent.AntiAliasedTextMaterialTranslucent"
+local HUD = "/Game/UI/NavigationSystems/SC_GenericObjective.SC_GenericObjective_C"
+local BEAM_MESH = "/Engine/BasicShapes/Cylinder.Cylinder"
+local BEAM_MAT = "/Engine/EngineMaterials/EmissiveMeshMaterial.EmissiveMeshMaterial"
+local BLUE, GREEN = { R = 0.1, G = 0.4, B = 1.0, A = 1.0 }, { R = 0.1, G = 1.0, B = 0.2, A = 1.0 }
+local XF = { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = { X = 0, Y = 0, Z = 0 }, Scale3D = { X = 1, Y = 1, Z = 1 } }
+local function load(path)
+    local o = StaticFindObject(path)
+    if not o:IsValid() then pcall(LoadAsset, path); o = StaticFindObject(path) end
+    return o:IsValid() and o or nil
+end
 local SOUND = "hud_log_entry_new_appear" -- the game's own short HUD blip (UMG_LogBook_Notification)
 local SOUND_PATH = "/Game/WwiseAudio/Events/UI/ui_hud/" .. SOUND .. "." .. SOUND
 local ITEM_NEAR = 90 -- uu: an item or container this close to the view ray counts as aimed at
@@ -92,33 +103,68 @@ end
 
 local function drop(key)
     local m = marks[key]
-    if m and valid(m.actor) then m.actor:K2_DestroyActor() end
+    if m then
+        if valid(m.hud) then pcall(function() m.hud:DeactivateObjective(false); m.hud:K2_DestroyComponent(m.hud) end) end
+        if valid(m.light) then m.light:K2_DestroyActor() end
+        if valid(m.actor) then m.actor:K2_DestroyActor() end
+    end
     marks[key] = nil
 end
 
-local function spawn(x, y, z)
+local function tint(m)
+    local w = valid(m.hud) and m.hud.MainIconWidget
+    if not valid(w) then return end
+    pcall(function() w.MainImage:SetColorAndOpacity(m.colour); w.Pulse:SetColorAndOpacity(m.colour) end)
+end
+
+-- the beam (a stretched engine cylinder, emissive, no collision), the light and the HUD marker at the point
+local function spawn(x, y, z, colour)
     local gs = UEHelpers.GetGameplayStatics()
-    local xf = { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = { X = x, Y = y, Z = z }, Scale3D = { X = 1, Y = 1, Z = 1 } }
-    local a = gs:FinishSpawningActor(gs:BeginDeferredActorSpawnFromClass(UEHelpers.GetWorldContextObject(), StaticFindObject("/Script/Engine.TextRenderActor"), xf, 1, nil), xf)
-    a:K2_SetActorLocation({ X = x, Y = y, Z = z }, false, {}, true) -- the spawn transform alone left it at the origin
-    local t = a.TextRender
-    t:SetHorizontalAlignment(1)
-    t:SetVerticalAlignment(2) -- EVRTA_TextBottom: the last line ("v") sits on the point
-    local mat = StaticFindObject(MAT)
-    if not mat:IsValid() then mat = LoadAsset(MAT) end
-    if mat and mat:IsValid() then t:SetTextMaterial(mat) end
-    t:SetTextRenderColor({ R = 255, G = 210, B = 70, A = 255 })
-    return a, t
+    local xf = { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = { X = x, Y = y, Z = z + 1000 }, Scale3D = { X = 0.1, Y = 0.1, Z = 20 } }
+    local a = gs:FinishSpawningActor(gs:BeginDeferredActorSpawnFromClass(UEHelpers.GetWorldContextObject(), StaticFindObject("/Script/Engine.StaticMeshActor"), xf, 1, nil), xf)
+    a:K2_SetActorLocation({ X = x, Y = y, Z = z + 1000 }, false, {}, true)
+    local c = a.StaticMeshComponent
+    c:SetMobility(2)
+    local mesh = load(BEAM_MESH)
+    if mesh then c:SetStaticMesh(mesh) end
+    c:SetCollisionEnabled(0)
+    c:SetCastShadow(false)
+    local mat = load(BEAM_MAT)
+    if mat then
+        local mid = c:CreateDynamicMaterialInstance(0, mat, FName("None"))
+        if valid(mid) then
+            pcall(function() mid:SetVectorParameterValue(FName("Color"), { R = colour.R * 6, G = colour.G * 6, B = colour.B * 6, A = 1 }) end)
+            pcall(function() mid:SetVectorParameterValue(FName("Emissive"), { R = colour.R * 6, G = colour.G * 6, B = colour.B * 6, A = 1 }) end)
+        end
+    end
+    local l
+    pcall(function()
+        local lx = { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = { X = x, Y = y, Z = z + 150 }, Scale3D = { X = 1, Y = 1, Z = 1 } }
+        l = gs:FinishSpawningActor(gs:BeginDeferredActorSpawnFromClass(UEHelpers.GetWorldContextObject(), StaticFindObject("/Script/Engine.PointLight"), lx, 1, nil), lx)
+        l:K2_SetActorLocation({ X = x, Y = y, Z = z + 150 }, false, {}, true)
+        local lc = l.PointLightComponent
+        lc:SetMobility(2)
+        lc:SetLightColor(colour, true)
+        lc:SetIntensity(20000)
+        lc:SetAttenuationRadius(1200)
+        lc:SetCastShadows(false)
+    end)
+    local hud = a:AddComponentByClass(load(HUD), false, XF, false)
+    hud.UpdatePositionOnTick = true
+    hud:ActivateObjective()
+    if valid(hud.MainIconWidget) then hud:SetMarkerVisuals(3, FText("")) end
+    return a, hud, l
 end
 
 -- show (or replace) the marker of one player
 function M.show(key, name, x, y, z, label)
     if OFF or not safety.active() then return end
     drop(key)
-    local a, t = spawn(x, y, z)
-    marks[key] = { actor = a, text = t, loc = { X = x, Y = y, Z = z }, name = name, label = label or "", t0 = os.clock(), shown = nil, size = nil }
+    local colour = key == "host" and BLUE or GREEN -- the host's ping carries the key "host" on both sides
+    local a, hud, l = spawn(x, y, z, colour)
+    marks[key] = { actor = a, hud = hud, light = l, colour = colour, loc = { X = x, Y = y, Z = z }, name = name, label = label or "", t0 = os.clock(), shown = nil }
     sound()
-    log("PT|ping show %s %.0f %.0f %.0f '%s'", name, x, y, z, label or "")
+    log("PT|ping show %s %.0f %.0f %.0f '%s' hud=%s widget=%s light=%s", name, x, y, z, label or "", tostring(valid(hud)), tostring(valid(hud) and valid(hud.MainIconWidget)), tostring(valid(l)))
 end
 
 -- host: a ping from a guest (or from ourselves) goes to everyone
@@ -156,7 +202,7 @@ function M.markers()
     local r = {}
     for k, m in pairs(marks) do
         if valid(m.actor) then
-            r[#r + 1] = { name = m.name, actor = m.actor, text = m.text, label = m.label, x = m.loc.X, y = m.loc.Y, z = m.loc.Z, age = os.clock() - m.t0 }
+            r[#r + 1] = { name = m.name, actor = m.actor, hud = m.hud, label = m.label, x = m.loc.X, y = m.loc.Y, z = m.loc.Z, age = os.clock() - m.t0 }
         end
     end
     return r
@@ -171,14 +217,17 @@ local function update()
             drop(key)
         elseif cam then
             local dx, dy, dz = cam.X - m.loc.X, cam.Y - m.loc.Y, cam.Z - m.loc.Z
-            local d = math.sqrt(dx * dx + dy * dy + dz * dz)
-            local meters = math.floor(d / 100 + 0.5)
-            local txt = (m.label ~= "" and (m.name .. "\n" .. m.label) or m.name) .. "\n" .. meters .. " m\nv"
-            if txt ~= m.shown then m.shown = txt; m.text:SetText(txt) end
-            -- keeps about the same size on screen: grows with distance
-            local size = math.floor(18 * math.max(1, d / 500))
-            if size ~= m.size then m.size = size; m.text:SetWorldSize(size) end
-            m.actor:K2_SetActorRotation({ Pitch = 0, Yaw = math.deg(math.atan(dy, dx)), Roll = 0 }, false)
+            local meters = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz) / 100 + 0.5)
+            local txt = (m.label ~= "" and (m.name .. "\n" .. m.label) or m.name) .. "\n" .. meters .. " m"
+            local w = valid(m.hud) and m.hud.MainIconWidget
+            if valid(w) then
+                if txt ~= m.shown then
+                    m.shown = txt
+                    w.TaskText:SetText(FText(txt))
+                    w.ObjectiveText:SetVisibility(0) -- the game shows its text only within 8 m and aimed at: always here
+                    tint(m)
+                end
+            end
         end
     end
 end
