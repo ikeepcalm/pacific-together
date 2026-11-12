@@ -1,7 +1,7 @@
 local UEHelpers = require("UEHelpers")
 
 local M = {
-    MOD_VERSION = "0.9.2",
+    MOD_VERSION = "0.9.3",
     PROTOCOL_VERSION = 7, -- 7: map icons (g.map.icons), currencies (g.st.cur), map north; 6: loot drop adoption ("K"), keypad and anchor-take messages; 5: msg.cpp chunks are confirmed ("PT1A|"); a 4 peer never confirms and a 5 sender would stall
 }
 

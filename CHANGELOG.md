@@ -3,6 +3,33 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
+## [0.9.3] - 2026-11-12
+
+Convenience build for the evening session. Network protocol **7**, as in 0.9.2. Both players should use 0.9.3; a 0.9.2
+partner still connects but does not get the new markers, breakables or guest-side driving.
+
+### Added
+
+- Guest driving, guest-side: when the guest sits at the wheel in a zone, the guest's own game runs the car's physics, so
+  the car answers the keys at once with no ping delay. The host's car follows the guest's, the way the guest's follows the
+  host's when the host drives. Leaving the wheel, the host taking it, or a dropped connection hands the car back to the
+  host where it is. In the garage the host still runs the car (it threw the guest's car about there). F9, then 7 (guest
+  only) switches it off and back on. While the guest drives this way, crash damage and anomaly pushes do not reach the car.
+- Own map marker for each player: both of you can place a waypoint and see both. Host blue, guest green, on the map pins
+  and the partner-position icons.
+- Heal hint: "[H] Patch up <name>" under the crosshair, only while you look at your partner within reach and the heal is ready.
+- FPS in the log: `PT|perf fps` once a minute with the number of players, to track slowdowns while hosting.
+
+### Changed
+
+- Middle-click ping: the game's own objective marker (stays on screen at the edge, name, item and distance) and a tall
+  beam of light at the spot, blue for the host's ping and green for the guest's.
+
+### Fixed
+
+- Breakables the host's car hits now break for the guest at once: signs, barrels, cones, fences, barricades, benches and
+  floating rocks (they used to break 5-11 s late without flying). Trees and shrubs fall over on the guest instead of vanishing.
+
 ## [0.9.2] - 2026-11-11
 
 Guest driving test build. Network protocol **7**, as in 0.9.1. Both players should use 0.9.2.
