@@ -13,7 +13,9 @@ local log = common.log
 
 local ga = car.ga
 if not ga then return {} end -- car.lua disabled (mutation nocarsync)
-local OFF = os.getenv("PT_MUTATE") == "noguestauth"
+-- M.off: mutation noguestauth, or the guest switched it off in F9 (7): the host simulates the guest's driving as before
+local M = { off = os.getenv("PT_MUTATE") == "noguestauth" }
+function M.toggle() M.off = not M.off; return "Guest drives own car: " .. (M.off and "off (host simulates)" or "on") end
 local NONE = FName("None")
 local TIMEOUT = 1 -- s without a sample: the host takes the car back
 local function valid(o) return o ~= nil and o:IsValid() end
@@ -66,7 +68,7 @@ LoopInGameThreadWithDelay(16, function()
         local seated = c ~= nil and atWheel(me, c)
         if not seated then blocked, seatedAt = false, nil else seatedAt = seatedAt or os.clock() end
         -- seated for half a second: the predicted seat and the host's seat swap it in and out at entry (physics on, off, on)
-        local want = not OFF and not blocked and net.hostSupports("guest-auth") and seated and (ga.mine or os.clock() - seatedAt > 0.5)
+        local want = not M.off and not blocked and net.hostSupports("guest-auth") and seated and (ga.mine or os.clock() - seatedAt > 0.5)
             and (ga.mine or not inGarage())
         if want and not ga.mine then
             local m = ga.motion()
@@ -144,7 +146,7 @@ end)
 -- host --------------------------------------------------------------------------------------------------------------------
 local cm = function() return common.first("BP_CarManager_C") end
 net.on("g.guestauth.car", function(pc, data)
-    if OFF or common.netMode() ~= "listen" or not net.peerSupports(pc, "guest-auth") then return end
+    if M.off or common.netMode() ~= "listen" or not net.peerSupports(pc, "guest-auth") then return end
     local c, m = car.theCar(true), cm()
     -- only the guest at the wheel while the host is not driving (car.lua seats the host's driver-door entry at the wheel)
     if not (c and m and m.PlayerCarState == 0 and atWheel(pc.Pawn, c)) then return end
@@ -174,4 +176,4 @@ LoopInGameThreadWithDelay(16, function()
     if not ok then ga.host = false; log("PT|error guestauth host %s", tostring(err)) end
 end)
 
-return {}
+return M
