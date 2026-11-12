@@ -13,9 +13,12 @@ local log = common.log
 
 local ga = car.ga
 if not ga then return {} end -- car.lua disabled (mutation nocarsync)
--- M.off: mutation noguestauth, or the guest switched it off in F9 (7): the host simulates the guest's driving as before
-local M = { off = os.getenv("PT_MUTATE") == "noguestauth" }
-function M.toggle() M.off = not M.off; return "Guest drives own car: " .. (M.off and "off (host simulates)" or "on") end
+-- M.off (guest side): the host simulates the guest's driving as before. Off by default since the owner's hand test 2026-11-12:
+-- the host sitting as passenger while the guest simulates launches the car (unsolved, docs/spikes/guestauth.md). The guest
+-- turns it on with F9 (7). The guestauth scenario runs with it on. MUT: mutation noguestauth, host side too.
+local MUT = os.getenv("PT_MUTATE") == "noguestauth"
+local M = { off = MUT or os.getenv("PT_SCENARIO") ~= "guestauth" }
+function M.toggle() M.off = MUT or not M.off; return "Guest drives own car: " .. (M.off and "off (host simulates)" or "on (host: stay out of the passenger seat)") end
 local NONE = FName("None")
 local TIMEOUT = 1 -- s without a sample: the host takes the car back
 local function valid(o) return o ~= nil and o:IsValid() end
@@ -189,7 +192,7 @@ end)
 -- host --------------------------------------------------------------------------------------------------------------------
 local cm = function() return common.first("BP_CarManager_C") end
 net.on("g.guestauth.car", function(pc, data)
-    if M.off or common.netMode() ~= "listen" or not net.peerSupports(pc, "guest-auth") then return end
+    if MUT or common.netMode() ~= "listen" or not net.peerSupports(pc, "guest-auth") then return end
     local c, m = car.theCar(true), cm()
     -- only the guest at the wheel while the host is not driving (car.lua seats the host's driver-door entry at the wheel)
     if not (c and m and m.PlayerCarState == 0 and atWheel(pc.Pawn, c)) then return end

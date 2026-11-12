@@ -10,11 +10,12 @@ mod version refuses the join.
 
 ### Added
 
-- Guest driving, guest-side: when the guest sits at the wheel in a zone, the guest's own game runs the car's physics, so
-  the car answers the keys at once with no ping delay. The host's car follows the guest's, the way the guest's follows the
-  host's when the host drives. Leaving the wheel, the host taking it, or a dropped connection hands the car back to the
-  host where it is. In the garage the host still runs the car (it threw the guest's car about there). F9, then 7 (guest
-  only) switches it off and back on. While the guest drives this way, crash damage and anomaly pushes do not reach the car.
+- Guest driving, guest-side (experimental, **off by default**): the guest turns it on with F9, then 7. When the guest
+  sits at the wheel in a zone, the guest's own game then runs the car's physics, so the car answers the keys at once with
+  no ping delay, and the host's car follows. Leaving the wheel, the host taking it, or a dropped connection hands the car
+  back to the host. In the garage the host still runs the car. **While it is on, the host must not sit in the passenger
+  seat: the car gets launched** (not fixed yet). Crash damage and anomaly pushes do not reach the car while the guest drives
+  this way. Doors open and shut normally (an early build tore them off).
 - Own map marker for each player: both of you can place a waypoint and see both. Host blue, guest green, on the map pins
   and the partner-position icons.
 - Heal hint: "[H] Patch up <name>" under the crosshair, only while you look at your partner within reach and the heal is ready.
