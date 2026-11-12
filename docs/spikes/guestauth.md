@@ -60,6 +60,18 @@ Authority rules:
   same code did not log it. The same error appears in older and other-lane results (`20261108-224623-lootcar`,
   `20261112-172509-breakables-carbreak`), so it predates this lane.
 
+- Garage (carsync, `20261112-182137-guestauth-carsync`, `20261112-183409-guestauth-carsync`): carsync's guest enters by the
+  driver's door, so since 0.9.2 it sits at the wheel. carsync expects the passenger seat, so host_guest_seated fails. No
+  carsync run exists after 156bfaa to compare. Live (game MCP), the guest's car once flipped onto its side (roll 93-125) the
+  moment its physics came on, with no input. In the second carsync run the car stayed steady at first, then the host took it
+  back with a 4800 uu/s sample velocity, after the host scenario had removed a wheel and a door under it.
+  Decision: no guest authority in the garage, where the host simulates as before. A start probe was added: the car must stay
+  within 50 uu and 10 deg for its first second, else the host keeps simulating until the guest leaves the wheel. Authority
+  starts only after the guest has sat at the wheel for 0.5 s, because the predicted seat and the host's seat toggled it at entry.
+  Handback velocity is capped at 4500 uu/s.
+- `session` 40/40 (`20261112-183810-guestauth-session`). An earlier session run (`20261112-182304`) crashed the client; game
+  MCP evals were moving that client's car at the time (operator error, the MCP session attached to the running scenario).
+
 ## Derived
 
 - The guest can simulate the replicated car copy (Role 1). Two conditions: the host's replicated pose stays muted, and every
@@ -73,4 +85,7 @@ Authority rules:
 - Crash damage and anomaly pushes while the guest drives are not forwarded (see the table above). The host's wheels stand still
   while it follows.
 - The guest's driving camera is still the character camera (unchanged).
+- Why the guest's car was thrown in the garage is unknown. Candidates: depenetration from a body that only the guest has
+  overlapping the chassis, or part removal under a simulating copy. The zone may hit the same thing rarely; the start probe
+  and the velocity cap limit the damage.
 - Handback was tested only with the car stopped. A moving handback carries the last sample's velocity but is untested.
