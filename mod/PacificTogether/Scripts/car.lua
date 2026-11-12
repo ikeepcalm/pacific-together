@@ -14,6 +14,9 @@ local log = common.log
 local ov = require("overlay")
 
 local M = {}
+-- guestauth.lua's state (this chunk is at Lua's 200-locals limit): mine = the guest simulates the car it drives; host = the
+-- host's car follows that guest's stream
+M.ga = { mine = false, host = false }
 local proxyInput
 function M.physicalProxyActive()
     return common.netMode() == "client" and net.hostSupports("physical-car") and proxyInput ~= nil and os.clock() - proxyInput.at < 1
@@ -460,7 +463,7 @@ LoopInGameThreadWithDelay(50, function()
 end)
 LoopInGameThreadWithDelay(16, function()
     if common.netMode() ~= "client" or not valid(wheelCar) then return end
-    if M.physicalProxyActive() then return end
+    if M.physicalProxyActive() or M.ga.mine then return end
     local a, b, u, extrapolate = wheelMotion.sample(wheelBuffer, os.clock())
     if not a then return end
     local ct = wheelCar:GetTransform()
@@ -871,7 +874,12 @@ end
 local carMotion,carClock
 RegisterLoadMapPreHook(function()carMotion,carClock=nil,nil end)
 net.on("g.motion.car",function(_,data)
-    if common.netMode()~="client" or not net.hostSupports("car-motion") or #data>1024 then return end
+    if common.netMode()~="client" or not net.hostSupports("car-motion") then return end
+    M.ga.take(data)
+end)
+-- one motion sample (g.motion.car; on the host the guest driver's g.guestauth.car) into the follower's carMotion
+function M.ga.take(data)
+    if #data>1024 then return end
     local fields={}
     for f in data:gmatch('[^|]+')do fields[#fields+1]=f end
     if #fields~=11 or fields[1]~=net.worldToken() then return end
@@ -886,7 +894,10 @@ net.on("g.motion.car",function(_,data)
     carClock=carClock and carClock+math.max(-0.0005,math.min(0.0005,(offset-carClock)*0.01)) or offset
     carMotion={source=fields[2],tm=fields[2]+carClock,t=t,
         p=vec(fields[3],fields[4],fields[5]),r={Pitch=fields[6],Yaw=fields[7],Roll=fields[8]},v=vec(fields[9],fields[10],fields[11])}
-end)
+    return true
+end
+function M.ga.motion() return carMotion end
+function M.ga.reset() carMotion=nil end
 LoopInGameThreadWithDelay(50,function()
     if common.netMode()~="listen" then return end
     local guests=net.guests();local wanted=false
@@ -1104,7 +1115,7 @@ local function follow(car)
             else
                 stoppedAt = nil
             end
-            local motion=net.hostSupports("car-motion") and carMotion or nil
+            local motion=(net.hostSupports("car-motion") or M.ga.host) and carMotion or nil
             -- Only the negotiated visual follower owns this car's pose; raw OnRep writes bypass its buffer.
             if motion and not physical and not poseMuted and PTNative_Mute and os.getenv('PT_MUTATE')~='nativecarpose' then
                 poseMuted=PTNative_Mute(carAddress,'OnRep_ReplicatedMovement')
@@ -1181,6 +1192,17 @@ local function follow(car)
         if os.clock() - tickAt > 0.2 then step() end
     end)
 end
+
+-- guestauth: the follower stops where the car is now; physics and the controller go back on with velocity v. keepMute: the guest
+-- that now simulates keeps the host's replicated pose muted (it would pull the car back to where it was a ping ago)
+function M.unfollow(car, v, keepMute)
+    if followLoop then CancelDelayedAction(followLoop) end
+    if followUnmute and not keepMute then followUnmute() end
+    followLoop, followUnmute, followed, tickStep = nil, nil, nil, nil
+    pcall(function() car.Chassis:SetSimulatePhysics(true); car.VehicleController:SetComponentTickEnabled(true) end)
+    if v then pcall(function() car.Chassis:SetPhysicsLinearVelocity(v, false, NONE) end) end
+end
+M.follow = function(car) if followed ~= car:GetFullName() then follow(car) end end
 
 -- the guest's own copy of the car and its part actors
 local function dedupe(car)
@@ -1704,7 +1726,7 @@ LoopInGameThreadWithDelay(50, function()
     net.toGuests("g.car.wheel", string.format("%.3f", v))
 end)
 net.on("g.car.wheel", function(_, data)
-    if common.netMode() ~= "client" or os.getenv("PT_MUTATE") == "nowheelmirror" then return end
+    if common.netMode() ~= "client" or os.getenv("PT_MUTATE") == "nowheelmirror" or M.ga.mine then return end
     local v, car = tonumber(data), theCar(false)
     if v and math.abs(v) <= 3 and car then pcall(function() car.SteeringWheelRotationTarget = v end) end
 end)
@@ -1883,7 +1905,7 @@ local function guestTick()
     hookAll()
     local c0 = #localCopies()
     if c0 > 0 then dedupe(car) end
-    if followed ~= car:GetFullName() then follow(car) end
+    if followed ~= car:GetFullName() and not M.ga.mine then follow(car) end
     moveArc(car)
     local pc = localPC()
     local me = pc and pc.Pawn
