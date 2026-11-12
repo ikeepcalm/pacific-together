@@ -5,8 +5,8 @@ What changed in Pacific Together, in plain words. Newest first. The format follo
 
 ## [0.9.3] - 2026-11-12
 
-Convenience build for the evening session. Network protocol **7**, as in 0.9.2. Both players should use 0.9.3; a 0.9.2
-partner still connects but does not get the new markers, breakables or guest-side driving.
+Convenience build for the evening session. Network protocol **7**, as in 0.9.2. Both players need 0.9.3; a different
+mod version refuses the join.
 
 ### Added
 
