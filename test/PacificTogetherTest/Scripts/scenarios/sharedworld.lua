@@ -24,6 +24,16 @@ return function(T)
         for _, a in ipairs(FindAllOf("BP_WaypointActor_C") or {}) do if a:IsValid() and T.inWorld(a) then r[#r + 1] = a end end
         return r
     end
+    -- the partner's marker: a visible Map-Pin icon on the map bounds actor (mapmark.lua; each player keeps its own actor)
+    local function pins()
+        local r = {}
+        for _, c in ipairs(FindAllOf("MapIconComponent") or {}) do
+            if c:IsValid() and c:GetFullName():find("BP_GobblerMapBounds", 1, true) and c.IconTexture:IsValid()
+                and c.IconTexture:GetFName():ToString() == "Map-Pin" and c:IsIconVisible() then r[#r + 1] = c end
+        end
+        return r
+    end
+    local function pnear(c, x, y) local l = c:K2_GetComponentLocation(); return math.abs(l.X - x) < 50 and math.abs(l.Y - y) < 50 end
     local function near(a, x, y) local l = a:K2_GetActorLocation(); return math.abs(l.X - x) < 50 and math.abs(l.Y - y) < 50 end
     local function spawnWp(x, y, z)
         local xf = { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = { X = x, Y = y, Z = z }, Scale3D = { X = 1, Y = 1, Z = 1 } }
@@ -53,18 +63,17 @@ return function(T)
             if not s then return false end
             local x, y = s:match("^(%S+) (%S+)")
             spot = { x = tonumber(x), y = tonumber(y) }
-            for _, a in ipairs(wps()) do if near(a, spot.x, spot.y) then return true end end
+            for _, c in ipairs(pins()) do if pnear(c, spot.x, spot.y) then return true end end
             return false
         end })
+        -- the host places its own marker (the guest's pin stays where it is); the guest gets a pin there too
         add({ run = function()
-            local a = wps()[1]
-            if not a then return end -- no waypoint arrived: host_gets_guest_waypoint already failed
-            local l = a:K2_GetActorLocation()
-            a:K2_SetActorLocation({ X = l.X + 2000, Y = l.Y, Z = l.Z }, false, {}, true)
-            toGuest("t.moved", string.format("%.0f %.0f", l.X + 2000, l.Y))
+            local l = L.own():K2_GetActorLocation()
+            spawnWp(l.X + 3000, l.Y + 2000, l.Z)
+            toGuest("t.moved", string.format("%.0f %.0f", l.X + 3000, l.Y + 2000))
         end })
         add({ check = "guest_follow_reported", timeout = 30, cond = function() return g("t.followed") ~= nil end })
-        add({ check = "host_waypoint_cleared", timeout = 20, cond = function() return g("t.cleared") ~= nil and #wps() == 0 end })
+        add({ check = "host_waypoint_cleared", timeout = 20, cond = function() return g("t.cleared") ~= nil and #pins() == 0 end })
         add({ run = function() toGuest("t.done") end })
         add({ wait = 3 })
         return steps
@@ -99,7 +108,7 @@ return function(T)
             local s = g("t.moved")
             if not s then return false end
             local x, y = s:match("^(%S+) (%S+)")
-            for _, a in ipairs(wps()) do if near(a, tonumber(x), tonumber(y)) then return true end end
+            for _, c in ipairs(pins()) do if pnear(c, tonumber(x), tonumber(y)) then return true end end
             return false
         end },
         { run = function()

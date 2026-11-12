@@ -16,6 +16,7 @@ if os.getenv("PT_MUTATE") == "nooverlay" then
     function M.hostPaused() end
     function M.transition() end
     function M.panel() end
+    function M.hint() end
     return M
 end
 
@@ -112,6 +113,14 @@ local function build()
     cs:SetAutoSize(true)
     frame:SetVisibility(1)
     n.card = frame
+    -- heal.lua's key hint, under the crosshair
+    n.hint = text(tree, "PTHint", 20, "good", "body", nil, 1)
+    local hs = canvas:AddChildToCanvas(n.hint)
+    hs:SetAnchors({ Minimum = { X = 0.5, Y = 0.5 }, Maximum = { X = 0.5, Y = 0.5 } })
+    hs:SetAlignment({ X = 0.5, Y = 0 })
+    hs:SetPosition({ X = 0, Y = 90 })
+    hs:SetAutoSize(true)
+    n.hint:SetVisibility(1)
     for i = 1, LINES do
         n.lines[i] = text(tree, "PTFeed" .. i, 16, "info")
         n.lines[i]:SetVisibility(1)
@@ -142,8 +151,14 @@ end
 local panelText
 function M.panel(t) panelText = t end
 
+local hintText
+function M.hint(t) hintText = t end -- a short key hint under the crosshair; nil hides it
+
 local function render()
     local now = os.clock()
+    local hv = hintText and 3 or 1
+    if ui.cache.hv ~= hv then ui.cache.hv = hv; ui.hint:SetVisibility(hv) end
+    if hintText then set(ui.hint, "hint", hintText) end
     local pnv = panelText and 3 or 1
     if ui.cache.pnv ~= pnv then ui.cache.pnv = pnv; ui.card:SetVisibility(pnv) end
     if panelText then
@@ -221,7 +236,7 @@ function M.other() return hostName or next(names) or "Player" end
 function M.settled() return sessionSince ~= nil and os.clock() - sessionSince > SETTLE end
 
 function M.state() -- for tests: what the widget should hold
-    return { label = "Pacific Together " .. common.MOD_VERSION, status = ui and ui.cache.status or "", lines = #feed }
+    return { label = "Pacific Together " .. common.MOD_VERSION, status = ui and ui.cache.status or "", lines = #feed, hint = hintText }
 end
 
 -- status ----------------------------------------------------------------------------------------------------------
