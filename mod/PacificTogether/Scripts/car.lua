@@ -1162,7 +1162,9 @@ local function follow(car)
                         end
                     end
                 end
-                car:K2_SetActorLocationAndRotation(to, rot, false, {}, true)
+                -- host following the guest: no teleport, so its hinged doors and the trunk's bodies swing with the car instead
+                -- of being torn off by a jump (a door broke off the host's car, owner 2026-11-12)
+                car:K2_SetActorLocationAndRotation(to, rot, false, {}, not M.ga.host)
                 local after=#cosmeticPose>0 and car:GetTransform()
                 for _,entry in ipairs(cosmeticPose)do
                     entry.body:K2_SetWorldTransform(kml():ComposeTransforms(entry.relative,after),false,{},true)
@@ -2045,7 +2047,8 @@ net.on("g.motion.doors", function(_, data)
     doorTargets=targets
 end)
 LoopInGameThreadWithDelay(16,function()
-    if common.netMode()~="client" or os.clock()<doorHold then return end
+    -- guestauth: the guest's own car swings its doors on their hinges (a posed kinematic door pinned the simulating chassis)
+    if common.netMode()~="client" or os.clock()<doorHold or (M.ga.mine and os.getenv("PT_MUTATE")~="guestauthdoors") then return end
     local car=theCar(false);if not car then return end
     local ct=car:GetTransform()
     for slot,part in pairs(doorsOf(car)) do

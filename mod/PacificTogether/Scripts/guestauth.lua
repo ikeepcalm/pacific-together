@@ -60,6 +60,52 @@ local function keys(pc)
     end
     return th, br, st, hb
 end
+-- Doors and panels while the guest simulates. The host's door stream posed them kinematic (car.lua skips that while ga.mine)
+-- with their hinge to the chassis still on: a kinematic hinged body pinned the chassis (guestdrive stood still at full throttle),
+-- and breaking the hinge instead made an opened door a free body that fell off and came back as a part (duplicate door, owner
+-- 2026-11-12). Now a hinged door simulates on its hinge as on the host's own car, a shut one stays as the game's shut leaves it
+-- (no hinge, kinematic), and no hinge on the guest's copy breaks by force: breaks are the host's (its state removes the part).
+local doorsAt = 0
+local function doorsPhysical(c)
+    if os.clock() - doorsAt < 0.25 then return end
+    doorsAt = os.clock()
+    for _, cls in ipairs({ "BP_CarPart_Door_Base_C", "BP_Panel_Base_C" }) do
+        for _, part in ipairs(FindAllOf(cls) or {}) do
+            pcall(function()
+                if not same(part:GetAttachParentActor(), c) then return end
+                local k, m = part.PhysicsConstraint, part.MainMesh
+                k:SetLinearBreakable(false, 0)
+                k:SetAngularBreakable(false, 0)
+                if not k:IsBroken() and not m:IsSimulatingPhysics(NONE) then m:SetSimulatePhysics(true) end
+            end)
+        end
+    end
+end
+-- The other player's body: on the host it is seated with collision off, but its copy here keeps its capsule, and seated in (or
+-- walking through) the simulating car it threw the car into the air (owner 2026-11-12, host sat as passenger). Its capsule
+-- ignores the chassis while we simulate; given back when we stop.
+local ignored = {} -- capsule lease key -> { lease, channel, response }
+local function ignoreOthers(c, me, on)
+    if not on then
+        for key, e in pairs(ignored) do
+            local cap = common.resolve(e.lease)
+            if cap then pcall(function() cap:SetCollisionResponseToChannel(e.channel, e.response) end) end
+            ignored[key] = nil
+        end
+        return
+    end
+    local channel = c.Chassis:GetCollisionObjectType()
+    for _, ch in ipairs(FindAllOf("BaseCharacter") or {}) do
+        if valid(ch) and not same(ch, me) and valid(ch.CapsuleComponent) then
+            local cap = ch.CapsuleComponent
+            local key = ch:GetFullName()
+            if not ignored[key] then
+                ignored[key] = { lease = common.lease(cap), channel = channel, response = cap:GetCollisionResponseToChannel(channel) }
+                cap:SetCollisionResponseToChannel(channel, 0)
+            end
+        end
+    end
+end
 LoopInGameThreadWithDelay(16, function()
     if common.netMode() ~= "client" then ga.mine = false; return end
     local ok, err = pcall(function()
@@ -74,6 +120,9 @@ LoopInGameThreadWithDelay(16, function()
             local m = ga.motion()
             ga.mine, yaw = true, c:K2_GetActorRotation().Yaw
             probe = { at = os.clock(), p = c:K2_GetActorLocation(), r = c:K2_GetActorRotation() }
+            -- before the chassis simulates: a kinematic hinged door pins it, the other player's capsule throws it
+            if os.getenv("PT_MUTATE") ~= "guestauthdoors" then doorsAt = 0; doorsPhysical(c) end
+            if os.getenv("PT_MUTATE") ~= "guestauthbodies" then pcall(ignoreOthers, c, me, true) end
             car.unfollow(c, m and m.v, true)
             log("PT|guestauth guest simulates the car it drives")
         elseif not want and ga.mine then
@@ -106,25 +155,19 @@ LoopInGameThreadWithDelay(16, function()
     end)
     if not ok then log("PT|error guestauth guest %s", tostring(err)) end
 end)
--- A door or panel the host's door stream poses (kinematic) keeps its hinge to the chassis: the guest's car drove 2 m and stood
--- still at full throttle (guestdrive 2026-11-12). The hinge goes, as the game's own shut does (BreakConstraint, kinematic mesh).
-local hingeAt = 0
-local function freeHinges(c)
-    if os.clock() - hingeAt < 0.25 then return end
-    hingeAt = os.clock()
-    for _, cls in ipairs({ "BP_CarPart_Door_Base_C", "BP_Panel_Base_C" }) do
-        for _, part in ipairs(FindAllOf(cls) or {}) do
-            pcall(function()
-                if same(part:GetAttachParentActor(), c) and not part.MainMesh:IsSimulatingPhysics(NONE) then part.PhysicsConstraint:BreakConstraint() end
-            end)
-        end
-    end
-end
+local othersAt = 0
 LoopInGameThreadWithDelay(50, function()
-    if not ga.mine or common.netMode() ~= "client" then return end
+    if not ga.mine or common.netMode() ~= "client" then
+        if next(ignored) then pcall(ignoreOthers, nil, nil, false) end
+        return
+    end
     local c = car.theCar(false)
     if not c then return end
-    if os.getenv("PT_MUTATE") ~= "guestauthhinge" then freeHinges(c) end
+    if os.getenv("PT_MUTATE") ~= "guestauthdoors" then doorsPhysical(c) end
+    if os.getenv("PT_MUTATE") ~= "guestauthbodies" and os.clock() - othersAt > 0.25 then
+        othersAt = os.clock()
+        pcall(ignoreOthers, c, localPC() and localPC().Pawn, true)
+    end
     local p, r, v = c:K2_GetActorLocation(), c:K2_GetActorRotation(), c:GetVelocity()
     if probe then
         local moved = math.sqrt((p.X - probe.p.X) ^ 2 + (p.Y - probe.p.Y) ^ 2 + (p.Z - probe.p.Z) ^ 2)

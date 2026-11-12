@@ -8,6 +8,9 @@
 --   host_handback_*          after the guest gets out the host simulates again where the car was: no jump (< 50 uu), not falling
 -- Run: tools/run-test.ps1 -Scenario guestauth -Fixture coop-zone -Headless
 -- Mutation noguestauth: the host simulates the guest's driving as before: guest_input_local fails.
+--   guest_door_parts_stay / host_door_parts_stay  the guest at the wheel opens and shuts a rear door: no part leaves the car
+--   host_passenger_* / guest_passenger_car_steady  the host sits as passenger while the guest simulates: the car stays down, parts stay
+-- Mutations: guestauthdoors (doors posed kinematic, no hinge handling), guestauthbodies (the host body collides with the guest car).
 return function(T)
     local L = require("scenarios.sessionlib")(T)
     local log = T.log
@@ -49,6 +52,41 @@ return function(T)
     end
     local function physics() return theCar().Chassis:IsSimulatingPhysics(NONE) end
     local function d3(a, b) return math.sqrt((a.X - b.X) ^ 2 + (a.Y - b.Y) ^ 2 + (a.Z - b.Z) ^ 2) end
+    -- the car's parts on it and the loose items around it: a part that falls off leaves the first and joins the second
+    local function partsOn()
+        local c, n = theCar(), 0
+        for _, cls in ipairs({ "BP_CarPart_Door_Base_C", "BP_Panel_Base_C", "BP_CarPart_Wheel_Base_C" }) do
+            for _, a in ipairs(FindAllOf(cls) or {}) do
+                local par = a:IsValid() and a:GetAttachParentActor()
+                if par and par:IsValid() and par:GetFullName() == c:GetFullName() then n = n + 1 end
+            end
+        end
+        return n
+    end
+    local function itemsNear()
+        local c, n = theCar():K2_GetActorLocation(), 0
+        for _, a in ipairs(FindAllOf("BP_WorldItem_C") or {}) do
+            if a:IsValid() and not a:GetAttachParentActor():IsValid() and d3(a:K2_GetActorLocation(), c) < 1500 then n = n + 1 end
+        end
+        return n
+    end
+    -- worst vertical speed and tilt of the car over the next seconds (every frame)
+    local function watchCar(seconds)
+        local w = { vz = 0, tilt = 0 }
+        local c = theCar()
+        local last, lt, t0 = c:K2_GetActorLocation(), os.clock(), os.clock()
+        local h
+        h = LoopInGameThreadWithDelay(1, function()
+            pcall(function()
+                local p, t, r = c:K2_GetActorLocation(), os.clock(), c:K2_GetActorRotation()
+                if t > lt then w.vz = math.max(w.vz, math.abs(p.Z - last.Z) / (t - lt)) end
+                w.tilt = math.max(w.tilt, math.abs(r.Pitch), math.abs(r.Roll))
+                last, lt = p, t
+            end)
+            if os.clock() - t0 > seconds then CancelDelayedAction(h); w.done = true end
+        end)
+        return w
+    end
 
     if T.ROLE == "host" then
         local steps = {}
@@ -116,6 +154,55 @@ return function(T)
             return #moving >= 10 and p95 < 300 and still and still < 30
         end })
         add({ run = function() tracking = false; CancelDelayedAction(track) end })
+        -- the guest at the wheel opens and shuts a rear door (owner 2026-11-12: doors fell off and came back as parts)
+        local parts0, items0
+        add({ run = function() parts0, items0 = partsOn(), itemsNear(); sendGuest("t.door") end })
+        add({ check = "guest_door_done", timeout = 30, cond = function() return take("t.doorok") or take("t.doorbad") end })
+        add({ wait = 3 })
+        add({ check = "host_door_parts_stay", timeout = 2, cond = function()
+            local p, i = partsOn(), itemsNear()
+            log("PT|info door test host parts %d -> %d, items near %d -> %d", parts0, p, items0, i)
+            return p == parts0 and i <= items0
+        end })
+        -- the host sits down as passenger while the guest drives (owner 2026-11-12: the car was thrown into the sky), as
+        -- car.lua's hostSit does it: collision and walking off, attached at the mirrored seat
+        local seatWatch, guestSeat
+        add({ run = function()
+            parts0, items0 = partsOn(), itemsNear()
+            local me, c = T.myPawn(), theCar()
+            me:SetActorEnableCollision(false)
+            pcall(function() me.CharacterMovement:DisableMovement() end)
+            local r = c:K2_GetActorRotation()
+            me:K2_SetActorLocationAndRotation(KML:TransformLocation(c:GetTransform(), { X = 46.2, Y = 45.8, Z = -12.3 }), { Pitch = 0, Yaw = r.Yaw, Roll = 0 }, false, {}, true)
+            me:K2_AttachToActor(c, NONE, 1, 1, 1, false)
+            seatWatch = watchCar(8)
+            sendGuest("t.seatwatch")
+        end })
+        add({ wait = 9 })
+        add({ check = "host_passenger_car_steady", timeout = 2, cond = function()
+            log("PT|info host passenger: host car max vz %.0f uu/s tilt %.1f deg", seatWatch.vz, seatWatch.tilt)
+            return seatWatch.done and seatWatch.vz < 300 and seatWatch.tilt < 25
+        end })
+        add({ check = "host_passenger_parts_stay", timeout = 2, cond = function()
+            local p, i = partsOn(), itemsNear()
+            log("PT|info passenger test host parts %d -> %d, items near %d -> %d, seated %s", parts0, p, items0, i, tostring(attached(T.myPawn())))
+            return p == parts0 and i <= items0 and attached(T.myPawn())
+        end })
+        add({ check = "guest_passenger_reported", timeout = 20, cond = function()
+            if take("t.seatok") then guestSeat = true; return true end
+            if take("t.seatbad") then guestSeat = false; return true end
+            return false
+        end })
+        add({ check = "guest_saw_steady_car", timeout = 2, cond = function() return guestSeat == true end })
+        add({ run = function()
+            local me = T.myPawn()
+            pcall(function() me:K2_DetachFromActor(1, 1, 1) end)
+            local c = theCar()
+            me:K2_SetActorLocation(KML:TransformLocation(c:GetTransform(), { X = 60, Y = 260, Z = 60 }), false, {}, true)
+            me:SetActorEnableCollision(true)
+            pcall(function() me.CharacterMovement:SetMovementMode(1, 0) end)
+        end })
+        add({ wait = 3 })
         -- hand back: the guest gets out; every frame of the next 4 s the car must not move more than a little
         local before, maxStep, last, frames, minVz, sim = nil, 0, nil, 0, 0, false
         add({ run = function()
@@ -223,6 +310,40 @@ return function(T)
     end })
     on("t.s", function() keys = "0 1 0 0" end)
     on("t.stop", function() keys = "0 0 0 1"; T.intent("g.car.ctl", "gear") end) -- handbrake, then park
+    -- the rear right door, opened and shut by the door's own code as the E key does (car.lua turns it into the host intent)
+    local function rearDoor()
+        local c = theCar()
+        for _, a in ipairs(FindAllOf("BP_CarPart_Door_Base_C") or {}) do
+            local par = a:IsValid() and a:GetAttachParentActor()
+            if par and par:IsValid() and par:GetFullName() == c:GetFullName() and a.RootComponent.AttachParent:GetFName():ToString() == "SLOT_RearRightDoor" then return a end
+        end
+    end
+    local gParts, gItems, gWatch
+    on("t.door", function()
+        gParts, gItems = partsOn(), itemsNear()
+        gWatch = watchCar(9)
+        local d = rearDoor()
+        log("PT|info guest opens the rear right door %s", tostring(d ~= nil))
+        if d then d:AttemptOpen() end
+        ExecuteInGameThreadWithDelay(3500, function() pcall(function() local x = rearDoor(); if x then x:AttemptShut() end end) end)
+    end)
+    add({ wait = 9 })
+    add({ check = "guest_door_parts_stay", timeout = 2, cond = function()
+        local p, i = partsOn(), itemsNear()
+        log("PT|info door test guest parts %d -> %d, items near %d -> %d, car max vz %.0f tilt %.1f", gParts, p, gItems, i, gWatch.vz, gWatch.tilt)
+        local ok = p == gParts and i <= gItems
+        T.intent(ok and "t.doorok" or "t.doorbad")
+        return ok
+    end })
+    on("t.seatwatch", function() gParts, gItems = partsOn(), itemsNear(); gWatch = watchCar(8) end)
+    add({ wait = 9 })
+    add({ check = "guest_passenger_car_steady", timeout = 2, cond = function()
+        local p, i = partsOn(), itemsNear()
+        log("PT|info host passenger on the guest: car max vz %.0f uu/s tilt %.1f deg, parts %d -> %d, items %d -> %d", gWatch.vz, gWatch.tilt, gParts, p, gItems, i)
+        local ok = gWatch.done and gWatch.vz < 300 and gWatch.tilt < 25 and p == gParts and i <= gItems
+        T.intent(ok and "t.seatok" or "t.seatbad")
+        return ok
+    end })
     on("t.exit", function()
         keys = "0 0 0 0"
         CancelDelayedAction(report)
