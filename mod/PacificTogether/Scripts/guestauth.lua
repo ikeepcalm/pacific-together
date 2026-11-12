@@ -38,6 +38,9 @@ if os.getenv("PT_SCENARIO") then
     net.testTap = function(kind, payload) if kind == "g.car.drive" then test = { payload, os.clock() } end end
 end
 local yaw, hooked = nil, false
+-- the first second: the guest's car must stay put before the host follows it. In the garage it was thrown on its side the moment
+-- its physics came on (carsync 2026-11-12, cause not found): then the host keeps simulating until the guest leaves the wheel.
+local probe, blocked = nil, false
 local function keys(pc)
     local function down(k) return pc:IsInputKeyDown(KEYS[k]) and 1 or 0 end
     local th, br, st, hb = down("W"), down("S"), down("D") - down("A"), down("SpaceBar")
@@ -52,10 +55,13 @@ LoopInGameThreadWithDelay(16, function()
     local ok, err = pcall(function()
         local c, pc = car.theCar(false), localPC()
         local me = pc and pc.Pawn
-        local want = not OFF and net.hostSupports("guest-auth") and c ~= nil and atWheel(me, c)
+        local seated = c ~= nil and atWheel(me, c)
+        if not seated then blocked = false end
+        local want = not OFF and not blocked and net.hostSupports("guest-auth") and seated
         if want and not ga.mine then
             local m = ga.motion()
             ga.mine, yaw = true, c:K2_GetActorRotation().Yaw
+            probe = { at = os.clock(), p = c:K2_GetActorLocation(), r = c:K2_GetActorRotation() }
             car.unfollow(c, m and m.v, true)
             log("PT|guestauth guest simulates the car it drives")
         elseif not want and ga.mine then
@@ -108,6 +114,19 @@ LoopInGameThreadWithDelay(50, function()
     if not c then return end
     if os.getenv("PT_MUTATE") ~= "guestauthhinge" then freeHinges(c) end
     local p, r, v = c:K2_GetActorLocation(), c:K2_GetActorRotation(), c:GetVelocity()
+    if probe then
+        local moved = math.sqrt((p.X - probe.p.X) ^ 2 + (p.Y - probe.p.Y) ^ 2 + (p.Z - probe.p.Z) ^ 2)
+        local tilt = math.max(math.abs(r.Pitch - probe.r.Pitch), math.abs((r.Roll - probe.r.Roll + 180) % 360 - 180))
+        if moved > 50 or tilt > 10 or os.getenv("PT_MUTATE") == "guestauthunstable" then
+            probe, blocked, ga.mine, ga.axis = nil, true, false, nil
+            car.follow(c)
+            log("PT|guestauth unstable start (moved %.0f uu, tilt %.0f deg): the host keeps simulating", moved, tilt)
+            return
+        end
+        if os.clock() - probe.at < 1 then return end
+        probe = nil
+        log("PT|guestauth guest car steady: streaming to the host")
+    end
     net.toHost("g.guestauth.car", string.format("%s|%.6f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f", net.worldToken(), os.clock(),
         p.X, p.Y, p.Z, r.Pitch, r.Yaw, r.Roll, v.X, v.Y, v.Z))
 end)

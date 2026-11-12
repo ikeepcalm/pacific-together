@@ -45,7 +45,20 @@ Authority rules:
   - The host's car was kinematic in 399 of the samples.
   - Host-to-guest car distance while moving: p50 124 uu, p95 204 uu (follow delay at up to ~900 uu/s). Once stopped it was 0.0 uu.
   - Handback on exit: max step per frame 0.2 uu, 0.1 uu moved, min vz -7 over 210 frames. The guest followed the host again.
-- Mutation `noguestauth`: see the lane report (run folder `*-guestauth-guestauth` with mutate=noguestauth).
+- Mutation `noguestauth` (`20261112-180418-guestauth-guestauth-noguestauth`) scored 32/37. guest_input_local failed: the
+  guest's own throttle never rose, physics false. host_follows_guest and host_car_tracks_guest failed too.
+- guestdrive with guestauth on (`20261112-180645-guestauth-guestdrive`, 31/34): the car moved about 2 m, then stood still at
+  full throttle. The door the host shut after entry is posed on the guest from the door stream (kinematic MainMesh) and kept
+  its `PhysicsConstraint` hinge to the chassis. Fix: while the guest simulates, the hinges of kinematic doors and panels are
+  broken, as the door's own shut path does (`BreakConstraint`, mesh kinematic). The mutation `guestauthhinge` turns this off.
+  After the fix guestdrive passed 34/34 (`20261112-181211-guestauth-guestdrive`). guestdrive now measures the host car's speed
+  from its movement, because a guest-driven host car is kinematic.
+- guestauth after the hinge fix (`20261112-181423-guestauth-guestauth`): every functional check passed. Throttle answered in
+  3 frames (67 ms) and the car moved after 12 frames (376 ms). Distance while moving was p50 107 / p95 205 uu, 0.0 uu once
+  stopped. Handback: max step 0.0 uu. The run scored 36/37 because the client logged car.lua's existing
+  `RegisterHook ... BP_Panel_Base_C:AttemptOpen is not loaded` (hookAll ran before the panel class loaded). Earlier runs of the
+  same code did not log it. The same error appears in older and other-lane results (`20261108-224623-lootcar`,
+  `20261112-172509-breakables-carbreak`), so it predates this lane.
 
 ## Derived
 
