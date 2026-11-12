@@ -1206,7 +1206,8 @@ function M.unfollow(car, v, keepMute)
         local body = common.resolve(entry.body)
         if body and same(common.resolve(entry.car), car) then pcall(function() body:SetSimulatePhysics(true) end) end
     end
-    if v then pcall(function() car.Chassis:SetPhysicsLinearVelocity(v, false, NONE) end) end
+    -- a thrown car's sample (4800 uu/s in the garage, carsync) is not passed on
+    if v and v.X ^ 2 + v.Y ^ 2 + v.Z ^ 2 < 4500 ^ 2 then pcall(function() car.Chassis:SetPhysicsLinearVelocity(v, false, NONE) end) end
 end
 M.follow = function(car) if followed ~= car:GetFullName() then follow(car) end end
 

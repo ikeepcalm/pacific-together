@@ -40,7 +40,15 @@ end
 local yaw, hooked = nil, false
 -- the first second: the guest's car must stay put before the host follows it. In the garage it was thrown on its side the moment
 -- its physics came on (carsync 2026-11-12, cause not found): then the host keeps simulating until the guest leaves the wheel.
-local probe, blocked = nil, false
+local probe, blocked, seatedAt = nil, false, nil
+-- shortcut: not in the garage. There the guest's car was thrown about while it sat at the wheel and the host worked on the car
+-- (carsync 2026-11-12: wheel and door removed, handback velocity 4800 uu/s); the host simulates there as before. Find the cause
+-- (part removal under a simulating copy?) before allowing it.
+local function inGarage()
+    local w = require("UEHelpers").GetWorld()
+    local ok, name = pcall(function() return require("UEHelpers").GetGameplayStatics():GetCurrentLevelName(w, true):ToString() end)
+    return ok and name:find("Garage", 1, true) ~= nil
+end
 local function keys(pc)
     local function down(k) return pc:IsInputKeyDown(KEYS[k]) and 1 or 0 end
     local th, br, st, hb = down("W"), down("S"), down("D") - down("A"), down("SpaceBar")
@@ -56,8 +64,10 @@ LoopInGameThreadWithDelay(16, function()
         local c, pc = car.theCar(false), localPC()
         local me = pc and pc.Pawn
         local seated = c ~= nil and atWheel(me, c)
-        if not seated then blocked = false end
-        local want = not OFF and not blocked and net.hostSupports("guest-auth") and seated
+        if not seated then blocked, seatedAt = false, nil else seatedAt = seatedAt or os.clock() end
+        -- seated for half a second: the predicted seat and the host's seat swap it in and out at entry (physics on, off, on)
+        local want = not OFF and not blocked and net.hostSupports("guest-auth") and seated and (ga.mine or os.clock() - seatedAt > 0.5)
+            and (ga.mine or not inGarage())
         if want and not ga.mine then
             local m = ga.motion()
             ga.mine, yaw = true, c:K2_GetActorRotation().Yaw
