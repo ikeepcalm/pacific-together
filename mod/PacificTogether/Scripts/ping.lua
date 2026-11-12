@@ -145,11 +145,12 @@ local function spawn(x, y, z, colour)
         local lc = l.PointLightComponent
         lc:SetMobility(2)
         lc:SetLightColor(colour, true)
-        lc:SetIntensity(20000)
+        lc:SetIntensity(8000)
         lc:SetAttenuationRadius(1200)
         lc:SetCastShadows(false)
     end)
-    local hud = a:AddComponentByClass(load(HUD), false, XF, false)
+    -- relative to the beam actor (scale Z 20): 37.5 below its middle is 7.5 m below it, 2.5 m above the point
+    local hud = a:AddComponentByClass(load(HUD), false, { Rotation = XF.Rotation, Translation = { X = 0, Y = 0, Z = -37.5 }, Scale3D = XF.Scale3D }, false)
     hud.UpdatePositionOnTick = true
     hud:ActivateObjective()
     if valid(hud.MainIconWidget) then hud:SetMarkerVisuals(3, FText("")) end

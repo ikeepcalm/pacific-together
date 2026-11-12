@@ -90,6 +90,7 @@ return function(T)
         add({ check = "host_own_marker_on_view_ray", timeout = 3, cond = function()
             local m = markOf(myName())
             if not m or not isBlue(m.colour) or not onViewRay(m) then return false end
+            if T.MUTATE == "shot" then T.shot("host_own_ping_blue") end
             hit1 = m
             sendGuest("t.hit1", string.format("%.0f|%.0f|%.0f|%s", m.x, m.y, m.z, myName()))
             return true
@@ -149,6 +150,7 @@ return function(T)
             local x, y, z, name = v:match("^([^|]*)|([^|]*)|([^|]*)|(.*)$")
             local all = marks()
             local m = markOf(name, all)
+            if T.MUTATE == "shot" and m then T.shot("host_sees_guest_ping_green") end
             T.log("PT|info ping host sees %d markers, guest's at %s", #all, m and string.format("%.0f %.0f %.0f", m.x, m.y, m.z) or "-")
             -- the host's own ping (step 2) may have run out by now (8 s): one or two markers, one per player
             return m ~= nil and isGreen(m.colour) and #all <= 2 and d3(m, tonumber(x), tonumber(y), tonumber(z)) < 100 and m.text:find("%d+ m") ~= nil
@@ -200,6 +202,7 @@ return function(T)
     add({ check = "guest_own_marker_on_view_ray", timeout = 3, cond = function()
         local m = markOf(myName())
         if not m or not isGreen(m.colour) or not onViewRay(m) then return false end
+        if T.MUTATE == "shot" then T.shot("guest_own_ping_green") end
         sendHost("t.hit3", string.format("%.0f|%.0f|%.0f|%s", m.x, m.y, m.z, myName()))
         return true
     end })
