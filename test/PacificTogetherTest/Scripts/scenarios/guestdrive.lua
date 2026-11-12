@@ -27,9 +27,16 @@ return function(T)
     end
     local function attached(c) local p = c:GetAttachParentActor(); return p:IsValid() and T.cls(p) == "BP_PlayerCarNew_C" end
     local function cm() return FindFirstOf("BP_CarManager_C") end
+    -- forward speed from the movement since the last call: with guestauth the host's car is a kinematic follower (no physics velocity)
+    local lastP, lastT
     local function fwd()
-        local c = theCar()
-        return KML:InverseTransformDirection(c:GetTransform(), c.Chassis:GetPhysicsLinearVelocity(FName("None"))).X
+        local c, t = theCar(), os.clock()
+        local p, v = c:K2_GetActorLocation(), 0
+        if lastP and t > lastT then
+            v = KML:InverseTransformDirection(c:GetTransform(), { X = p.X - lastP.X, Y = p.Y - lastP.Y, Z = p.Z - lastP.Z }).X / (t - lastT)
+        end
+        lastP, lastT = p, t
+        return v
     end
 
     if T.ROLE == "host" then
@@ -82,8 +89,9 @@ return function(T)
         add({ run = function() sendGuest("t.s") end })
         add({ check = "host_car_reverses_by_guest", timeout = 14, cond = function()
             local c = theCar()
-            log("PT|info forward %.0f reverse %s", fwd(), tostring(c.PlayerInReverseMode))
-            return c.PlayerInReverseMode and fwd() < -150
+            local v = fwd()
+            log("PT|info forward %.0f reverse %s", v, tostring(c.PlayerInReverseMode))
+            return c.PlayerInReverseMode and v < -150
         end })
         add({ run = function() sendGuest("t.stop") end })
         local lights0

@@ -280,6 +280,11 @@ local function show(note)
         L[#L + 1] = "[4]  Story tasks: fix a stuck objective"
         L[#L + 1] = "[5]  Performance mode: " .. (require("perf").enabled() and "on" or "off")
         L[#L + 1] = "[6]  Performance check (10 s)"
+        local ga = package.loaded.guestauth
+        -- guest only: the host switching it off would ignore a guest that still simulates
+        if safety.guest() and type(ga) == "table" and ga.toggle then
+            L[#L + 1] = "[7]  Guest drives own car: " .. (ga.off and "off" or "on")
+        end
         L[#L + 1] = " "
         L[#L + 1] = "[F9]  Close"
     else
@@ -328,7 +333,8 @@ local function doTask(i)
 end
 
 local ACTIONS = { teleport, resync, unstick, nil, function() return require("perf").toggle() end,
-    function() return require("perf").check(function(text) if page then show(text) else ov.post(text, "info", "perfcheck") end end) end }
+    function() return require("perf").check(function(text) if page then show(text) else ov.post(text, "info", "perfcheck") end end) end,
+    function() local ga = package.loaded.guestauth; if safety.guest() and type(ga) == "table" and ga.toggle then return ga.toggle() end end }
 local function press(n)
     if page == "main" then
         if ACTIONS[n] then show(ACTIONS[n]())

@@ -20,6 +20,7 @@ if os.getenv("PT_MUTATE")=="nocarmotion" then offered=offered:gsub(",car%-motion
 if os.getenv("PT_MUTATE")=="nodoormotion" then offered=offered:gsub(",door%-motion","") end
 -- The simulated guest chassis fights pose correction; retain it only as a failing test control.
 if os.getenv("PT_MUTATE") == "physicalcar" then offered = offered .. ",physical-car" end
+if os.getenv("PT_MUTATE") ~= "noguestauth" then offered = offered .. ",guest-auth" end -- guestauth.lua: the guest at the wheel simulates the car
 if PTNative_MusicFinish then offered = offered .. ",music-files" end
 local hostFeatures, hostEpoch, hostTicket, serial, baselineComplete = {}, nil, nil, 0, false
 local held = {} -- guest intents waiting for the baseline (M.toHost)
@@ -315,6 +316,7 @@ if os.getenv("PT_SCENARIO") then
             return
         end
         local kind, payload = data:match("^([^|]+)|(.*)$")
+        if kind and M.testTap then pcall(M.testTap, kind, payload) end -- guestauth.lua: the bot's drive keys are also the guest's own
         if kind and kind:sub(1, 2) == "g." then M.toHost(kind, payload) end
     end
     M.on("g.net.testintent", function(_, data) testIntent(data, 0) end)
