@@ -35,7 +35,7 @@ local function partnerInReach(pc)
     end
 end
 
-common.onKey("H", function()
+local function press()
     if not safety.active() then return end
     local pc = UEHelpers.GetPlayerController()
     if not valid(pc) or not partnerInReach(pc) then return end
@@ -45,6 +45,20 @@ common.onKey("H", function()
     if common.netMode() == "client" then net.toHost("g.heal.give", "") else net.toGuests("g.heal.give", "") end
     ov.post("You patched up " .. ov.other(), "good", "heal")
     log("PT|heal given")
+end
+common.onKey("H", press)
+if os.getenv("PT_SCENARIO") == "healhint" then net.on("g.heal.testpress", press) end -- the test bot's H
+
+-- the key hint (owner request 2026-11-12): only while the partner is in reach and in front of the camera AND our heal is ready
+-- (the hint would otherwise tell a player to press H when it only answers "again in N s"). Mutation healhintalways: always shown.
+local ALWAYS = os.getenv("PT_MUTATE") == "healhintalways"
+LoopInGameThreadWithDelay(150, function()
+    local want = nil
+    if safety.active() or ALWAYS then
+        local pc = UEHelpers.GetPlayerController()
+        if ALWAYS or (valid(pc) and os.clock() >= readyAt and partnerInReach(pc)) then want = "[H] Patch up " .. ov.other() end
+    end
+    ov.hint(want)
 end)
 
 net.on("g.heal.give", function()

@@ -4,6 +4,7 @@
 --   host ping at an item     the host drops a steel item and looks at it: the new ping REPLACES the first (one marker per player, moved), and the
 --                            marker, on both sides, names the item (its archetype title)
 --   guest ping               the guest looks down and pings: the host gets a marker named after the guest within 1 m; one marker per player
+--   colours                  the host's marker is blue and the guest's green on both sides (checks above)
 --   expiry                   with no further ping both sides end with no markers, about 8 s after the last ping (not earlier)
 -- Run: tools/run-test.ps1 -Scenario ping -Fixture garage -Headless      Mutation noping: ping.lua inert (no marker anywhere): every check FAILS.
 return function(T)
@@ -25,20 +26,27 @@ return function(T)
     local function nums(s) local r = {}; for v in s:gmatch("[^|]+") do r[#r + 1] = tonumber(v) end; return r end
     local function myName() return T.localPC().PlayerState:GetPlayerName():ToString() end
 
-    -- ping markers now up (their text ends "<n> m" and the pin line "v"): { text, x, y, z }
+    -- ping markers now up: the game's objective marker (SC_GenericObjective) on a StaticMeshActor beam, its text ending "<n> m":
+    -- { text, x, y, z, colour } (x,y,z: the ping point, the beam is 10 m tall around it)
     local function marks()
         local r = {}
-        for _, a in ipairs(FindAllOf("TextRenderActor") or {}) do
-            if alive(a) and a.TextRender:IsValid() then
-                local t = a.TextRender.Text:ToString()
-                if t:match("\n%d+ m\nv$") then
-                    local l = a:K2_GetActorLocation()
-                    r[#r + 1] = { text = t, x = l.X, y = l.Y, z = l.Z }
+        for _, c in ipairs(FindAllOf("SC_GenericObjective_C") or {}) do
+            local okc, err = pcall(function() -- the game's own markers have other owners; stale ones answer nullptr
+                if not (alive(c) and T.inWorld(c)) then return end
+                local o = c:GetOwner()
+                if not (alive(o) and o:GetClass():GetFName():ToString() == "StaticMeshActor" and alive(c.MainIconWidget)) then return end
+                local t = c.MainIconWidget.TaskText:GetText():ToString()
+                if t:match("\n%d+ m$") then
+                    local l = o:K2_GetActorLocation()
+                    r[#r + 1] = { text = t, x = l.X, y = l.Y, z = l.Z - 1000, colour = c.MainIconWidget.MainImage.ColorAndOpacity }
                 end
-            end
+            end)
+            if not okc then T.log("PT|info ping hud comp error %s", tostring(err)) end
         end
         return r
     end
+    local function isBlue(c) return c.B > 0.8 and c.G < 0.6 and c.R < 0.4 end -- the host's colour (as the map pins)
+    local function isGreen(c) return c.G > 0.8 and c.B < 0.5 and c.R < 0.4 end -- the guest's
     local function markOf(name, list)
         for _, m in ipairs(list or marks()) do if m.text:sub(1, #name + 1) == name .. "\n" then return m end end
     end
@@ -81,7 +89,8 @@ return function(T)
         add({ run = function() ping() end })
         add({ check = "host_own_marker_on_view_ray", timeout = 3, cond = function()
             local m = markOf(myName())
-            if not m or not onViewRay(m) then return false end
+            if not m or not isBlue(m.colour) or not onViewRay(m) then return false end
+            if T.MUTATE == "shot" then T.shot("host_own_ping_blue") end
             hit1 = m
             sendGuest("t.hit1", string.format("%.0f|%.0f|%.0f|%s", m.x, m.y, m.z, myName()))
             return true
@@ -128,7 +137,7 @@ return function(T)
         add({ check = "host_marker_names_item_replaced_first", timeout = 3, cond = function()
             local all = marks()
             local m = markOf(myName(), all)
-            if not (m and title ~= "" and #all == 1 and m.text:find(title, 1, true) and d3(m, hit1.x, hit1.y, hit1.z) > 30) then return false end
+            if not (m and isBlue(m.colour) and title ~= "" and #all == 1 and m.text:find(title, 1, true) and d3(m, hit1.x, hit1.y, hit1.z) > 30) then return false end
             sendGuest("t.hit2", string.format("%.0f|%.0f|%.0f|%s", m.x, m.y, m.z, title))
             return true
         end })
@@ -141,9 +150,10 @@ return function(T)
             local x, y, z, name = v:match("^([^|]*)|([^|]*)|([^|]*)|(.*)$")
             local all = marks()
             local m = markOf(name, all)
+            if T.MUTATE == "shot" and m then T.shot("host_sees_guest_ping_green") end
             T.log("PT|info ping host sees %d markers, guest's at %s", #all, m and string.format("%.0f %.0f %.0f", m.x, m.y, m.z) or "-")
             -- the host's own ping (step 2) may have run out by now (8 s): one or two markers, one per player
-            return m ~= nil and #all <= 2 and d3(m, tonumber(x), tonumber(y), tonumber(z)) < 100 and m.text:find("%d+ m") ~= nil
+            return m ~= nil and isGreen(m.colour) and #all <= 2 and d3(m, tonumber(x), tonumber(y), tonumber(z)) < 100 and m.text:find("%d+ m") ~= nil
         end })
         -- 4. nothing more is pinged: the markers go
         local t0
@@ -170,7 +180,7 @@ return function(T)
         local all = marks()
         local m = markOf(name, all)
         T.log("PT|info ping guest sees %d markers, host's at %s", #all, m and string.format("%.0f %.0f %.0f", m.x, m.y, m.z) or "-")
-        return m ~= nil and #all == 1 and d3(m, tonumber(x), tonumber(y), tonumber(z)) < 100 and m.text:find("%d+ m") ~= nil
+        return m ~= nil and isBlue(m.colour) and #all == 1 and d3(m, tonumber(x), tonumber(y), tonumber(z)) < 100 and m.text:find("%d+ m") ~= nil
     end })
     add({ run = function() sendHost("t.ok1") end })
     local hit2
@@ -191,7 +201,8 @@ return function(T)
     add({ run = function() ping(); tping = os.clock() end })
     add({ check = "guest_own_marker_on_view_ray", timeout = 3, cond = function()
         local m = markOf(myName())
-        if not m or not onViewRay(m) then return false end
+        if not m or not isGreen(m.colour) or not onViewRay(m) then return false end
+        if T.MUTATE == "shot" then T.shot("guest_own_ping_green") end
         sendHost("t.hit3", string.format("%.0f|%.0f|%.0f|%s", m.x, m.y, m.z, myName()))
         return true
     end })
