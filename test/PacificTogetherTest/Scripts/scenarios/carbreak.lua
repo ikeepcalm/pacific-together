@@ -9,7 +9,7 @@ return function(T)
         local me=T.myPawn():K2_GetActorLocation();local best,bd
         for _,v in ipairs(FindAllOf(cls)or{})do
             local n=v:GetFullName()
-            if T.inWorld(v)and not v.IsBroken and v.BaseMesh and v.BaseMesh:IsValid()and not n:find("BP_IF_",1,true)and not n:find("Foliage",1,true)then
+            if T.inWorld(v)and not v.IsBroken and v.BaseMesh and v.BaseMesh:IsValid()and not n:find("BP_IF_",1,true)and not n:find("Foliage",1,true)and not v.BaseMesh.StaticMesh:GetFullName():find("/VFX/",1,true)then
                 local p=v:K2_GetActorLocation();local d=(p.X-me.X)^2+(p.Y-me.Y)^2+(p.Z-me.Z)^2
                 if not bd or d<bd then best,bd=v,d end
             end
@@ -42,12 +42,18 @@ return function(T)
             {check="guest_broke",timeout=40,cond=function()return has("broke")end},
             -- a real foliage instance (tree/shrub): the host's game swaps it into its crash actor and it falls; the guest must do the same
             {run=function()
-                local me=T.myPawn():K2_GetActorLocation()
+                local me=T.myPawn():K2_GetActorLocation();local want={} -- only meshes the game can swap into a crash actor
+                for _,a in ipairs(FindAllOf("BP_Crash_Complex_Foliage_Base_C")or{})do if a.BaseMesh.StaticMesh:IsValid()then want[a.BaseMesh.StaticMesh:GetFullName():match("^%S+ (.+)$")]=true end end
                 for _,c in ipairs(FindAllOf("FoliageInstancedStaticMeshComponent")or{})do
                     local mp=c.StaticMesh:IsValid()and c.StaticMesh:GetFullName():match("^%S+ (.+)$")or""
-                    if T.inWorld(c)and(mp:find("/Shrubs/",1,true)or mp:find("/Trees/",1,true))then
-                        for _,i in ipairs(c:GetInstancesOverlappingSphere(me,5000,true))do
-                            local xf={};if c:GetInstanceTransform(i:get(),xf,true)then tree={c=c,i=i:get(),xf=xf,mesh=mp};break end
+                    if T.inWorld(c)and want[mp]then
+                        for _,i in ipairs(c:GetInstancesOverlappingSphere(me,20000,true))do
+                            local xf={}
+                            if c:GetInstanceTransform(i:get(),xf,true)then
+                                local t=xf.Translation;local dx,dy=t.X-me.X,t.Y-me.Y;local d=(dx*dx+dy*dy)^.5
+                                -- not one the game already swapped (those sit 20 000 down) and not right under the host's swap radius
+                                if math.abs(t.Z-me.Z)<1500 and d>2500 and d<15000 then tree={c=c,i=i:get(),xf=xf,mesh=mp};break end
+                            end
                         end
                     end
                     if tree then break end
@@ -59,15 +65,18 @@ return function(T)
             {check="guest_tree_ready",timeout=40,cond=function()return has("treeready")end},
             {run=function()
                 local m=FindFirstOf("BP_FoliageManager_C");assert(m and m:IsValid(),"no foliage manager")
-                m:ConvertInstanceToSwappable({OwningComponent_14_6824D4974A5EB8C238B737B8507E9571=tree.c,InstanceIndex_2_4C12DC584DB750C0F6F37E9B65AB16C4=tree.i,
+                local ok,err=pcall(function()m:ConvertInstanceToSwappable({OwningComponent_14_6824D4974A5EB8C238B737B8507E9571=tree.c,InstanceIndex_2_4C12DC584DB750C0F6F37E9B65AB16C4=tree.i,
                     InstanceTransform_11_06A4F5C7447701E17A7210BD5DE540B7=tree.xf,StaticMesh_8_8CBDF16941839081660D19B1C70D18EF=tree.c.StaticMesh,
-                    Initialized_13_A81C055B4B2DB6E0D27C5292D399C857=false})
-            end},{wait=1},
-            {run=function()
+                    Initialized_13_A81C055B4B2DB6E0D27C5292D399C857=false})end)
+                T.log("PT|info carbreak host swap ok=%s err=%s",tostring(ok),tostring(err))
                 local t=tree.xf.Translation;local a
                 for _,v in ipairs(FindAllOf("BP_Crash_Complex_Foliage_Base_C")or{})do
                     if T.inWorld(v)then local q=v:K2_GetActorLocation();if (q.X-t.X)^2+(q.Y-t.Y)^2+(q.Z-t.Z)^2<40^2 then a=v;break end end
                 end
+                if not a then local n,best=0,1e18
+                    for _,v in ipairs(FindAllOf("BP_Crash_Complex_Foliage_Base_C")or{})do n=n+1;local q=v:K2_GetActorLocation();local d=((q.X-t.X)^2+(q.Y-t.Y)^2+(q.Z-t.Z)^2)^.5;if d<best then best=d end end
+                    T.log("PT|info carbreak no actor: foliage actors=%d nearest=%.1f tree=%.0f,%.0f,%.0f",n,best,t.X,t.Y,t.Z)
+                    for _,v in ipairs(FindAllOf("BP_Crash_Complex_Foliage_Base_C")or{})do local q=v:K2_GetActorLocation();T.log("PT|info carbreak fa %s %.0f %.0f %.0f",v:GetClass():GetFName():ToString(),q.X,q.Y,q.Z)end end
                 assert(a,"host swap made no crash actor");a:ComplexBreak({X=5e5,Y=0,Z=0},a.BaseMesh)
             end},
             {check="guest_tree_actor_broken",timeout=40,cond=function()return has("treebroke")end},{wait=2}}

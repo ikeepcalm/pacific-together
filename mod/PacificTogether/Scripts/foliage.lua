@@ -156,7 +156,7 @@ LoopInGameThreadWithDelay(16,function()
                 if not w.job.swapped and swapInstance(c,idx,xf)then
                     common.log('PT|foliage swapped instance %.1f %.1f %.1f',w.job.p.X,w.job.p.Y,w.job.p.Z)
                     w.job.swapped=true;w.job.tries=0;local j=w.job
-                    common.defer(200,function()pending[#pending+1]=j end);work=nil;return
+                    table.insert(pending,1,j);work=nil;return -- next tick: a far-away swapped actor deswaps itself within a second
                 end
                 if c:RemoveInstance(idx) then
                     common.log('PT|foliage applied instance %.1f %.1f %.1f',w.job.p.X,w.job.p.Y,w.job.p.Z)
