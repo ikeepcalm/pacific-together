@@ -125,7 +125,15 @@ function M.check(done)
     log("PT|perf check started")
     return "Performance check: 10 s, keep playing as usual"
 end
+-- FPS every minute next to the PT|perf rows (friend host 10 FPS vs 30 alone, 2026-11-11: no number to compare); this loop runs once a frame
+local frames, fpsAt = 0, os.clock()
 LoopInGameThreadWithDelay(1, function()
+    frames = frames + 1
+    local dt = os.clock() - fpsAt
+    if dt >= 60 then
+        log("PT|perf fps %.1f peers=%d", frames / dt, #(FindAllOf("PlayerController") or {}))
+        frames, fpsAt = 0, os.clock()
+    end
     local c = check
     if not c then return end
     c.frames = c.frames + 1
