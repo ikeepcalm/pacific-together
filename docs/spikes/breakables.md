@@ -31,3 +31,8 @@ Owner report: driving the host car through small trees or flying rocks breaks th
 
 ## Results
 - carbreak 19/19: `local/test-results/20261112-173414-breakables-carbreak`.
+- visual.lua already mirrors `BP_Destruct_*` breaks (br=1) but from its 5 s sweep, about 5-11 s late and without velocity; carbreak
+  asserts a break within 4 s / 6 s, and the `nocarbreak` mutation fails both checks (18/20, `...-breakables-carbreak-nocarbreak`).
+- Reruns: foliage 20/20 (`20261112-174544-breakables-foliage`), session 40/40 (`20261112-174924-breakables-session`), visual -Fixture zone
+  27/29 (`20261112-180134-breakables-visual`): guest_door_follows_host also failed in 20261108 runs before this lane; the other
+  failure is "RegisterHook BP_Panel_Base:AttemptShut is not loaded" (car.lua, not touched here).
