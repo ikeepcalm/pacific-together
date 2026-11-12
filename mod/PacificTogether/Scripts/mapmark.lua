@@ -17,6 +17,9 @@ local HUD = "/Game/UI/NavigationSystems/SC_GenericObjective.SC_GenericObjective_
 local XF = { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = { X = 0, Y = 0, Z = 0 }, Scale3D = { X = 1, Y = 1, Z = 1 } }
 local TYPE_BLUE = 3 -- EObjectiveMarkerDisplayType: the blue quest marker, with text
 
+local BLUE, GREEN = { R = 0.1, G = 0.4, B = 1.0, A = 1.0 }, { R = 0.1, G = 1.0, B = 0.2, A = 1.0 }
+local function colourOf(host) return host and BLUE or GREEN end
+local proxyOf = {} -- full names of our own icon components the host-icon copy must leave alone
 local marks = {} -- character full name -> { icon, hud, shown, text }
 
 local function valid(o) return o ~= nil and o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) end
@@ -42,7 +45,7 @@ local function addIcon(char)
     icon.IconTexture, icon.IconMaterial_UMG, icon.IconMaterial_Canvas = s.IconTexture, s.IconMaterial_UMG, s.IconMaterial_Canvas
     icon:SetIconSize(s.IconSize, s.IconSizeUnit)
     icon:SetIconZOrder(s.IconZOrder + 1)
-    icon:SetIconDrawColor({ R = 0.2, G = 0.8, B = 1.0, A = 1.0 })
+    icon:SetIconDrawColor(colourOf(safety.guest())) -- the other one: host blue, guest green
     icon:SetIconVisible(true)
     return icon
 end
@@ -102,13 +105,16 @@ end
 local RECAPTURE = { 30 }
 local captureSeen, captureDone = nil, 0
 
--- The ARC waypoint (owner request 2026-10-30): each side's ARC screen places its own BP_WaypointActor (map icon + in-world
--- marker, gone by itself within 10 m of the local camera), so a guest marking a turn for the driving host marked it only for
--- itself. Both sides send their waypoint ("x y z" or "none") when it changes there; the other side moves, spawns or removes its
--- own to match, the last change wins. Mutation nowaypoint: off.
+-- The ARC waypoint (owner requests 2026-10-30, 2026-11-12): each side's ARC screen places its own BP_WaypointActor (map pin +
+-- in-world marker, gone by itself within 10 m of the local camera). Each player keeps their OWN pin and sees the partner's as a
+-- second pin: the partner's is a MapIconComponent on the map bounds actor (not a second BP_WaypointActor: the ARC screen's
+-- FindExistingWaypoint takes the first actor of the class and would move the partner's). Colours: host blue, guest green, on the
+-- pins and on the partner-position icons. Both sides send their waypoint ("x y z" or "none") when it changes.
+-- Mutation nowaypoint: off. Mutation onemark: the old single shared marker (the partner's spawns/moves our own actor).
 local net = require("net")
 local WP = "/Game/UI/CarEquipment/Internal/Gobbler/BP_WaypointActor.BP_WaypointActor_C"
 local wp = { sent = nil, got = nil }
+local partnerPin, pinTex = nil, nil
 local function waypoint()
     for _, a in ipairs(FindAllOf("BP_WaypointActor_C") or {}) do
         if valid(a) and a:GetWorld():IsValid() and a:GetWorld():GetFullName() == UEHelpers.GetWorld():GetFullName() then return a end
@@ -122,31 +128,62 @@ end
 local function sendWp(s)
     if safety.guest() then net.toHost("g.map.wp", s) else net.toGuests("g.map.wp", s) end
 end
-net.on("g.map.wp", function(_, s)
-    if not safety.active() then return end
-    local a = waypoint()
-    wp.got, wp.sent = s, s
+local function pinTexture()
+    if valid(pinTex) then return pinTex end
+    for _, t in ipairs(FindAllOf("Texture2D") or {}) do
+        if valid(t) and t:GetFName():ToString() == "Map-Pin" then pinTex = t; return t end
+    end
+end
+-- the partner's pin: a map icon like the game's own pin, in the partner's colour; nil when the map bounds actor is not there
+local function showPartnerPin(x, y, z)
+    local s, tex, h = carIcon(), pinTexture(), FindFirstOf("BP_GobblerMapBounds_C")
+    if not (s and tex and valid(h)) then return false end
+    if not valid(partnerPin) then
+        partnerPin = h:AddComponentByClass(class(ICON), true, XF, false)
+        proxyOf[partnerPin:GetFullName()] = true
+    end
+    partnerPin:SetIconTexture(tex)
+    partnerPin:ResetIconMaterialForUMG(); partnerPin:ResetIconMaterialForCanvas()
+    partnerPin:K2_SetWorldLocationAndRotation({ X = x, Y = y, Z = z }, { Pitch = 0, Yaw = 0, Roll = 0 }, false, {}, true)
+    partnerPin:SetIconSize(s.IconSize, s.IconSizeUnit)
+    partnerPin:SetIconZOrder(s.IconZOrder + 2)
+    partnerPin:SetIconDrawColor(colourOf(safety.guest())) -- the partner of a guest is the host
+    partnerPin:SetIconVisible(true)
+    return true
+end
+local function applyPartner(s)
     if s == "none" then
-        if a then a:K2_DestroyActor() end
-        log("PT|mapmark waypoint cleared by the other player")
-        return
+        if valid(partnerPin) then partnerPin:SetIconVisible(false) end
+        return true
     end
     local x, y, z = s:match("^(%S+) (%S+) (%S+)$")
-    local xf = { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = { X = tonumber(x), Y = tonumber(y), Z = tonumber(z) }, Scale3D = { X = 1, Y = 1, Z = 1 } }
-    if a then
-        a:K2_SetActorTransform(xf, false, {}, true)
-    else
-        local cls = class(WP)
-        local gs = UEHelpers.GetGameplayStatics()
-        a = gs:FinishSpawningActor(gs:BeginDeferredActorSpawnFromClass(UEHelpers.GetWorldContextObject(), cls, xf, 1, nil), xf)
-        -- the ARC screen moves or clears the waypoint it knows: ours from now on
-        for _, scr in ipairs(FindAllOf("UMG_GobblerScreen_C") or {}) do if valid(scr) then pcall(function() scr.Waypoint = a end) end end
+    return showPartnerPin(tonumber(x), tonumber(y), tonumber(z))
+end
+net.on("g.map.wp", function(_, s)
+    if not safety.active() then return end
+    if os.getenv("PT_MUTATE") == "onemark" then wp.got, wp.sent = s, s end -- the old single marker: the partner's state is ours
+    if os.getenv("PT_MUTATE") == "onemark" then
+        local a = waypoint()
+        if s == "none" then if a then a:K2_DestroyActor() end return end
+        local x, y, z = s:match("^(%S+) (%S+) (%S+)$")
+        local xf = { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = { X = tonumber(x), Y = tonumber(y), Z = tonumber(z) }, Scale3D = { X = 1, Y = 1, Z = 1 } }
+        if a then a:K2_SetActorTransform(xf, false, {}, true)
+        else
+            local gs = UEHelpers.GetGameplayStatics()
+            gs:FinishSpawningActor(gs:BeginDeferredActorSpawnFromClass(UEHelpers.GetWorldContextObject(), class(WP), xf, 1, nil), xf)
+        end
+        return
     end
-    log("PT|mapmark waypoint set by the other player at %s", s)
+    wp.pending = s
+    if applyPartner(s) then wp.pending = nil end
+    log("PT|mapmark partner waypoint %s", s)
 end)
 local function waypointTick()
-    if not safety.active() then wp.sent, wp.got = nil, nil; return end
-    local s = wpState(waypoint())
+    if not safety.active() then wp.sent, wp.got, wp.pending = nil, nil, nil; return end
+    if wp.pending and applyPartner(wp.pending) then wp.pending = nil end
+    local own = waypoint()
+    if own and valid(own.MapIcon) and os.getenv("PT_MUTATE") ~= "onemark" then own.MapIcon:SetIconDrawColor(colourOf(not safety.guest())) end
+    local s = wpState(own)
     if s ~= wp.sent then
         wp.sent = s
         if s ~= wp.got then sendWp(s); log("PT|mapmark waypoint sent %s", s) end
@@ -168,7 +205,7 @@ end
 -- the host in it (access violation, live 2026-11-04).
 -- shortcut: no tooltips, layer offsets or per-layer rotation on the copies; send them if hover text or odd icons turn out to matter.
 local SKIP = { ["Car_-_Key"] = true, ["Map-Pin"] = true }
-local hostIcons, applied, sentIcons, sentAt, proxies, proxyOf, holder = nil, nil, nil, nil, {}, {}, nil
+local hostIcons, applied, sentIcons, sentAt, proxies, holder = nil, nil, nil, nil, {}, nil
 local hid, missing = {}, {} -- guest: its own icons it turned off (full name -> component); asset paths that did not load
 local DEFAULT_MAT = { ["/MinimapPlugin/Materials/Icons/M_UMG_MapIcon.M_UMG_MapIcon"] = true, ["/MinimapPlugin/Materials/Icons/M_Canvas_MapIcon.M_Canvas_MapIcon"] = true }
 local function path(o) return valid(o) and (o:GetFullName():gsub("^%S+ ", "")) or "" end
@@ -277,7 +314,7 @@ if os.getenv("PT_MUTATE") ~= "noicons" then
 end
 
 -- a map change frees every object we hold: forget them before it happens
-RegisterLoadMapPreHook(function() marks, captureSeen, captureDone = {}, nil, 0; wp.sent, wp.got = nil, nil; hostIcons, applied, sentIcons, proxies, proxyOf, holder, hid = nil, nil, nil, {}, {}, nil, {} end)
+RegisterLoadMapPreHook(function() marks, captureSeen, captureDone = {}, nil, 0; wp.sent, wp.got, wp.pending, partnerPin = nil, nil, nil, nil; hostIcons, applied, sentIcons, proxies, holder, hid = nil, nil, nil, {}, nil, {}; proxyOf = {} end)
 
 LoopInGameThreadWithDelay(250, function()
     local ok, err = pcall(update)
