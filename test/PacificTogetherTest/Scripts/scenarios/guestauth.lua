@@ -151,7 +151,7 @@ return function(T)
     -- guest
     local steps = {}
     local function add(s) steps[#steps + 1] = s end
-    local keys, loop, report = "0 0 0 0", nil, nil
+    local keys, loop, report, probeAt = "0 0 0 0", nil, nil, nil
     add({ check = "client_in_zone", timeout = 400, cond = function() return T.netMode() == "client" and T.map() ~= "RB_MainMenu" and T.cls(T.myPawn()) == T.CHAR end })
     add({ check = "guest_one_car", timeout = 90, cond = function() return theCar() ~= nil end })
     add({ check = "guest_told_sit", timeout = 300, cond = function() return take("t.sit") end })
@@ -167,6 +167,25 @@ return function(T)
             pcall(function()
                 local c = theCar()
                 local p, v = c:K2_GetActorLocation(), c:GetVelocity()
+                if os.clock() - (probeAt or 0) > 1 then
+                    probeAt = os.clock()
+                    local okp, errp = pcall(function()
+                        local vc = c.VehicleController
+                        local okb, pb = pcall(function() return vc:GetParkingBrakeActive() end)
+                        log("PT|info guest car p=%.0f,%.0f,%.0f v=%.0f,%.0f,%.0f fwd=%.0f thr=%.2f in=%.2f/%.2f phys=%s vctick=%s pb=%s gear=%s ign=%s keys=%s",
+                            p.X, p.Y, p.Z, v.X, v.Y, v.Z, fwd(), c.ThrottleCurrent, vc.ThrottleInput, vc.BrakeInput, tostring(physics()),
+                            tostring(vc:IsComponentTickEnabled()), tostring(okb and pb), tostring(cm().MyCarGearBox), tostring(cm().CarIgnitionState), keys)
+                    end)
+                    if not okp then log("PT|info guest car probe error %s", tostring(errp)) end
+                    pcall(function()
+                        local ch = c.Chassis
+                        local cp, cv = ch:K2_GetComponentLocation(), ch:GetPhysicsLinearVelocity(NONE)
+                        local root = c.RootComponent
+                        log("PT|info guest chassis p=%.0f,%.0f,%.0f v=%.0f,%.0f,%.0f root=%s attached=%s mutes=%s role=%s repmove=%s",
+                            cp.X, cp.Y, cp.Z, cv.X, cv.Y, cv.Z, root:GetFName():ToString(), tostring(ch.AttachParent and ch.AttachParent:IsValid() and ch.AttachParent:GetFName():ToString()),
+                            tostring(PTNative_MuteCount and PTNative_MuteCount()), tostring(c.Role), tostring(c.bReplicateMovement))
+                    end)
+                end
                 T.intent("t.gpos", string.format("%.1f,%.1f,%.1f,%.1f", p.X, p.Y, p.Z, math.sqrt(v.X ^ 2 + v.Y ^ 2 + v.Z ^ 2)))
             end)
         end)

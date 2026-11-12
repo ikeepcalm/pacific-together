@@ -1199,7 +1199,13 @@ function M.unfollow(car, v, keepMute)
     if followLoop then CancelDelayedAction(followLoop) end
     if followUnmute and not keepMute then followUnmute() end
     followLoop, followUnmute, followed, tickStep = nil, nil, nil, nil
-    pcall(function() car.Chassis:SetSimulatePhysics(true); car.VehicleController:SetComponentTickEnabled(true) end)
+    pcall(function() car.Chassis:SetSimulatePhysics(true); car.VehicleController:SetComponentTickEnabled(true); car.VehicleController:Wake() end)
+    -- the key/bobble/hanging bodies the follower posed kinematically are constrained to the chassis: a kinematic key pinned the
+    -- simulating chassis in place (throttle built 1500 uu/s of velocity, the car moved 5 uu; live 2026-11-12)
+    for _, entry in pairs(cosmeticBodies) do
+        local body = common.resolve(entry.body)
+        if body and same(common.resolve(entry.car), car) then pcall(function() body:SetSimulatePhysics(true) end) end
+    end
     if v then pcall(function() car.Chassis:SetPhysicsLinearVelocity(v, false, NONE) end) end
 end
 M.follow = function(car) if followed ~= car:GetFullName() then follow(car) end end
