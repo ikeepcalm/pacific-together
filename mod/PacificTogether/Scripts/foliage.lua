@@ -39,8 +39,13 @@ local function publish(a)
     if records[row] then return end
     records[row]=true
     common.log('PT|foliage break %s %.1f %.1f %.1f',kind,p.X,p.Y,p.Z)
-    if kind=="F"then
-        for _,pc in ipairs(net.guests())do if net.peerSupports(pc,"foliage")then net.toGuest(pc,"g.foliage.break",row)end end
+    if kind=="F"then -- 0.9.2 guests get the plain row; newer ones the crash row with the car's velocity (impulse for the fall)
+        local cm=FindFirstOf("BP_CarManager_C");local v={X=0,Y=0,Z=0}
+        if live(cm)and live(cm.NewCarActor)then local ok,r=pcall(function()return cm.NewCarActor:GetVelocity()end);if ok and r then v=r end end
+        local crow=string.format("%s|F|%.0f|%.0f|%.0f",row,v.X,v.Y,v.Z);crashRows[row]=crow
+        for _,pc in ipairs(net.guests())do if net.peerSupports(pc,"foliage")then
+            if net.peerSupports(pc,"foliage-impulse")then net.toGuest(pc,"g.foliage.crash",crow)else net.toGuest(pc,"g.foliage.break",row)end
+        end end
         return
     end
     -- Physics starts after the hook returns: read the knocked-flying velocity a moment later.
@@ -56,6 +61,16 @@ local function listCrash()
     for _,n in ipairs{"BP_Crash_Simple_Base_C","BP_Crash_Complex_Base_C"}do for _,a in ipairs(FindAllOf(n)or{})do l[#l+1]=a end end
     return l
 end
+-- BP_FoliageManager's own swap (what an overlap does on the host): spawns the crash actor from the instance, hides the instance.
+local function swapInstance(c,idx,xf)
+    if os.getenv("PT_MUTATE")=="noswap" or c:GetClass():GetFName():ToString()~="FoliageInstancedStaticMeshComponent" then return false end
+    local m=FindFirstOf("BP_FoliageManager_C");if not live(m) then return false end
+    return (pcall(function()
+        m:ConvertInstanceToSwappable({OwningComponent_14_6824D4974A5EB8C238B737B8507E9571=c,InstanceIndex_2_4C12DC584DB750C0F6F37E9B65AB16C4=idx,
+            InstanceTransform_11_06A4F5C7447701E17A7210BD5DE540B7=xf,StaticMesh_8_8CBDF16941839081660D19B1C70D18EF=c.StaticMesh,
+            Initialized_13_A81C055B4B2DB6E0D27C5292D399C857=false})
+    end))
+end
 local hooked=false
 RegisterLoadMapPreHook(function() records,pending,seen,work,admitted,crashRows={},{},{},nil,{},{} end)
 net.on("g.foliage.break",function(_,data)
@@ -69,7 +84,7 @@ net.on("g.foliage.break",function(_,data)
 end)
 net.on("g.foliage.crash",function(_,data)
     if common.netMode()~="client" or not net.hostSupports("foliage") or #data>4096 or seen[data] or #pending>=256 then return end
-    local epoch,mesh,x,y,z,kind,vx,vy,vz=data:match("^([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)|([SC])|([^|]+)|([^|]+)|([^|]+)$")
+    local epoch,mesh,x,y,z,kind,vx,vy,vz=data:match("^([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)|([SCF])|([^|]+)|([^|]+)|([^|]+)$")
     local n={tonumber(x),tonumber(y),tonumber(z),tonumber(vx),tonumber(vy),tonumber(vz)}
     if epoch~=net.worldToken() or not mesh or not mesh:find("^/Game/") then return end
     for i=1,6 do if not n[i] or n[i]~=n[i] or math.abs(n[i])>1e8 then return end end
@@ -108,7 +123,9 @@ LoopInGameThreadWithDelay(16,function()
                         if p.kind=="S"then
                             a:SimpleBreak({X=0,Y=0,Z=0})
                             if p.v.X~=0 or p.v.Y~=0 or p.v.Z~=0 then pcall(function()a.BaseMesh:SetAllPhysicsLinearVelocity(p.v,false)end)end
-                        else a:ComplexBreak({X=0,Y=0,Z=0},a.BaseMesh)end
+                        else -- the host's car hit it: same push (velocity x ~car mass, as the game's own hit does)
+                            local v=p.v or{X=0,Y=0,Z=0};a:ComplexBreak({X=v.X*1000,Y=v.Y*1000,Z=v.Z*1000},a.BaseMesh)
+                        end
                     end
                     common.log('PT|foliage applied actor %.1f %.1f %.1f',p.p.X,p.p.Y,p.p.Z)
                     return
@@ -134,9 +151,17 @@ LoopInGameThreadWithDelay(16,function()
         if live(c) and w.index<=#entry.indices then
             local idx=entry.indices[w.index]
             local xf={};local ok=c:GetInstanceTransform(idx,xf,true);calls=calls+1
-            if ok and close(xf.Translation,w.job.p) and c:RemoveInstance(idx) then
-                common.log('PT|foliage applied instance %.1f %.1f %.1f',w.job.p.X,w.job.p.Y,w.job.p.Z)
-                work=nil;return
+            if ok and close(xf.Translation,w.job.p) then
+                -- Do what the host's game did: swap the instance into its crash actor (it falls), break that next pass.
+                if not w.job.swapped and swapInstance(c,idx,xf)then
+                    common.log('PT|foliage swapped instance %.1f %.1f %.1f',w.job.p.X,w.job.p.Y,w.job.p.Z)
+                    w.job.swapped=true;w.job.tries=0;local j=w.job
+                    table.insert(pending,1,j);work=nil;return -- next tick: a far-away swapped actor deswaps itself within a second
+                end
+                if c:RemoveInstance(idx) then
+                    common.log('PT|foliage applied instance %.1f %.1f %.1f',w.job.p.X,w.job.p.Y,w.job.p.Z)
+                    work=nil;return
+                end
             end
             w.index=w.index+1
         else w.component=w.component+1;w.index=1 end
@@ -144,7 +169,7 @@ LoopInGameThreadWithDelay(16,function()
     if w.component>#w.components then
         -- shortcut: retry streamed-out foliage for five minutes; increase only with a streaming regression.
         w.job.tries=(w.job.tries or 0)+1
-        if w.job.tries<300 then common.defer(1000,function()pending[#pending+1]=w.job end)end
+        if w.job.tries<(w.job.swapped and 10 or 300) then common.defer(1000,function()pending[#pending+1]=w.job end)end
         work=nil
     end
 end)
