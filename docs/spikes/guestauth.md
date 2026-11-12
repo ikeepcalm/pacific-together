@@ -30,8 +30,34 @@ Authority rules:
 
 ## Observations
 
-(filled after runs)
+- First runs (`20261112-173322-guestauth-guestauth`, `20261112-173820-guestauth-guestauth`, 35/37): authority switched both
+  ways and handback was clean, but the guest's car did not move. Its chassis simulated, the throttle built 1500 uu/s of
+  physics velocity, and the car moved 5 uu in 12 s. The host's car followed it exactly (p50 2 uu).
+- Live (game MCP, coop-zone): an impulse or set velocity on the guest's chassis was cancelled within a frame. The client's
+  physics worked on a spawned cube. `OnRep_ReplicatedMovement` was muted (PTNative_MuteCount rose about 30/s) and no
+  ProcessEvent call moved the car. VehicleController `Wake()` alone changed nothing. With
+  `SM_Wagon_01_KeyPhysics:SetSimulatePhysics(true)` the chassis moved right away: car.lua's cosmetic follower
+  (renderCosmetics) makes the key body kinematic, and `PhysicsConstraint_Key` ties it to the chassis.
+- With the cosmetic bodies back on physics at the switch (`car.lua` `M.unfollow`), run `20261112-175842-guestauth-guestauth`
+  passed 37/37:
+  - The guest's key reached its own throttle in 3 frames (176 ms) and its car moved after 8 frames (498 ms). The test bot's key
+    reaches guestauth.lua through the test intent, which takes one or two of those frames.
+  - The host's car was kinematic in 399 of the samples.
+  - Host-to-guest car distance while moving: p50 124 uu, p95 204 uu (follow delay at up to ~900 uu/s). Once stopped it was 0.0 uu.
+  - Handback on exit: max step per frame 0.2 uu, 0.1 uu moved, min vz -7 over 210 frames. The guest followed the host again.
+- Mutation `noguestauth`: see the lane report (run folder `*-guestauth-guestauth` with mutate=noguestauth).
 
-## Derived / Guesses / Unknowns
+## Derived
 
-(filled after runs)
+- The guest can simulate the replicated car copy (Role 1). Two conditions: the host's replicated pose stays muted, and every
+  body constrained to the chassis must simulate too (key, bobble, hanging). A kinematic constrained body pins the chassis in place.
+- The host follows with the existing `follow()` (its motion source is the guest's g.guestauth.car samples in the same
+  carMotion slot), so the host sees the guest's car about one follow delay (0.1-0.25 s) late, as the guest saw the host's.
+
+## Guesses / Unknowns
+
+- Not run on a real network (ping/loss). The guest's stream is a reliable RPC at 20 Hz, about 130 B per sample.
+- Crash damage and anomaly pushes while the guest drives are not forwarded (see the table above). The host's wheels stand still
+  while it follows.
+- The guest's driving camera is still the character camera (unchanged).
+- Handback was tested only with the car stopped. A moving handback carries the last sample's velocity but is untested.
