@@ -14,6 +14,7 @@ local function inWorld(a)
 end
 local function path(a) return a:GetFullName():match("^%S+ (.+)$") end
 local function close(p,q) return (p.X-q.X)^2+(p.Y-q.Y)^2+(p.Z-q.Z)^2<5^2 end
+local function close2(p,q,r) return (p.X-q.X)^2+(p.Y-q.Y)^2+(p.Z-q.Z)^2<r*r end
 local function source(a)
     local s=a.InstanceSwappableData
     if s.Initialized_13_A81C055B4B2DB6E0D27C5292D399C857 and live(s.StaticMesh_8_8CBDF16941839081660D19B1C70D18EF) then
@@ -22,10 +23,12 @@ local function source(a)
     end
     return {p=a:K2_GetActorLocation(),mesh=path(a.BaseMesh.StaticMesh)}
 end
+local publishCrash
 local function publish(a)
     if common.netMode()~="listen" or os.getenv("PT_MUTATE")=="nofoliage" or not inWorld(a) then return end
     local cls=StaticFindObject('/Game/Gameplay/Destruction/Base/BP_Crash_Complex_Foliage_Base.BP_Crash_Complex_Foliage_Base_C')
-    if not live(cls) or not a:IsA(cls) or not live(a.BaseMesh) or not live(a.BaseMesh.StaticMesh) then return end
+    if live(cls) and not a:IsA(cls) then return publishCrash(a) end
+    if not live(cls) or not live(a.BaseMesh) or not live(a.BaseMesh.StaticMesh) then return end
     local state=source(a);local p=state.p
     local row=string.format("%s|%s|%.1f|%.1f|%.1f",net.worldToken(),state.mesh,p.X,p.Y,p.Z)
     if records[row] then return end
@@ -33,8 +36,60 @@ local function publish(a)
     common.log('PT|foliage break %.1f %.1f %.1f',p.X,p.Y,p.Z)
     for _,pc in ipairs(net.guests())do if net.peerSupports(pc,"foliage")then net.toGuest(pc,"g.foliage.break",row)end end
 end
+-- Other breakables (signs, barrels, fences, floating rocks): same level-placed actor on both sides, so path identifies it.
+local crashRecords,crashPending,crashN={}, {},0
+function publishCrash(a)
+    if common.netMode()~="listen" or os.getenv("PT_MUTATE")=="nocarbreak" or not inWorld(a) then return end
+    local simple=StaticFindObject('/Game/Gameplay/Destruction/Base/BP_Crash_Simple_Base.BP_Crash_Simple_Base_C')
+    local complex=StaticFindObject('/Game/Gameplay/Destruction/Base/BP_Crash_Complex_Base.BP_Crash_Complex_Base_C')
+    local kind=live(simple)and a:IsA(simple)and"S"or live(complex)and a:IsA(complex)and"C"
+    if not kind or crashN>=512 then return end
+    local ap=path(a);if crashRecords[ap]then return end
+    local p=a:K2_GetActorLocation();local cls=a:GetClass():GetFName():ToString()
+    local function row(v)return string.format("%s|%s|%s|%s|%.1f|%.1f|%.1f|%.0f|%.0f|%.0f",net.worldToken(),kind,cls,ap,p.X,p.Y,p.Z,v.X,v.Y,v.Z)end
+    local zero={X=0,Y=0,Z=0};crashRecords[ap]=row(zero);crashN=crashN+1
+    common.log('PT|crashbreak %s %s %.1f %.1f %.1f',kind,cls,p.X,p.Y,p.Z)
+    -- Physics only starts after the hook returns: read the knocked-flying velocity a moment later.
+    common.defer(150,function()
+        local v=zero
+        if kind=="S"and live(a)and live(a.BaseMesh)then local ok,r=pcall(function()return a.BaseMesh:GetPhysicsLinearVelocity("None")end);if ok and r then v={X=r.X,Y=r.Y,Z=r.Z}end end
+        for _,pc in ipairs(net.guests())do if net.peerSupports(pc,"foliage")then net.toGuest(pc,"g.foliage.crash",row(v))end end
+    end)
+end
 local hooked=false
-RegisterLoadMapPreHook(function() records,pending,seen,work,admitted={},{},{},nil,{} end)
+RegisterLoadMapPreHook(function() records,pending,seen,work,admitted={},{},{},nil,{};crashRecords,crashPending,crashN={}, {},0 end)
+net.on("g.foliage.crash",function(_,data)
+    if common.netMode()~="client" or not net.hostSupports("foliage") or #data>2048 or seen[data] or #crashPending>=256 then return end
+    local epoch,kind,cls,ap,x,y,z,vx,vy,vz=data:match("^([^|]+)|([SC])|([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)$")
+    local n={tonumber(x),tonumber(y),tonumber(z),tonumber(vx),tonumber(vy),tonumber(vz)}
+    if epoch~=net.worldToken() or not cls then return end
+    for i=1,6 do if not n[i] or n[i]~=n[i] or math.abs(n[i])>1e8 then return end end
+    seen[data]=true;crashPending[#crashPending+1]={kind=kind,cls=cls,path=ap,p={X=n[1],Y=n[2],Z=n[3]},v={X=n[4],Y=n[5],Z=n[6]}}
+end)
+LoopInGameThreadWithDelay(250,function()
+    if common.netMode()~="client" or #crashPending==0 then return end
+    local keep={}
+    for _,j in ipairs(crashPending)do
+        local a=StaticFindObject(j.path)
+        if not live(a)or not a.BaseMesh then
+            a=nil
+            for _,c in ipairs(FindAllOf(j.cls)or{})do if inWorld(c)and not c.IsBroken and close2(c:K2_GetActorLocation(),j.p,300)then a=c;break end end
+        end
+        if live(a)then
+            if not a.IsBroken then
+                if j.kind=="C"then a:ComplexBreak({X=0,Y=0,Z=0},a.BaseMesh)else
+                    a:SimpleBreak({X=0,Y=0,Z=0})
+                    if j.v.X~=0 or j.v.Y~=0 or j.v.Z~=0 then pcall(function()a.BaseMesh:SetAllPhysicsLinearVelocity(j.v,false)end)end
+                end
+                common.log('PT|crashbreak applied %s %.1f %.1f %.1f',j.cls,j.p.X,j.p.Y,j.p.Z)
+            end
+        else
+            -- shortcut: streamed-out props are retried for a minute, then dropped.
+            j.tries=(j.tries or 0)+1;if j.tries<240 then keep[#keep+1]=j end
+        end
+    end
+    crashPending=keep
+end)
 net.on("g.foliage.break",function(_,data)
     if common.netMode()~="client" or not net.hostSupports("foliage") or #data>4096 then return end
     local epoch,mesh,x,y,z=data:match("^([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)$")
@@ -61,6 +116,7 @@ LoopInGameThreadWithDelay(250,function()
         if key and net.peerSupports(pc,"foliage") and net.lifecycle(pc)=="active" and not admitted[key] then
             admitted[key]=true
             for row in pairs(records)do net.toGuest(pc,"g.foliage.break",row)end
+            for _,row in pairs(crashRecords)do net.toGuest(pc,"g.foliage.crash",row)end
         end
     end
 end)
