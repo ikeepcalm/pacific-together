@@ -12,7 +12,7 @@ assert(type(PTNative_MsgReset) == "function", "PacificTogetherNative is outdated
 local M = {}
 local handlers = {}
 -- Extensions ride the author's PT1/PT1A contract, only after both peers opt in.
-local offered = "motion,item-tint,world-clock,item-clock,cosmetic-motion,car-motion,door-motion,named-storage,foliage,foliage-state,wreck-state,drop-velocity,item-state,intents,heap,heap-lid" .. (PTNative_TunnelMotionSend and ",datagrams" or "")
+local offered = "motion,item-tint,world-clock,item-clock,cosmetic-motion,car-motion,door-motion,named-storage,foliage,foliage-state,foliage-impulse,wreck-state,drop-velocity,item-state,intents,heap,heap-lid" .. (PTNative_TunnelMotionSend and ",datagrams" or "")
 if os.getenv("PT_MUTATE")=="noworldclock" then offered=offered:gsub(",world%-clock","") end
 if os.getenv("PT_MUTATE")=="noheaplid" then offered=offered:gsub(",heap%-lid","") end
 if os.getenv("PT_MUTATE")=="nowreckstate" then offered=offered:gsub(",wreck%-state","") end

@@ -27,7 +27,7 @@ return function(T)
     end
     local function gone(a)return not a:IsValid()or a:HasAnyInternalFlags(EInternalObjectFlags.PendingKill)or a.IsBroken end
     if T.ROLE=="host"then
-        local s,c,sp,cp
+        local s,c,sp,cp,tree
         return {T.onMap("RB_MainMenu",90),{run=function()T.console("open /Game/Maps/Rural/"..map.."/"..map.."?listen")end},T.onMap(map,120),
             {check="guest_joined",timeout=240,cond=function()return L.guestChar()~=nil end},{wait=15},
             {run=function()
@@ -39,7 +39,38 @@ return function(T)
             end},
             {check="guest_ready",timeout=40,cond=function()return has("ready")end},
             {run=function()s:SimpleBreak({X=0,Y=0,Z=0})end},{wait=4},{run=function()T.log("PT|info carbreak complex next");c:ComplexBreak({X=0,Y=0,Z=0},c.BaseMesh)end},
-            {check="guest_broke",timeout=40,cond=function()return has("broke")end},{wait=2}}
+            {check="guest_broke",timeout=40,cond=function()return has("broke")end},
+            -- a real foliage instance (tree/shrub): the host's game swaps it into its crash actor and it falls; the guest must do the same
+            {run=function()
+                local me=T.myPawn():K2_GetActorLocation()
+                for _,c in ipairs(FindAllOf("FoliageInstancedStaticMeshComponent")or{})do
+                    local mp=c.StaticMesh:IsValid()and c.StaticMesh:GetFullName():match("^%S+ (.+)$")or""
+                    if T.inWorld(c)and(mp:find("/Shrubs/",1,true)or mp:find("/Trees/",1,true))then
+                        for _,i in ipairs(c:GetInstancesOverlappingSphere(me,5000,true))do
+                            local xf={};if c:GetInstanceTransform(i:get(),xf,true)then tree={c=c,i=i:get(),xf=xf,mesh=mp};break end
+                        end
+                    end
+                    if tree then break end
+                end
+                assert(tree,"no foliage instance near host")
+                local t=tree.xf.Translation
+                send("tree",string.format("%s|%f|%f|%f",tree.mesh,t.X,t.Y,t.Z))
+            end},
+            {check="guest_tree_ready",timeout=40,cond=function()return has("treeready")end},
+            {run=function()
+                local m=FindFirstOf("BP_FoliageManager_C");assert(m and m:IsValid(),"no foliage manager")
+                m:ConvertInstanceToSwappable({OwningComponent_14_6824D4974A5EB8C238B737B8507E9571=tree.c,InstanceIndex_2_4C12DC584DB750C0F6F37E9B65AB16C4=tree.i,
+                    InstanceTransform_11_06A4F5C7447701E17A7210BD5DE540B7=tree.xf,StaticMesh_8_8CBDF16941839081660D19B1C70D18EF=tree.c.StaticMesh,
+                    Initialized_13_A81C055B4B2DB6E0D27C5292D399C857=false})
+            end},{wait=1},
+            {run=function()
+                local t=tree.xf.Translation;local a
+                for _,v in ipairs(FindAllOf("BP_Crash_Complex_Foliage_Base_C")or{})do
+                    if T.inWorld(v)then local q=v:K2_GetActorLocation();if (q.X-t.X)^2+(q.Y-t.Y)^2+(q.Z-t.Z)^2<40^2 then a=v;break end end
+                end
+                assert(a,"host swap made no crash actor");a:ComplexBreak({X=5e5,Y=0,Z=0},a.BaseMesh)
+            end},
+            {check="guest_tree_actor_broken",timeout=40,cond=function()return has("treebroke")end},{wait=2}}
     end
     local sp,cp,sa,ca
     return {T.onMap("RB_MainMenu",90),{check="guest_in_forest",timeout=240,cond=function()return T.netMode()=="client"and T.map()==map end},
@@ -54,5 +85,17 @@ return function(T)
         -- visual.lua mirrors destructibles too but only after its 5-11 s sweep; this module must land within seconds
         {check="simple_break_prompt",timeout=4,cond=function()return gone(sa)end},
         {check="complex_break_prompt",timeout=6,cond=function()return gone(ca)end},
-        {run=function()send("broke")end},{wait=2}}
+        {run=function()send("broke")end},
+        {check="tree_instance_seen",timeout=60,cond=function()return has("tree")end},
+        {run=function()send("treeready")end},
+        -- not just a removed instance: the tree must turn into a broken crash actor here
+        {check="tree_becomes_broken_actor",timeout=15,cond=function()
+            local m,p=parse(got["t.carbreak.tree"])
+            for _,v in ipairs(FindAllOf("BP_Crash_Complex_Foliage_Base_C")or{})do
+                if T.inWorld(v)and v.IsBroken then
+                    local q=v:K2_GetActorLocation();if (q.X-p.X)^2+(q.Y-p.Y)^2+(q.Z-p.Z)^2<60^2 then return true end
+                end
+            end
+        end},
+        {run=function()send("treebroke")end},{wait=2}}
 end
