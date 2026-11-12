@@ -51,6 +51,8 @@ return function(T)
             return sa~=nil and ca~=nil and not gone(sa)and not gone(ca)
         end},
         {run=function()send("ready")end},
-        {check="host_break_reaches_guest",timeout=40,cond=function()return gone(sa)and gone(ca)end},
+        -- visual.lua mirrors destructibles too but only after its 5-11 s sweep; this module must land within seconds
+        {check="simple_break_prompt",timeout=4,cond=function()return gone(sa)end},
+        {check="complex_break_prompt",timeout=6,cond=function()return gone(ca)end},
         {run=function()send("broke")end},{wait=2}}
 end
