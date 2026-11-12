@@ -89,8 +89,9 @@ return function(T)
         add({ run = function() sendGuest("t.s") end })
         add({ check = "host_car_reverses_by_guest", timeout = 14, cond = function()
             local c = theCar()
-            log("PT|info forward %.0f reverse %s", fwd(), tostring(c.PlayerInReverseMode))
-            return c.PlayerInReverseMode and fwd() < -150
+            local v = fwd()
+            log("PT|info forward %.0f reverse %s", v, tostring(c.PlayerInReverseMode))
+            return c.PlayerInReverseMode and v < -150
         end })
         add({ run = function() sendGuest("t.stop") end })
         local lights0

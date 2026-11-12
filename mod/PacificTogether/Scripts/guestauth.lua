@@ -88,10 +88,25 @@ LoopInGameThreadWithDelay(16, function()
     end)
     if not ok then log("PT|error guestauth guest %s", tostring(err)) end
 end)
+-- A door or panel the host's door stream poses (kinematic) keeps its hinge to the chassis: the guest's car drove 2 m and stood
+-- still at full throttle (guestdrive 2026-11-12). The hinge goes, as the game's own shut does (BreakConstraint, kinematic mesh).
+local hingeAt = 0
+local function freeHinges(c)
+    if os.clock() - hingeAt < 0.25 then return end
+    hingeAt = os.clock()
+    for _, cls in ipairs({ "BP_CarPart_Door_Base_C", "BP_Panel_Base_C" }) do
+        for _, part in ipairs(FindAllOf(cls) or {}) do
+            pcall(function()
+                if same(part:GetAttachParentActor(), c) and not part.MainMesh:IsSimulatingPhysics(NONE) then part.PhysicsConstraint:BreakConstraint() end
+            end)
+        end
+    end
+end
 LoopInGameThreadWithDelay(50, function()
     if not ga.mine or common.netMode() ~= "client" then return end
     local c = car.theCar(false)
     if not c then return end
+    if os.getenv("PT_MUTATE") ~= "guestauthhinge" then freeHinges(c) end
     local p, r, v = c:K2_GetActorLocation(), c:K2_GetActorRotation(), c:GetVelocity()
     net.toHost("g.guestauth.car", string.format("%s|%.6f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f", net.worldToken(), os.clock(),
         p.X, p.Y, p.Z, r.Pitch, r.Yaw, r.Roll, v.X, v.Y, v.Z))
