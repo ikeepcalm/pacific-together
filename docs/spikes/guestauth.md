@@ -89,3 +89,14 @@ Authority rules:
   overlapping the chassis, or part removal under a simulating copy. The zone may hit the same thing rarely; the start probe
   and the velocity cap limit the damage.
 - Handback was tested only with the car stopped. A moving handback carries the last sample's velocity but is untested.
+
+## carsync control (2026-11-12 evening)
+
+- Main 883d892 checked out on this lane's pair (`20261112-190255-guestauth-carsync`): 34/46, the same failures as the lane's
+  `20261112-184933` (host_guest_seated at t=240 and the drive/follow checks after it). With main's code the carsync guest's
+  driver-door intent seats it at the wheel too (`car enter from 8675 uu`, seat 46.9,-46.6; seat error 92.4).
+- The lead's passing main run `20261112-185446-carsync` took another path: the game attached the joining guest to the car
+  (`car guest attached by the game, moved to the passenger seat`) before its enter intent, so the later D intent was ignored.
+  Whether carsync passes depends on which of the two happens first, not on this lane.
+- After merging main (8b4f905): guestauth 37/37 (`20261112-190515`), guestdrive 33/34 (`20261112-190654`). The only failure
+  is the existing `BP_Panel_Base_C:AttemptShut is not loaded` error gate.
