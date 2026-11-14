@@ -285,6 +285,10 @@ local function show(note)
         if safety.guest() and type(ga) == "table" and ga.toggle then
             L[#L + 1] = "[7]  Guest drives own car: " .. (ga.off and "off" or "on")
         end
+        local world = package.loaded.world
+        if not safety.guest() and type(world) == "table" and world.toggleWeather then -- the host owns the weather, the guest follows
+            L[#L + 1] = "[8]  Co-op weather (dark, storms): " .. (world.coopWeather and "on" or "off")
+        end
         L[#L + 1] = " "
         L[#L + 1] = "[F9]  Close"
     else
@@ -334,7 +338,8 @@ end
 
 local ACTIONS = { teleport, resync, unstick, nil, function() return require("perf").toggle() end,
     function() return require("perf").check(function(text) if page then show(text) else ov.post(text, "info", "perfcheck") end end) end,
-    function() local ga = package.loaded.guestauth; if safety.guest() and type(ga) == "table" and ga.toggle then return ga.toggle() end end }
+    function() local ga = package.loaded.guestauth; if safety.guest() and type(ga) == "table" and ga.toggle then return ga.toggle() end end,
+    function() local w = package.loaded.world; if not safety.guest() and type(w) == "table" and w.toggleWeather then return w.toggleWeather() end end }
 local function press(n)
     if page == "main" then
         if ACTIONS[n] then show(ACTIONS[n]())

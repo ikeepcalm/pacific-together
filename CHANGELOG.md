@@ -3,6 +3,32 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
+## [0.9.3.1] - 2026-11-14
+
+Preview for 3-4 player testing. Network protocol **8**: everyone needs 0.9.3.1; a 0.9.3 player cannot join.
+
+### Added
+
+- 3-4 players: the Steam lobby takes a host and up to three guests. Every guest sees every other player, their held tool,
+  their health under the name tag and their map marker (the host passes each guest's own state on to the others). Heal
+  (H) patches up the player you look at. The third player rides on the rear seat behind the driver (next to the ARC body);
+  a fourth stays outside and gets "The car is full". The host's loading screen waits for every guest. Feed lines name the
+  player who did it.
+
+### Changed
+
+- The mod's text matches the game's HUD: the same cream as the health box and key prompts, no teal or green, a lighter shadow.
+  Name tags too. The heal hint is a key box like the game's own prompts ("H" in an outlined box, then "Patch up <name>").
+- The "Pacific Together <version>" label only shows in the main menu, for 10 s after a load and with the F9 menu open; the
+  session status line stays.
+- A guest who joins later sees the other players' map markers at once.
+
+### Fixed
+
+- The loading screen's "WAITING FOR HOST..." ran off the right edge of the screen; the box now grows to the left.
+- Loot with more than one guest: a dropped item could be taken over by the wrong guest, a guest joining while another got
+  the full item list only got its tail, and loot stopped flowing to the others when the first guest left.
+
 ## [0.9.3] - 2026-11-12
 
 Convenience build for the evening session. Network protocol **7**, as in 0.9.2. Both players need 0.9.3; a different

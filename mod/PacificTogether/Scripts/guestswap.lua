@@ -41,7 +41,7 @@ end
 
 -- host: apply the guest's swap to the real car ---------------------------------------------------------------------------
 
-net.on("g.swap.set", function(_, data)
+net.on("g.swap.set", function(pc, data)
     if common.netMode() ~= "listen" or not safety.active() then return end
     local name, spec = data:match("^([^\t]+)\t(.*)$")
     local s = name and slotItem(name)
@@ -62,7 +62,7 @@ net.on("g.swap.set", function(_, data)
         end
     end
     log("PT|swap applied %s %s", name, spec)
-    ov.post(ov.other() .. (spec == "-" and " removed " or " installed ") .. name:match("[^%.]+$"), "good", "swap")
+    ov.post(ov.nameOf(pc) .. (spec == "-" and " removed " or " installed ") .. name:match("[^%.]+$"), "good", "swap")
 end)
 
 -- guest: the game's own swap ----------------------------------------------------------------------------------------------

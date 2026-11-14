@@ -29,8 +29,11 @@ end
 local NONE = FName("None")
 local PREFIX = "/Game/Gameplay/Inventory/Items/"
 local COMP = "/Game/Gameplay/Inventory/GenericItemProperties/Components/"
-local PASSENGER = { X = 46.2, Y = 45.8, Z = -12.3 } -- X8: the driver's seat mirrored across the car's centre line
-local DRIVER = { X = 46.2, Y = -45.8, Z = -12.3 } -- a guest at the wheel (guest driving, 2026-11-08)
+-- P: X8, the driver's seat mirrored across the car's centre line
+-- D: a guest at the wheel (guest driving, 2026-11-08)
+-- a third player (D1, owner 2026-11-14): the rear seat behind the driver, the ARC body's spot mirrored; a fourth stays outside.
+-- shortcut: X/Y from ARC_AT, Z the front seats' height, not measured in game; measure the rear bench if the body floats or sinks
+local SPOTS = { D = { X = 46.2, Y = -45.8, Z = -12.3 }, P = { X = 46.2, Y = 45.8, Z = -12.3 }, R = { X = -45, Y = -43, Z = -12.3 } } -- one table: car.lua is at Lua's 200 locals
 -- where the ARC's parts are put, car-local centre of their collision bounds. The game puts both on the passenger seat (full ARC
 -- body 74x80 cm centred 56,43; screen unit 36x48 cm centred 85,34): the guest sat inside them, also after the old fixed -70 shift
 -- (measured 2026-11-09, friend's save). Screen: the gap between the front seats, behind the dash (X8's spot by the dash hid the
@@ -494,7 +497,8 @@ local function sitPose(char, on)
         end
     end)
 end
-local seated = {} -- host: guest character full name -> true while our seat() holds it (the game attaches a new character as DRIVER, playtest 2026-10-23)
+local reserved = {} -- host: guest character full name -> { spot, at }: chosen in g.car.enter, held while it glides in (5 s)
+local seated = {} -- host: guest character full name -> its spot ("D", "P", "R") while our seat() holds it (the game attaches a new character as DRIVER, playtest 2026-10-23)
 -- what is under a spot on this side: "z=<impact z>" or "none" (diagnostic for the guest falling through the map after leaving the car)
 local function groundAt(who, p)
     local ok, r = pcall(function()
@@ -509,18 +513,19 @@ end
 
 local hostRiding = false -- host: the host sits in the passenger seat, seated by us (guest driving)
 local driverGuest = nil -- host: full name of the guest character seated at the wheel (it drives while the host does not)
-local function seat(char, car, driver)
-    seated[char:GetFullName()] = true
+local function seat(char, car, spot)
+    local driver = spot == "D"
+    seated[char:GetFullName()], reserved[char:GetFullName()] = spot, nil
     if driver then driverGuest = char:GetFullName() elseif driverGuest == char:GetFullName() then driverGuest = nil end
-    local want = driver and DRIVER or PASSENGER
+    local want = SPOTS[spot]
     local lp = want
-    pcall(function()
+    if spot ~= "R" then pcall(function()
         local t = {}
         local f = StaticFindObject(char:GetClass():GetFullName():match("^%S+ (.+)$") .. ":GetCarAttachTransformForCharacter")
         f(char, t)
         local d = toLocal(car, t.Translation) -- the driver's seat
         lp = driver and vec(d.X, d.Y, d.Z) or vec(d.X, -d.Y, d.Z)
-    end)
+    end) end
     -- the game's transform once came out 18 uu high (head in the roof, garage play 2026-10-24): only small corrections are kept
     if dist(lp, want) > 8 then lp = want end
     pcall(function() char:K2_DetachFromActor(1, 1, 1) end) -- a re-seat (the host took the wheel) attaches anew at the new spot
@@ -533,6 +538,18 @@ local function seat(char, car, driver)
     -- tell the guest at once: the engine's attachment replication reached it 4-14 s later (it stood frozen by the shut door)
     if os.getenv("PT_MUTATE") ~= "noseatmsg" then pcall(function() net.toGuest(char.Controller, "g.car.seat", string.format("%.1f,%.1f,%.1f", lp.X, lp.Y, lp.Z)) end) end
     log("PT|car seated %s at %.1f,%.1f,%.1f", char:GetFullName(), lp.X, lp.Y, lp.Z)
+end
+
+-- host: the seat a guest gets: the wanted one when free, else the passenger seat, else the rear one; nil when the car is full
+function SPOTS.free(char, want)
+    local here, taken, me = {}, {}, char:GetFullName()
+    for _, g in ipairs(net.guests()) do local c = g.Pawn; if valid(c) then here[c:GetFullName()] = true end end
+    for name, spot in pairs(seated) do if name ~= me and here[name] then taken[spot] = true end end
+    for name, r in pairs(reserved) do if name ~= me and here[name] and os.clock() - r.at < 5 then taken[r.spot] = true end end
+    if hostRiding then taken.P = true end
+    local cm = carManager()
+    if cm and cm.PlayerCarState ~= 0 then taken.D = true end
+    for _, spot in ipairs({ want, "P", "R" }) do if spot and not taken[spot] then return spot end end
 end
 
 local function guestChar(pc)
@@ -643,22 +660,25 @@ net.on("g.car.enter", function(pc, data)
     local driver = data == "D" and os.getenv("PT_MUTATE") ~= "noguestdrive"
     if cm and cm.PlayerCarState ~= 0 then driver = false end
     if hostRiding and os.getenv("PT_MUTATE") ~= "noguestdrive" then driver = true end
+    local spot = SPOTS.free(char, driver and "D" or "P")
+    if not spot then net.toGuest(pc, "g.car.full", ""); log("PT|car full, %s stays outside", char:GetFullName()); return end
+    reserved[char:GetFullName()] = { spot = spot, at = os.clock() } -- a second guest entering during the glide gets another seat
     -- shortcut: no reach check (a client-side teleport did not move the guest on the host); add one when doors are real input
     log("PT|car enter from %.0f uu", dist(char:K2_GetActorLocation(), car:K2_GetActorLocation()))
     local function sit()
         if not (valid(char) and valid(car)) then return end
         glideFlags(char, false)
-        seat(char, car, driver)
+        seat(char, car, spot)
         -- the guest's door stayed open and swung while driving (hand playtest 2026-10-23): no entry animation shuts it here
         local door = entryDoor and now() - entryDoor.at < 8 and entryDoor.part
         entryDoor = nil
         if door then
             common.defer(800, function() pcall(function() if valid(door) then door:AttemptShut() end end) end)
         end
-        ov.post(ov.other() .. " entered the car")
+        ov.post(ov.nameOf(pc) .. " entered the car")
     end
     -- far from the car (the host has the guest elsewhere: a client-side move, carsync's 87 m) there is no door to walk past
-    if noGlide() or dist(char:K2_GetActorLocation(), car:K2_GetActorLocation()) > 600 then sit() else glideIn(char, car, driver and DRIVER or PASSENGER, sit) end
+    if noGlide() or dist(char:K2_GetActorLocation(), car:K2_GetActorLocation()) > 600 then sit() else glideIn(char, car, SPOTS[spot], sit) end
 end)
 
 -- the car radio (its power button is the driver's highlight too) and the shifter: the parts attached to the car, looked up every 2 s
@@ -720,7 +740,8 @@ net.on("g.car.exit", function(pc)
     local char, car = guestChar(pc), theCar(true)
     if not char or not car or not same(char:GetAttachParentActor(), car) then return end
     local wasDriver = driverGuest == char:GetFullName()
-    local door = doorParts(car)[wasDriver and "SLOT_FrontLeftDoor" or "SLOT_FrontRightDoor"]
+    local rear = seated[char:GetFullName()] == "R" -- behind the driver: out on the driver's side
+    local door = doorParts(car)[rear and "SLOT_RearLeftDoor" or wasDriver and "SLOT_FrontLeftDoor" or "SLOT_FrontRightDoor"]
     if valid(door) then
         door:AttemptOpen()
         common.defer(1500, function() if valid(door) then door:AttemptShut() end end)
@@ -749,7 +770,7 @@ net.on("g.car.exit", function(pc)
         out = vec(p.X - r.X * 250, p.Y - r.Y * 250, p.Z + 80)
     end
     local side = "driver"
-    if not wasDriver then out, side = passengerSide(car, out) end
+    if not (wasDriver or rear) then out, side = passengerSide(car, out) end
     log("PT|car exit spot %.0f,%.0f,%.0f (%s, %s side)", out.X, out.Y, out.Z, from, side)
     local seatAt = toLocal(car, char:K2_GetActorLocation())
     char:K2_SetActorLocation(out, false, {}, true)
@@ -798,7 +819,7 @@ net.on("g.car.exit", function(pc)
         end)
     end)
     log("PT|car guest left the car")
-    ov.post(ov.other() .. " left the car")
+    ov.post(ov.nameOf(pc) .. " left the car")
 end)
 
 net.on("g.car.hello", function() lastSent = nil end)
@@ -821,11 +842,12 @@ LoopInGameThreadWithDelay(16, function()
             -- the host got in by the driver's door: it takes the wheel, the guest moves over
             if on and driverGuest == char:GetFullName() and carManager().PlayerCarState ~= 0 then
                 log("PT|car host takes the wheel, guest to the passenger seat")
-                seat(char, car, false)
+                seat(char, car, SPOTS.free(char, "P") or "P")
             end
             if on and not seated[char:GetFullName()] then
                 log("PT|car guest attached by the game, moved to the passenger seat")
-                seat(char, car)
+                -- shortcut: a full car (4 players) still doubles up on the passenger seat; eject instead if a 4th player respawns inside
+                seat(char, car, SPOTS.free(char, "P") or "P")
             end
         end
     end)
@@ -1347,20 +1369,27 @@ end)
 -- Prediction: the guest walks in and sits down at once, as the host does the same; the host's g.car.seat confirms it. Waiting for the
 -- host's walk-in to end first made every entry take 2.1-2.3 s on the guest's screen (friend session 2026-11-01). No confirmation
 -- 4 s after we sat (the host refused: car gone, guest elsewhere on the host): stand up by the door again.
-local function seatTaken(car, me, driverSide) -- guest: another body (the host) sits on that side of the car
+local function takenSeats(car, me) -- guest: the seats other bodies sit on, { D = true, P = true, R = true }
+    local t = {}
     for _, c in ipairs(FindAllOf("BaseCharacter") or {}) do
-        if valid(c) and not same(c, me) and same(c:GetAttachParentActor(), car) and (toLocal(car, c:K2_GetActorLocation()).Y < 0) == driverSide then return true end
+        if valid(c) and not same(c, me) and same(c:GetAttachParentActor(), car) then
+            local l = toLocal(car, c:K2_GetActorLocation())
+            t[l.X > 0 and (l.Y < 0 and "D" or "P") or (l.Y < 0 and "R" or "ARC")] = true
+        end
     end
-    return false
+    return t
 end
+net.on("g.car.full", function() ov.post("The car is full", "warn", "car.full") end)
 local function predictEnter(me, car, driverDoor)
     if noGlide() or os.getenv("PT_MUTATE") == "nopredict" or not (valid(me) and car) or riding or gliding(me) or valid(me:GetAttachParentActor()) then return end
     local t0 = now()
     local meLease, carLease = common.lease(me), common.lease(car)
     -- the seat the host will give (g.car.enter): the wheel by the driver's door unless the host drives, the wheel too when the host rides
+    local taken = takenSeats(car, me)
     local drive = os.getenv("PT_MUTATE") ~= "noguestdrive"
-        and ((driverDoor and not seatTaken(car, me, true)) or seatTaken(car, me, false))
-    local spot = drive and DRIVER or PASSENGER
+        and not taken.D and (driverDoor or taken.P)
+    local spot = drive and SPOTS.D or not taken.P and SPOTS.P or not taken.R and SPOTS.R or nil
+    if not spot then return end -- full: the host answers g.car.full
     glideIn(me, car, spot, function()
         if not (common.resolve(meLease) and common.resolve(carLease)) then return end
         if os.getenv("PT_MUTATE") ~= "nopredictseat" and seatConfirmedAt < t0 and not valid(me:GetAttachParentActor()) then
@@ -1372,7 +1401,7 @@ local function predictEnter(me, car, driverDoor)
                 or not same(localPC() and localPC().Pawn, me) or same(me.AttachmentReplication.AttachParent, car) then return end
             if same(me:GetAttachParentActor(), car) then pcall(function() me:K2_DetachFromActor(1, 1, 1) end) end
             stopRide(me)
-            local d = doorPoint(car, PASSENGER)
+            local d = doorPoint(car, SPOTS.P)
             if d then me:K2_SetActorLocation(toWorld(car, vec(d.X, d.Y, d.Z + 20)), false, {}, true) end
             me:SetActorEnableCollision(true); me.CharacterMovement:SetMovementMode(1, 0)
             log("PT|car seat not confirmed by the host: standing up again")
@@ -1773,11 +1802,11 @@ local function hostStand(me, car)
 end
 local function hostSit(me, car)
     hostRiding = true
-    glideIn(me, car, PASSENGER, function()
+    glideIn(me, car, SPOTS.P, function()
         if not (valid(me) and valid(car)) then hostRiding = false return end
         glideFlags(me, false)
         local r = car:K2_GetActorRotation()
-        me:K2_SetActorLocationAndRotation(toWorld(car, PASSENGER), { Pitch = 0, Yaw = r.Yaw, Roll = 0 }, false, {}, true)
+        me:K2_SetActorLocationAndRotation(toWorld(car, SPOTS.P), { Pitch = 0, Yaw = r.Yaw, Roll = 0 }, false, {}, true)
         me:K2_AttachToActor(car, NONE, 1, 1, 1, false)
         sitPose(me, true)
         hostSitPct(me, 1)
@@ -1798,7 +1827,7 @@ LoopInGameThreadWithDelay(16, function()
         if hostRiding and not attached and not gliding(me) then hostRiding = false; hostSitPct(me, 0) end -- died, respawned, map
         if hostRiding and attached and car.Chassis then
             -- held at the seat: a moving car must not leave the body behind its own attachment
-            if dist(toLocal(car, me:K2_GetActorLocation()), PASSENGER) > 5 then me:K2_SetActorRelativeLocation(PASSENGER, false, {}, true) end
+            if dist(toLocal(car, me:K2_GetActorLocation()), SPOTS.P) > 5 then me:K2_SetActorRelativeLocation(SPOTS.P, false, {}, true) end
         end
         if not pressed or gliding(me) then return end
         local hm = first("BP_HighlightManager_C")
@@ -1811,12 +1840,15 @@ LoopInGameThreadWithDelay(16, function()
             shutPassengerDoor(car)
         elseif not hostRiding and not attached and cm.PlayerCarState == 0 and side and side.Y > 30 and side.X > -80
             and dist(me:K2_GetActorLocation(), car:K2_GetActorLocation()) < 400 then
-            for _, gpc in ipairs(net.guests()) do -- the seat is taken: a guest passenger moves to the wheel
+            local fits = true
+            for _, gpc in ipairs(net.guests()) do -- the seat is taken: a guest passenger moves to the wheel (the rear when one drives)
                 local g = guestChar(gpc)
-                if g and same(g:GetAttachParentActor(), car) and driverGuest ~= g:GetFullName() then seat(g, car, true) end
+                if g and same(g:GetAttachParentActor(), car) and seated[g:GetFullName()] == "P" then
+                    local to = driverGuest and SPOTS.free(g, "R") or "D"
+                    if to and to ~= "P" then seat(g, car, to) else fits = false end
+                end
             end
-            hostSit(me, car)
-            shutPassengerDoor(car)
+            if fits then hostSit(me, car); shutPassengerDoor(car) else ov.post("The car is full", "warn", "car.full") end
         end
     end)
     if not ok then log("PT|error car host passenger %s", tostring(err)) end

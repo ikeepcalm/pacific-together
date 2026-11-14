@@ -34,16 +34,31 @@ end
 -- host ----------------------------------------------------------------------------------------------------------------------
 
 local expectGuest, holdSince = false, nil
-local clockGuest,clockSince
 local clock=require("worldclock")
+local clocks = {} -- guest controller address -> { lease, since, done }: its world-clock handshake (3-4 players: one per guest)
+local function startClock(pc)
+    if clocks[pc:GetAddress()] then return end
+    clock.begin(pc); clocks[pc:GetAddress()] = { lease = common.lease(pc), since = os.clock() }
+end
+-- the hold ends once every guest has its character and its clock (or its clock timed out); starts a missing guest's clock
+local function allReady()
+    for _, g in ipairs(net.guests()) do
+        local life = net.lifecycle(g)
+        if life ~= "active" and life ~= "disconnected" then return false end -- a stalled guest holds everyone until HOLD_MAX
+        local c = clocks[g:GetAddress()]
+        if not clock.ready(g) and not (c and c.done) then startClock(g); return false end -- ready = true without the capability
+    end
+    return true
+end
+local function others() return #net.guests() > 1 and "the others" or overlay.other() end
 local function release(why,force)
     if not holdSince then return end
-    local pc=net.guests()[1]
-    if pc and net.peerSupports(pc,'world-clock') and not clock.ready(pc) and not force then
-        if not common.resolve(clockGuest) then clock.begin(pc);clockGuest,clockSince=common.lease(pc),os.clock() end
-        return
+    if not force and not allReady() then return end
+    local clocked, synced = false, true
+    for _, g in ipairs(net.guests()) do
+        if net.peerSupports(g, 'world-clock') then clocked, synced = true, synced and clock.ready(g) end
     end
-    if pc and net.peerSupports(pc,'world-clock') then why=why..(clock.ready(pc) and ' (guest clock ready)' or ' (clock timeout)') end
+    if clocked then why = why .. (synced and ' (guest clock ready)' or ' (clock timeout)') end
     local ls = screen()
     if ls then ls.FadeGoal = 0.0; ls.FadeDirection = false end
     log("PT|trans host release after %.1f s: %s", os.clock() - holdSince, why)
@@ -83,9 +98,10 @@ local function hookAll()
         ls.FadeDirection = true
         ls.StatusBox:SetRenderOpacity(1.0)
         ls.CurrentStatusSwitcher:SetActiveWidgetIndex(0)
-        ls.CurrentStateText:SetText(FText("WAITING FOR " .. overlay.other():upper() .. "..."))
+        ls.CurrentStateText:SetText(FText("WAITING FOR " .. others():upper() .. "..."))
+        pcall(function() ls.StatusBorder.Slot:SetAutoSize(true) end) -- a fixed 500 uu box: a long name ran off the right edge
         holdSince = os.clock()
-        overlay.post("Waiting for " .. overlay.other() .. " to load\226\128\166")
+        overlay.post("Waiting for " .. others() .. " to load\226\128\166")
         log("PT|trans host hold")
     end)
 end
@@ -93,13 +109,13 @@ end
 -- the guest's character is there (net.lua): let go, or tell a guest that joined mid-map to show the world
 net.ready = function(pc)
     if OFF then return end
-    if net.peerSupports(pc,"world-clock") and not clock.ready(pc) then
-        clock.begin(pc);clockGuest,clockSince=common.lease(pc),os.clock()
+    if not clock.ready(pc) then
+        startClock(pc)
     elseif holdSince then release("guest ready") else net.toGuest(pc, "g.trans", "go") end
 end
 
 RegisterLoadMapPreHook(function()
-    clockGuest,clockSince=nil,nil
+    clocks = {}
     pcall(function()
         if common.netMode() == "listen" and #net.guests() > 0 then
             expectGuest = true
@@ -123,6 +139,7 @@ local function showScreen()
     ls.CurrentStatusSwitcher:SetActiveWidgetIndex(0)
     ls.StatusBox:SetRenderOpacity(1.0)
     ls.CurrentStateText:SetText(FText(mapName() == MENU and "TRAVELING..." or "WAITING FOR HOST..."))
+    pcall(function() ls.StatusBorder.Slot:SetAutoSize(true) end) -- grows to the left (right-aligned), not off the screen
 end
 local function hideScreen()
     local ls = screen()
@@ -170,15 +187,18 @@ LoopInGameThreadWithDelay(100, function()
     if OFF then return end
     local mode = common.netMode()
     if mode == "listen" then
-        local pc=common.resolve(clockGuest)
-        if pc and (clock.ready(pc) or os.clock()-clockSince>5) then
-            if holdSince then release(clock.ready(pc) and "guest clock ready" or "clock timeout",true) else net.toGuest(pc,"g.trans","go") end
-            clockGuest,clockSince=nil,nil
+        for a, c in pairs(clocks) do
+            local pc = common.resolve(c.lease)
+            if not pc then clocks[a] = nil
+            elseif not c.done and (clock.ready(pc) or os.clock() - c.since > 5) then
+                c.done = true
+                if holdSince then release(clock.ready(pc) and "guest clock ready" or "clock timeout") else net.toGuest(pc,"g.trans","go") end
+            end
         end
         hookAll()
         if holdSince and os.clock() - holdSince > HOLD_MAX then
-            overlay.post(overlay.other() .. " did not load in time", "warn")
-            release("timeout")
+            overlay.post(others() .. " did not load in time", "warn")
+            release("timeout", true)
         end
         return
     end

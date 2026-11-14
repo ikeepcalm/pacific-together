@@ -1,8 +1,8 @@
 -- Partner heal (owner's choice after playtest 2026-10-31: the host kept losing health to damage not fixed yet). Look at the other
 -- player within 3 m and press H: they get 40% of their maximum health back, for free. Each player can do it once per 3 minutes.
 -- The giver checks distance, aim and its own cooldown; the receiver heals itself (each process owns its own PlayerHealth,
--- health.lua). Messages: g.heal.give (no data); g.heal.full (no data), the receiver's answer when it was already at full health:
--- the giver gets its cooldown back (hand test 2026-11-01 spent it on a full host). Inert in single player (Q7).
+-- health.lua). Messages (net.target, to one player): g.heal.give; g.heal.full, the receiver's answer when it was already at full
+-- health: the giver gets its cooldown back (hand test 2026-11-01 spent it on a full host). Inert in single player (Q7).
 local UEHelpers = require("UEHelpers")
 local common = require("common")
 local safety = require("safety")
@@ -38,12 +38,15 @@ end
 local function press()
     if not safety.active() then return end
     local pc = UEHelpers.GetPlayerController()
-    if not valid(pc) or not partnerInReach(pc) then return end
+    local target = valid(pc) and partnerInReach(pc)
+    if not target then return end
     local left = readyAt - os.clock()
-    if left > 0 then ov.post(string.format("You can heal %s again in %d s", ov.other(), math.ceil(left)), "warn", "heal"); return end
+    if left > 0 then ov.post(string.format("You can heal %s again in %d s", ov.nameOf(target), math.ceil(left)), "warn", "heal"); return end
+    local id = net.idOf(target)
+    if id < 0 then return end -- its PlayerState has not arrived yet
     readyAt = os.clock() + M.COOLDOWN
-    if common.netMode() == "client" then net.toHost("g.heal.give", "") else net.toGuests("g.heal.give", "") end
-    ov.post("You patched up " .. ov.other(), "good", "heal")
+    net.sendTo(id, "g.heal.give", "")
+    ov.post("You patched up " .. ov.nameOf(target), "good", "heal")
     log("PT|heal given")
 end
 common.onKey("H", press)
@@ -56,28 +59,29 @@ LoopInGameThreadWithDelay(150, function()
     local want = nil
     if safety.active() or ALWAYS then
         local pc = UEHelpers.GetPlayerController()
-        if ALWAYS or (valid(pc) and os.clock() >= readyAt and partnerInReach(pc)) then want = "[H] Patch up " .. ov.other() end
+        local target = valid(pc) and os.clock() >= readyAt and partnerInReach(pc)
+        if ALWAYS or target then want = "[H] Patch up " .. (target and ov.nameOf(target) or ov.other()) end
     end
     ov.hint(want)
 end)
 
-net.on("g.heal.give", function()
+net.target("g.heal.give", function(_, _, giver)
     local m = FindFirstOf("BP_ResourceManager_C")
     local h = valid(m) and m.PlayerHealth
     if not valid(h) then return end
     local add = math.min(h.Maximum * M.SHARE, h.Maximum - h.Current)
     if add <= 0 then
-        if common.netMode() == "client" then net.toHost("g.heal.full", "") else net.toGuests("g.heal.full", "") end
+        net.sendTo(giver, "g.heal.full", "")
         return
     end
     h:Adjust(m, add)
-    ov.post(ov.other() .. " patched you up", "good", "heal")
+    ov.post(ov.nameOf(giver) .. " patched you up", "good", "heal")
     log("PT|heal got +%.0f now %.0f/%.0f", add, h.Current, h.Maximum)
 end)
 
-net.on("g.heal.full", function()
+net.target("g.heal.full", function(_, _, id)
     readyAt = 0
-    ov.post(ov.other() .. " is already at full health", "info", "heal")
+    ov.post(ov.nameOf(id) .. " is already at full health", "info", "heal")
 end)
 
 -- ARC Doc (the Doctor ARC's car ability, class AP_Tether_Basic): the game heals only the player who activates it (the host:

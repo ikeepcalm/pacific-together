@@ -93,10 +93,10 @@ end
 
 -- theirs ----------------------------------------------------------------------------------------------------------------
 
-local remoteTint=""
-local remote = { state = "", at = 0 } -- last report from the other player
-local mirrors = {}                    -- character full name -> { actor, parts, light, state, swingAt }
-local handledUse = nil
+local remotes = {} -- PlayerState.PlayerId -> { state, at, useAt, tint }: each other player's last report (3-4 players, net.share)
+local ids = {} -- character full name -> its PlayerId (read again only while unknown: the PlayerState can arrive late)
+local function remoteOf(id) remotes[id] = remotes[id] or { state = "", at = 0, tint = "" }; return remotes[id] end
+local mirrors = {}                    -- character full name -> { actor, parts, light, state, tint, swingAt, handledUse }
 
 -- never our own body: the guest's Scrapper was built on the host's own character (while driving ownChar had no character) and sat
 -- over the host's hotbar for good (playtest 2026-10-31). On the host the other body is the one a guest's controller drives.
@@ -178,9 +178,9 @@ local function levelHold(char)
     return kml:MakeRelativeTransform(want, hand)
 end
 
-local function build(char, st)
+local function build(char, st, remote) -- remote: that player's report (tint, last use)
     local arch, size, on, kind, parts = st:match("^([^|]*)|(%d+)|(%d)|(%a+)|(.*)$")
-    local m = { state = st, arch = arch, size = tonumber(size), on = on == "1", kind = kind, parts = {}, swingAt = nil }
+    local m = { state = st, tint = remote.tint, arch = arch, size = tonumber(size), on = on == "1", kind = kind, parts = {}, swingAt = nil }
     for p, t in parts:gmatch("([^;@]+)@([^;]+)") do
         -- a tool's world mesh (what lies on the ground: one piece, world materials, true size) beside its first-person one
         -- ("SM_Tool_Breaker_01" -> "SM_Tool_Breaker_01_World"): first-person parts carry first-person materials and sizes and
@@ -210,7 +210,7 @@ local function build(char, st)
                 a:K2_SetActorRelativeTransform({ Translation = { X = v[1], Y = v[2], Z = v[3] }, Rotation = { X = v[4], Y = v[5], Z = v[6], W = v[7] },
                     Scale3D = { X = v[8], Y = v[9], Z = v[10] } }, false, {}, true)
             end
-            tint.mesh(a.StaticMeshComponent,remoteTint)
+            tint.mesh(a.StaticMeshComponent,remote.tint)
             m.parts[#m.parts + 1] = a
             if world then break end -- the world mesh is the whole tool
         end
@@ -265,7 +265,7 @@ local nextScan, others = 0, {}
 local function update()
     if not safety.active() then
         for k in pairs(mirrors) do dropMirror(k) end
-        remote = { state = "", at = 0 }
+        remotes = {}
         return
     end
     if os.time() >= nextScan then nextScan = os.time() + 2; others = otherChars() end
@@ -275,12 +275,14 @@ local function update()
             local key = c:GetFullName()
             seen[key] = true
             local m = mirrors[key]
+            if (ids[key] or -1) < 0 then ids[key] = net.idOf(c) end
+            local remote = remoteOf(ids[key])
             if remote.state == "" then
                 if m then dropMirror(key) end
             else
-                if m and m.state ~= remote.state then dropMirror(key); m = nil end
-                if not m then m = build(c, remote.state); mirrors[key] = m; log("PT|hands mirror %s %s", key:match("[^.]+$"), remote.state:sub(1, 160)) end
-                if remote.useAt and remote.useAt ~= handledUse then handledUse, m.swingAt = remote.useAt, remote.useAt end
+                if m and (m.state ~= remote.state or m.tint ~= remote.tint) then dropMirror(key); m = nil end
+                if not m then m = build(c, remote.state, remote); mirrors[key] = m; log("PT|hands mirror %s %s", key:match("[^.]+$"), remote.state:sub(1, 160)) end
+                if remote.useAt and remote.useAt ~= m.handledUse then m.handledUse, m.swingAt = remote.useAt, remote.useAt end
                 follow(c, m)
             end
         end
@@ -291,9 +293,7 @@ end
 -- state reports and tool use ---------------------------------------------------------------------------------------------
 
 local lastSent, lastAt, lastTint = nil, 0, nil
-local function send(kind, data)
-    if safety.guest() then net.toHost(kind, data) else net.toGuests(kind, data) end
-end
+local send = net.send
 
 local function report()
     if not safety.active() then lastSent = nil; return end
@@ -303,9 +303,7 @@ local function report()
     local h=hand['Hand Item'];local appearance=valid(h) and valid(h.Instance) and tint.spec(h.Instance) or ""
     if appearance~=lastTint or os.time()-lastAt>=3 then
         lastTint=appearance
-        if safety.guest() then
-            if net.hostSupports('item-tint') then net.toHost('g.hands.tint',appearance) end
-        else for _,pc in ipairs(net.guests()) do if net.peerSupports(pc,'item-tint') then net.toGuest(pc,'g.hands.tint',appearance) end end end
+        send('g.hands.tint',appearance)
     end
     -- on change, else every 3 s so a late joiner and a missed message catch up
     if s ~= lastSent or os.time() - lastAt >= 3 then
@@ -314,16 +312,13 @@ local function report()
     end
 end
 
-net.on('g.hands.tint',function(pc,data)
-    if #data>2200 or (safety.guest() and not net.hostSupports('item-tint')) or (not safety.guest() and not net.peerSupports(pc,'item-tint')) then return end
+net.share('g.hands.tint',function(_,data,from)
+    if #data>2200 then return end
     if data~="" and not data:match('^:p[%w_/%.-]+:t[01]:c[%w_/%.-]+$') then return end
-    if remoteTint~=data then
-        remoteTint=data
-        for k in pairs(mirrors) do dropMirror(k) end
-    end
+    remoteOf(from).tint=data -- update() rebuilds that player's mirror
 end)
-net.on("g.hands.s", function(_, data) remote.state, remote.at = data, os.time() end)
-net.on("g.hands.use", function() remote.useAt = os.clock() end)
+net.share("g.hands.s", function(_, data, from) local r = remoteOf(from); r.state, r.at = data, os.time() end)
+net.share("g.hands.use", function(_, _, from) remoteOf(from).useAt = os.clock() end)
 
 -- The use-press input event of the base class (_2 is the press, _3 the release; every tool's overridden PrimaryUsePress is called
 -- from it). A pre hook: post hooks of Blueprint events do not fire (docs/spikes/PT1-feel.md).
@@ -336,7 +331,7 @@ local function hookUse()
 end
 
 -- a map change frees every object we hold
-RegisterLoadMapPreHook(function() remoteTint="";lastTint=nil;mirrors, others, nextScan, remote = {}, {}, 0, { state = "", at = 0 } end)
+RegisterLoadMapPreHook(function() lastTint=nil;mirrors, others, nextScan, remotes, ids = {}, {}, 0, {}, {} end)
 
 LoopInGameThreadWithDelay(100, function()
     local ok, err = pcall(function()

@@ -58,6 +58,51 @@ RegisterLoadMapPreHook(function()
 end)
 
 function M.on(kind, fn) handlers[kind] = fn end
+
+-- 3-4 players (D1). Guests talk only to the host. Player messages, handlers fn(pc, data, from), from = the sending player's
+-- PlayerState.PlayerId (on the host taken from the connection, so a guest cannot speak for another):
+--   M.share(kind, fn[, event]) + M.send(kind, data): a player's own state for everyone (held tool, health, map marker). The host
+--     forwards a guest's copy to the other guests and keeps each player's last one for a guest that joins later (not for an event).
+--   M.target(kind, fn) + M.sendTo(id, kind, data): for one player (heal). A guest sends "<to>|<data>"; the host takes or forwards it.
+-- Guests always get "<from>|<data>".
+local shared, targeted, sharedSeen, lastShared = {}, {}, {}, {}
+RegisterLoadMapPreHook(function() sharedSeen, lastShared = {}, {} end)
+function M.share(kind, fn, event) shared[kind], handlers[kind] = event and "event" or "state", fn end
+function M.target(kind, fn) targeted[kind], handlers[kind] = true, fn end
+function M.idOf(x) -- a controller or a character
+    local ps = x and x:IsValid() and x.PlayerState
+    return ps and ps:IsValid() and ps.PlayerId or -1
+end
+function M.myId() return M.idOf(UEHelpers.GetPlayerController()) end
+function M.pcOf(id) for _, g in ipairs(M.guests()) do if M.idOf(g) == id then return g end end end -- host: that guest's controller
+local function remember(kind, from, data)
+    if shared[kind] ~= "state" then return end
+    lastShared[kind] = lastShared[kind] or {}
+    lastShared[kind][from] = data
+end
+function M.send(kind, data)
+    data = data or ""
+    if common.netMode() == "client" then return M.toHost(kind, data) end
+    local me = M.myId()
+    remember(kind, me, data)
+    return M.toGuests(kind, me .. "|" .. data)
+end
+function M.sendTo(id, kind, data)
+    data = data or ""
+    if common.netMode() == "client" then return M.toHost(kind, id .. "|" .. data) end
+    local to = M.pcOf(id)
+    return to ~= nil and M.toGuest(to, kind, M.myId() .. "|" .. data)
+end
+-- host: a guest that just became active gets the other players' last state
+local function replayShared(pc)
+    local here, mine = { [M.myId()] = true }, M.idOf(pc)
+    for _, g in ipairs(M.guests()) do here[M.idOf(g)] = true end
+    for kind, byId in pairs(lastShared) do
+        for from, data in pairs(byId) do
+            if here[from] and from ~= mine then M.toGuest(pc, kind, from .. "|" .. data) end
+        end
+    end
+end
 M.heardAt = {} -- kind -> os.clock() when its last message was handled
 
 local function localPC()
@@ -217,6 +262,7 @@ M.on("g.net.ready", function(pc)
         drain(f)
         if f.baselineApplied or (require("session").guestInfo(pc) or {}).caps ~= "mv" then
             f.baseline = true
+            replayShared(pc)
             if M.ready then pcall(M.ready, pc) end
         end
     end
@@ -280,6 +326,7 @@ M.on("g.net.baseline", function(pc, data)
     if f.ready and not f.baseline then
         f.baseline = true
         log("PT|net baseline applied after %.1f s", os.clock() - f.at)
+        replayShared(pc)
         if M.ready then M.ready(pc) end
     end
 end)
@@ -374,7 +421,29 @@ local function dispatch()
         elseif pc and permitted(pc, kind, data) then
             common.crumb("net " .. kind)
             local t0 = os.clock()
-            local ok, err = pcall(fn, pc, data)
+            local from, mine = nil, true
+            if shared[kind] or targeted[kind] then
+                local id, rest = data:match("^(%-?%d+)|(.*)$")
+                if common.netMode() == "client" then
+                    from, data = tonumber(id) or -1, rest or ""
+                elseif shared[kind] then
+                    from = M.idOf(pc)
+                    remember(kind, from, data)
+                    local addr = pc:GetAddress()
+                    for _, g in ipairs(M.guests()) do if g:GetAddress() ~= addr then M.toGuest(g, kind, from .. "|" .. data) end end
+                else -- targeted: ours, or forwarded with the sender's id
+                    from, data = M.idOf(pc), rest or ""
+                    if tonumber(id) ~= M.myId() then
+                        mine = false
+                        local to = M.pcOf(tonumber(id))
+                        if to then M.toGuest(to, kind, from .. "|" .. data) end
+                    end
+                end
+                local seen = kind .. "@" .. tostring(from) -- once per sender and map: which players' state reaches us
+                if not sharedSeen[seen] then sharedSeen[seen] = true; log("PT|net shared %s from %s", kind, tostring(from)) end
+            end
+            local ok, err = true, nil
+            if mine then ok, err = pcall(fn, pc, data, from) end
             if not ok then log("PT|error net %s %s", kind, tostring(err)) end
             M.heardAt[kind] = os.clock()
             -- which handler holds the frame (playtest 2026-10-24: this loop took 0.7-2.2 s at a time on both sides)

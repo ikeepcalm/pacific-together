@@ -1,10 +1,12 @@
 # Makes two isolated test copies of the game with UE4SS and our mods, never touching the real install.
 # client1 = full copy, client2 = hardlinks to client1 except its own PenDriverPro/Binaries/Win64 (own UE4SS, logs, mods).
 # -LinkFrom <existing client1> builds client1 from hardlinks too (an extra pair, e.g. one per workflow lane, costs ~700 MB).
+# -Extra 1|2 adds client3 (and client4) the same way as client2, for 3-4 player runs (run-test.ps1 -Clients 3|4).
 # Mod junctions point at the repo this script lives in, so run it from the worktree whose mods the pair should load.
 param(
     [string]$Root = "C:\PacificTogetherTest",
     [string]$LinkFrom = "",
+    [ValidateSet(0, 1, 2)][int]$Extra = 0,
     [string]$Game = "C:\Program Files (x86)\Steam\steamapps\common\Pacific Drive",
     [string]$UE4SSZip = "$PSScriptRoot\..\local\cache\ue4ss\zDEV-UE4SS_v3.0.1-1181-g83330635.zip"
 )
@@ -23,7 +25,7 @@ $zipName = Split-Path $UE4SSZip -Leaf
 if ((Get-FileHash $UE4SSZip).Hash -ne $PinnedUE4SS[$zipName]) { throw "UE4SS zip hash mismatch: $UE4SSZip" }
 if ((Resolve-Path $Game).Path.TrimEnd('\') -eq $Root.TrimEnd('\')) { throw "Root must not be the real install." }
 
-$c1 = Join-Path $Root "client1"; $c2 = Join-Path $Root "client2"
+$c1 = Join-Path $Root "client1"
 
 # hardlinks every game file except Binaries (each copy needs its own UE4SS, logs, mods) and Saved (per-copy state)
 function Link-Game($src, $dst) {
@@ -51,10 +53,15 @@ if ($LinkFrom) {
 }
 if ((Get-FileHash "$c1\$ExeRel").Hash -ne $PinnedExe) { throw "client1 exe hash mismatch" }
 
-Write-Host "client2: hardlinking game data, copying Binaries"
-Link-Game $c1 $c2
+$copies = @($c1)
+for ($i = 2; $i -le 2 + $Extra; $i++) {
+    $cx = Join-Path $Root "client$i"
+    Write-Host "client${i}: hardlinking game data, copying Binaries"
+    Link-Game $c1 $cx
+    $copies += $cx
+}
 
-foreach ($c in $c1, $c2) {
+foreach ($c in $copies) {
     # the stock crash reporter can upload to Ironwood without a click; modded test crashes must never reach them
     Remove-Item (Join-Path $c "Engine\Binaries\Win64\CrashReportClient.exe") -Force -ErrorAction SilentlyContinue
     $bin = Join-Path $c $BinRel
@@ -70,5 +77,5 @@ foreach ($c in $c1, $c2) {
         if ((Test-Path $m.s) -and -not (Test-Path $link)) { New-Item -ItemType Junction -Path $link -Target $m.s | Out-Null }
     }
 }
-Write-Host "Done: $c1, $c2"
+Write-Host "Done: $($copies -join ', ')"
 exit 0  # robocopy leaves $LASTEXITCODE at 1 ("files copied")

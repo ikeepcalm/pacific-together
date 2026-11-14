@@ -3,7 +3,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Scenario,
     [string]$Root = "C:\PacificTogetherTest",
-    [ValidateSet(0, 1, 2)][int]$Clients = 0,
+    [ValidateSet(0, 1, 2, 3, 4)][int]$Clients = 0, # 3-4: extra guests client3, client4 (role client; tools\setup-test.ps1 -Extra)
     [int]$Seconds = 0,
     [string]$Mutate = "",
     [switch]$KeepOpen,
@@ -68,6 +68,8 @@ $Defaults.messageepoch = @(1, 180)
 $Defaults.worldactions = @(1, 180)
 $Defaults.seatepoch = @(2, 300)
 $AutoJoin += "seatepoch"
+$Defaults.threeplayer = @(3, 900)
+$AutoJoin += "threeplayer"
 # per-run Engine.ini additions, restored after the run; the mutations in skip run without them
 $IniEdits = @{ zonejoin = @{ client = "[/Script/OnlineSubsystemUtils.IpNetDriver]`r`nResolutionConnectionTimeout=120`r`n"; skip = @("noconfig", "cdo") } }
 # M6: the shipping mod's Steam lobby/join runs in these scenarios only (test runs keep it off so they never touch the owner's Steam presence);
@@ -85,8 +87,10 @@ if (-not $Seconds) { $Seconds = $d[1] }
 $DumpOutputs = "UHTHeaderDump", "CXXHeaderDump", "*.usmap", "Mods\shared\types"
 
 $sides = @(@(
-    @{ Role = "host"; Dir = Join-Path $Root "client1" },
-    @{ Role = "client"; Dir = Join-Path $Root "client2" }
+    @{ Role = "host"; Name = "host"; Dir = Join-Path $Root "client1" },
+    @{ Role = "client"; Name = "client"; Dir = Join-Path $Root "client2" },
+    @{ Role = "client"; Name = "client3"; Dir = Join-Path $Root "client3" },
+    @{ Role = "client"; Name = "client4"; Dir = Join-Path $Root "client4" }
 ) | Select-Object -First $Clients)
 foreach ($s in $sides) {
     $s.Bin = Join-Path $s.Dir $BinRel
@@ -156,7 +160,7 @@ while (-not $slot) {
 $oldCrashes = @{}
 foreach ($s in $sides) {
     Remove-Item $s.Log -ErrorAction SilentlyContinue
-    $oldCrashes[$s.Role] = @(Get-ChildItem $s.Crashes -Directory -ErrorAction SilentlyContinue | ForEach-Object Name)
+    $oldCrashes[$s.Name] = @(Get-ChildItem $s.Crashes -Directory -ErrorAction SilentlyContinue | ForEach-Object Name)
     if ($Scenario -eq "dump") { foreach ($o in $DumpOutputs) { Remove-Item "$($s.Bin)\ue4ss\$o" -Recurse -Force -ErrorAction SilentlyContinue } }
 }
 
@@ -214,7 +218,7 @@ function Start-Side($s, $life) {
         $s.Proc = Start-Process $exe -ArgumentList $gameArgs -WorkingDirectory $s.Bin -PassThru
         $s.Started = Get-Date
         $script:procs += $s.Proc
-        Write-Host "started $($s.Role) life $life PID $($s.Proc.Id)"
+        Write-Host "started $($s.Name) life $life PID $($s.Proc.Id)"
     } finally {
         Remove-Item Env:PT_ROLE, Env:PT_SCENARIO, Env:PT_STATUS, Env:PT_HOST, Env:PT_MUTATE, Env:PT_FIXTURE, Env:PT_JOIN, Env:PT_TUNNEL, Env:PT_LIFE, Env:PT_STEAM, Env:PT_STEAM_INBOX, Env:PT_STEAM_UDP -ErrorAction SilentlyContinue
     }
@@ -249,8 +253,8 @@ function Invoke-Directives {
 
 function Get-NewCrashes {
     foreach ($s in $sides) {
-        Get-ChildItem $s.Crashes -Directory -ErrorAction SilentlyContinue | Where-Object { $oldCrashes[$s.Role] -notcontains $_.Name } |
-            ForEach-Object { [pscustomobject]@{ Role = $s.Role; Dir = $_ } }
+        Get-ChildItem $s.Crashes -Directory -ErrorAction SilentlyContinue | Where-Object { $oldCrashes[$s.Name] -notcontains $_.Name } |
+            ForEach-Object { [pscustomobject]@{ Name = $s.Name; Dir = $_ } }
     }
 }
 
@@ -265,7 +269,7 @@ while ((Get-Date) -lt $deadline) {
         if ($s.Proc.HasExited -or $s.BootRetries -ge 2 -or ((Get-Date) - $s.Started).TotalSeconds -lt 120) { continue }
         if ((Read-Shared $s.Log) -match "PT\|boot ") { continue }
         $s.BootRetries++
-        Write-Host "runner: $($s.Role) never booted, restarting it (retry $($s.BootRetries))"
+        Write-Host "runner: $($s.Name) never booted, restarting it (retry $($s.BootRetries))"
         $script:killed += $s.Proc.Id
         Stop-Process -Id $s.Proc.Id -Force -ErrorAction SilentlyContinue
         $s.Proc.WaitForExit(15000) | Out-Null
@@ -314,42 +318,42 @@ Get-TestProcesses "CrashReportClient" | Stop-Process -Force
 $crashes = @(Get-NewCrashes | ForEach-Object {
     $ctx = Join-Path $_.Dir.FullName "CrashContext.runtime-xml"
     $msg = if (Test-Path $ctx) { ([regex]::Match((Get-Content $ctx -Raw), "<ErrorMessage>([^<]*)")).Groups[1].Value } else { "no CrashContext" }
-    Copy-Item $_.Dir.FullName (Join-Path $results "crash-$($_.Role)-$($_.Dir.Name)") -Recurse
-    "$($_.Role): $msg"
+    Copy-Item $_.Dir.FullName (Join-Path $results "crash-$($_.Name)-$($_.Dir.Name)") -Recurse
+    "$($_.Name): $msg"
 })
 
 $checks = New-Object System.Collections.Generic.List[object]
 function Add-Check($name, $pass, $detail) { $checks.Add([pscustomobject]@{ Name = $name; Pass = [bool]$pass; Detail = $detail }) }
 foreach ($s in $sides) {
-    $r = $s.Role
+    $r = $s.Role; $n = $s.Name # the test mod logs side=<role>; files and check names use the side's own name
     $text = Get-Log $s
-    [IO.File]::WriteAllText((Join-Path $results "$r-UE4SS.log"), $text)
-    Copy-Item (Join-Path $s.Dir "PenDriverPro\Saved\Logs\PenDriverPro.log") (Join-Path $results "$r-PenDriverPro.log") -ErrorAction SilentlyContinue
+    [IO.File]::WriteAllText((Join-Path $results "$n-UE4SS.log"), $text)
+    Copy-Item (Join-Path $s.Dir "PenDriverPro\Saved\Logs\PenDriverPro.log") (Join-Path $results "$n-PenDriverPro.log") -ErrorAction SilentlyContinue
     # X13: HighResShot writes under Saved\Screenshots; copy this run's shots in the order they were taken
     Get-ChildItem (Join-Path $s.Dir "PenDriverPro\Saved\Screenshots") -Recurse -File -ErrorAction SilentlyContinue | Where-Object LastWriteTime -ge $started |
-        Sort-Object LastWriteTime | ForEach-Object { Copy-Item $_.FullName (Join-Path $results "$r-$($_.Name)") }
+        Sort-Object LastWriteTime | ForEach-Object { Copy-Item $_.FullName (Join-Path $results "$n-$($_.Name)") }
 
     $boot = [regex]::Match($text, "\[PacificTogether\] PT\|boot (.*)")
-    Add-Check "$r main mod booted" $boot.Success $boot.Groups[1].Value.Trim()
+    Add-Check "$n main mod booted" $boot.Success $boot.Groups[1].Value.Trim()
     # one plan line per life of the process (a relaunched side plans again; the killed life must have reported all its checks)
     $plans = @([regex]::Matches($text, "\[PacificTogetherTest\] PT\|plan side=$r checks=(\d+)"))
     $planned = if ($plans.Count) { ($plans | ForEach-Object { [int]$_.Groups[1].Value } | Measure-Object -Sum).Sum } else { -1 }
-    Add-Check "$r test plan" ($plans.Count -gt 0) "checks=$planned lives=$($plans.Count)"
+    Add-Check "$n test plan" ($plans.Count -gt 0) "checks=$planned lives=$($plans.Count)"
     $reported = [regex]::Matches($text, "\[PacificTogetherTest\] PT\|check side=$r name=(\S+) result=(PASS|FAIL) detail=(.*)")
-    foreach ($m in $reported) { Add-Check "$r $($m.Groups[1].Value)" ($m.Groups[2].Value -eq "PASS") $m.Groups[3].Value.Trim() }
-    if ($planned -ge 0 -and $reported.Count -ne $planned) { Add-Check "$r all planned checks reported" $false "$($reported.Count) of $planned" }
-    Add-Check "$r done" ($text -match "\[PacificTogetherTest\] PT\|done side=$r") ""
+    foreach ($m in $reported) { Add-Check "$n $($m.Groups[1].Value)" ($m.Groups[2].Value -eq "PASS") $m.Groups[3].Value.Trim() }
+    if ($planned -ge 0 -and $reported.Count -ne $planned) { Add-Check "$n all planned checks reported" $false "$($reported.Count) of $planned" }
+    Add-Check "$n done" ($text -match "\[PacificTogetherTest\] PT\|done side=$r") ""
     $errors = [regex]::Matches($text, "PT\|error .*")
-    Add-Check "$r no PT|error" ($errors.Count -eq 0) $(if ($errors.Count) { "$($errors.Count): $($errors[0].Value.Trim())" })
+    Add-Check "$n no PT|error" ($errors.Count -eq 0) $(if ($errors.Count) { "$($errors.Count): $($errors[0].Value.Trim())" })
     if ($s.Snaps.Count) {
         $tags = @($s.Snaps.Keys)
-        $s.Snaps.GetEnumerator() | ForEach-Object { "## $($_.Key)"; $_.Value } | Set-Content -Encoding utf8 (Join-Path $results "snapshots-$r.txt")
+        $s.Snaps.GetEnumerator() | ForEach-Object { "## $($_.Key)"; $_.Value } | Set-Content -Encoding utf8 (Join-Path $results "snapshots-$n.txt")
         foreach ($tag in $tags[1..($tags.Count - 1)]) {
             # content = name, size, hash; a rewrite with the same bytes (the game rewrites GameUserSettings.ini on every map load) is listed, not failed
             $content = { param($lines) @($lines | ForEach-Object { $f = $_ -split "`t"; "$($f[0])`t$($f[1])`t$($f[3])" }) }
             $diff = @(Compare-Object (& $content $s.Snaps[$tags[0]]) (& $content $s.Snaps[$tag]) | ForEach-Object { "$($_.SideIndicator)$(($_.InputObject -split "`t")[0])" })
             $touched = @(Compare-Object @($s.Snaps[$tags[0]]) @($s.Snaps[$tag]) | Where-Object SideIndicator -eq "=>" | ForEach-Object { ($_.InputObject -split "`t")[0] })
-            Add-Check "$r saves unchanged $($tags[0])->$tag" ($diff.Count -eq 0) (($diff -join " ") + $(if ($touched) { " rewritten: $($touched -join ' ')" }))
+            Add-Check "$n saves unchanged $($tags[0])->$tag" ($diff.Count -eq 0) (($diff -join " ") + $(if ($touched) { " rewritten: $($touched -join ' ')" }))
         }
     }
 }

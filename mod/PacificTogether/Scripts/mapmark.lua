@@ -113,8 +113,8 @@ local captureSeen, captureDone = nil, 0
 -- Mutation nowaypoint: off. Mutation onemark: the old single shared marker (the partner's spawns/moves our own actor).
 local net = require("net")
 local WP = "/Game/UI/CarEquipment/Internal/Gobbler/BP_WaypointActor.BP_WaypointActor_C"
-local wp = { sent = nil, got = nil }
-local partnerPin, pinTex = nil, nil
+local wp = { sent = nil, got = nil, pending = {} }
+local pins, pinTex = {}, nil -- PlayerState.PlayerId -> that player's waypoint pin (3-4 players)
 local function waypoint()
     for _, a in ipairs(FindAllOf("BP_WaypointActor_C") or {}) do
         if valid(a) and a:GetWorld():IsValid() and a:GetWorld():GetFullName() == UEHelpers.GetWorld():GetFullName() then return a end
@@ -125,9 +125,6 @@ local function wpState(a)
     local l = a:K2_GetActorLocation()
     return string.format("%.0f %.0f %.0f", l.X, l.Y, l.Z)
 end
-local function sendWp(s)
-    if safety.guest() then net.toHost("g.map.wp", s) else net.toGuests("g.map.wp", s) end
-end
 local function pinTexture()
     if valid(pinTex) then return pinTex end
     for _, t in ipairs(FindAllOf("Texture2D") or {}) do
@@ -135,31 +132,34 @@ local function pinTexture()
     end
 end
 -- the partner's pin: a map icon like the game's own pin, in the partner's colour; nil when the map bounds actor is not there
-local function showPartnerPin(x, y, z)
+local function showPartnerPin(id, x, y, z)
     local s, tex, h = carIcon(), pinTexture(), FindFirstOf("BP_GobblerMapBounds_C")
     if not (s and tex and valid(h)) then return false end
+    local partnerPin = pins[id]
     if not valid(partnerPin) then
         partnerPin = h:AddComponentByClass(class(ICON), true, XF, false)
         proxyOf[partnerPin:GetFullName()] = true
+        pins[id] = partnerPin
     end
     partnerPin:SetIconTexture(tex)
     partnerPin:ResetIconMaterialForUMG(); partnerPin:ResetIconMaterialForCanvas()
     partnerPin:K2_SetWorldLocationAndRotation({ X = x, Y = y, Z = z }, { Pitch = 0, Yaw = 0, Roll = 0 }, false, {}, true)
     partnerPin:SetIconSize(s.IconSize, s.IconSizeUnit)
     partnerPin:SetIconZOrder(s.IconZOrder + 2)
-    partnerPin:SetIconDrawColor(colourOf(safety.guest())) -- the partner of a guest is the host
+    partnerPin:SetIconDrawColor(colourOf(safety.guest())) -- the partner of a guest is the host (shortcut: another guest's pin is blue too)
     partnerPin:SetIconVisible(true)
     return true
 end
-local function applyPartner(s)
+local function applyPartner(id, s)
     if s == "none" then
-        if valid(partnerPin) then partnerPin:SetIconVisible(false) end
+        if valid(pins[id]) then pins[id]:SetIconVisible(false) end
         return true
     end
     local x, y, z = s:match("^(%S+) (%S+) (%S+)$")
-    return showPartnerPin(tonumber(x), tonumber(y), tonumber(z))
+    if not z then return true end
+    return showPartnerPin(id, tonumber(x), tonumber(y), tonumber(z))
 end
-net.on("g.map.wp", function(_, s)
+net.share("g.map.wp", function(_, s, from)
     if not safety.active() then return end
     if os.getenv("PT_MUTATE") == "onemark" then wp.got, wp.sent = s, s end -- the old single marker: the partner's state is ours
     if os.getenv("PT_MUTATE") == "onemark" then
@@ -174,19 +174,19 @@ net.on("g.map.wp", function(_, s)
         end
         return
     end
-    wp.pending = s
-    if applyPartner(s) then wp.pending = nil end
+    wp.pending[from] = s
+    if applyPartner(from, s) then wp.pending[from] = nil end
     log("PT|mapmark partner waypoint %s", s)
 end)
 local function waypointTick()
-    if not safety.active() then wp.sent, wp.got, wp.pending = nil, nil, nil; return end
-    if wp.pending and applyPartner(wp.pending) then wp.pending = nil end
+    if not safety.active() then wp.sent, wp.got, wp.pending = nil, nil, {}; return end
+    for id, p in pairs(wp.pending) do if applyPartner(id, p) then wp.pending[id] = nil end end
     local own = waypoint()
     if own and valid(own.MapIcon) and os.getenv("PT_MUTATE") ~= "onemark" then own.MapIcon:SetIconDrawColor(colourOf(not safety.guest())) end
     local s = wpState(own)
-    if s ~= wp.sent then
+    if s ~= wp.sent then -- a player who joins later gets it from the host (net.share keeps the last one)
         wp.sent = s
-        if s ~= wp.got then sendWp(s); log("PT|mapmark waypoint sent %s", s) end
+        if s ~= wp.got then net.send("g.map.wp", s); log("PT|mapmark waypoint sent %s", s) end
         wp.got = nil
     end
 end
@@ -314,7 +314,7 @@ if os.getenv("PT_MUTATE") ~= "noicons" then
 end
 
 -- a map change frees every object we hold: forget them before it happens
-RegisterLoadMapPreHook(function() marks, captureSeen, captureDone = {}, nil, 0; wp.sent, wp.got, wp.pending, partnerPin = nil, nil, nil, nil; hostIcons, applied, sentIcons, proxies, holder, hid = nil, nil, nil, {}, nil, {}; proxyOf = {} end)
+RegisterLoadMapPreHook(function() marks, captureSeen, captureDone = {}, nil, 0; wp.sent, wp.got, wp.pending, pins = nil, nil, {}, {}; hostIcons, applied, sentIcons, proxies, holder, hid = nil, nil, nil, {}, nil, {}; proxyOf = {} end)
 
 LoopInGameThreadWithDelay(250, function()
     local ok, err = pcall(update)

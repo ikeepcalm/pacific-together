@@ -129,8 +129,8 @@ end
 --   nights  time runs at 0.6x at night and 1.8x by day (0 = midnight, 0.3 dawn, 0.68 sunset), and a map that loads in daylight
 --           starts late in the afternoon
 --   storms  one of the game's weather events every 5-9 min (they replace each other)
--- Mutation nospooky: off.
-local SPOOKY = M.mutate ~= "nospooky"
+-- Mutation nospooky: off. The host switches it in the F9 menu (8), e.g. to compare FPS in the game's own weather (owner 2026-11-14).
+M.coopWeather = M.mutate ~= "nospooky"
 local GLOOM_ID, FLOOR = "PTCoopGloom", { [2] = 0.3, [3] = 0.45, [4] = 0.45, [5] = 0.3 } -- OV index: rain, fog, wind, darkness
 local EVENTS = { "Storm", "Storm", "Rain Heavy", "Rain Heavy", "Dark Heavy", "Fog Medium" }
 local spooky = { on = false }
@@ -182,9 +182,21 @@ local function spookyOff()
     spooky = { on = false }
 end
 
+-- F9 (8), host: the co-op weather off gives the game's own weather back at midday; on brings the gloom and long nights back
+function M.toggleWeather()
+    M.coopWeather = not M.coopWeather
+    if not M.coopWeather then
+        try("coopweather", spookyOff)
+        local tod = first("BP_ToDManager_C")
+        if tod then pcall(tod["Set Current Time Of Day"], tod, 0.45) end -- 0 midnight, 0.3 dawn, 0.68 sunset (the guest follows)
+    end
+    log("PT|world co-op weather %s (F9)", M.coopWeather and "on" or "off")
+    return "Co-op weather: " .. (M.coopWeather and "on (darker, storms, long nights)" or "off (the game's own weather, midday)")
+end
+
 local function hostTick()
     replicate()
-    if SPOOKY then try("coopweather", spookyTick) end
+    if M.coopWeather then try("coopweather", spookyTick) end
     local data = snapshot()
     net.toGuests("g.world.state", data)
 end

@@ -71,7 +71,7 @@ net.on("g.st.shred", function(pc, data)
     end
     kick = n > 0
     log("PT|st shred %d items put in the host's shredder", n)
-    if n > 0 then ov.post(ov.other() .. " is using the part shredder", "good", "st.shred") end
+    if n > 0 then ov.post(ov.nameOf(pc) .. " is using the part shredder", "good", "st.shred") end
 end)
 
 -- guest: what the host's shredder refused goes back into the backpack
@@ -103,7 +103,7 @@ end
 
 local buying = false -- guest: inside the game's own PurchaseNode, whose cost recipe must not run here
 
-net.on("g.st.buy", function(_, data)
+net.on("g.st.buy", function(pc, data)
     if not host() then return end
     local node = StaticFindObject(data)
     local im = FindFirstOf("BP_InventoryManager_C")
@@ -116,7 +116,7 @@ net.on("g.st.buy", function(_, data)
     if ok then
         local bench = first("BP_Garage_InventingBench_C")
         if bench then pcall(function() bench:OnNodePurchased(node) end) end -- the printed blueprint / upgrade kit
-        ov.post(ov.other() .. " researched " .. data:match("[^:]+$"), "good", "st.buy")
+        ov.post(ov.nameOf(pc) .. " researched " .. data:match("[^:]+$"), "good", "st.buy")
     end
 end)
 
@@ -174,7 +174,7 @@ end)
 
 -- Garage upgrades -----------------------------------------------------------------------------------------------------------
 
-net.on("g.st.up", function(_, data)
+net.on("g.st.up", function(pc, data)
     if not host() then return end
     local name, cls = data:match("^([^\t]+)\t(.+)$")
     local s
@@ -186,7 +186,7 @@ net.on("g.st.up", function(_, data)
     for _, h in ipairs(garage.installedOn(s)) do if h == cls then return end end -- already there: a level default the guest built too
     s:InstallSpecificUpgrade(c, false)
     log("PT|st up installed %s on %s", cls:match("[^.]+$"), name)
-    ov.post(ov.other() .. " built " .. cls:match("[^.]+$"):gsub("^UP_Garage_", ""), "good", "st.up")
+    ov.post(ov.nameOf(pc) .. " built " .. cls:match("[^.]+$"):gsub("^UP_Garage_", ""), "good", "st.up")
 end)
 
 local function upHook(self, cls)
@@ -303,7 +303,7 @@ local function cureHook(self, quirk, removed)
     net.toHost("g.st.cure", k)
 end
 
-net.on("g.st.cure", function(_, data)
+net.on("g.st.cure", function(pc, data)
     if not host() then return end
     local sm, im = qmgr(), FindFirstOf("BP_InventoryManager_C")
     if not (sm and valid(im)) then return end
@@ -320,7 +320,7 @@ net.on("g.st.cure", function(_, data)
             local qm = FindFirstOf("BP_QuestManager_C")
             if valid(qm) then pcall(function() qm:OnCuredQuirk() end) end
             log("PT|st cure %s: removed on the host", data:match("[^|]+$"))
-            ov.post(ov.other() .. " cured a car quirk", "good", "st.cure")
+            ov.post(ov.nameOf(pc) .. " cured a car quirk", "good", "st.cure")
             return
         end
     end

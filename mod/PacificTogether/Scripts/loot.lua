@@ -68,8 +68,7 @@ local listening = false -- host with a guest (the 500 ms tick sets it; the 50 ms
 -- host: the guest controller that asked for the full list (H) = loaded and acking. Nothing goes out before: a loading guest acks
 -- late, and lines sent meanwhile overflowed its reliable channel and dropped it (lootsync 2026-10-22, NumOutRec 254). The full
 -- list it asks for carries everything registered before.
--- shortcut: one ready guest (PLAN D1: 2 players); per-guest readiness before 3-4 players
-local readyFor
+local readyFor = {} -- host: addresses of the guests that asked for the full list (3-4 players: any one keeps lines flowing)
 local lastRx = -math.huge -- guest: when the host's last loot line came in
 
 -- a big container (a garage's storage can hold hundreds of stacks) does not fit one message (32 KB): its state goes as numbered pieces
@@ -94,7 +93,7 @@ local partial = {} -- id -> { piece index -> text } (guest and host)
 local inbox, head = {}, 1 -- lines from the other side, worked off a few ms per frame (below)
 local function flush()
     if #out == 0 then return end
-    if common.netMode() == "listen" and not readyFor then out = {}; return end
+    if common.netMode() == "listen" and not next(readyFor) then out = {}; return end
     local buf, size = {}, 0
     local function send()
         if #buf == 0 then return end
@@ -535,6 +534,8 @@ end
 -- the full list for a guest that asks (H), sent over several ticks like the scan; "F" ends it
 local allQueue
 local fullSentAt = -math.huge
+-- 3-4 players: the guest the last full list was for, and another guest whose H came during it (it saw only the tail: a fresh list after)
+local listFor, listNext = nil, nil
 local function sendAll()
     allQueue = {}
     for id in pairs(ents) do allQueue[#allQueue + 1] = id end
@@ -550,7 +551,10 @@ local function sendSome()
         elseif e and entityAlive(e) then say(line(e)) end
     end
     -- F only once the host has registered everything: the guest purges what the list does not hold
-    if #allQueue == 0 and hostScanned then allQueue, fullSentAt = nil, os.clock(); say("F"); log("PT|loot full list sent") end
+    if #allQueue == 0 and hostScanned then
+        allQueue, fullSentAt = nil, os.clock(); say("F"); log("PT|loot full list sent")
+        if listNext then listFor, listNext = listNext, nil; sendAll() end
+    end
 end
 
 -- guest -----------------------------------------------------------------------------------------------------------
@@ -846,7 +850,7 @@ net.on("g.loot.pose", acceptPoses)
 -- host: world items send rotation too; a tire can tip over without moving its centre.
 local function turned(a, b) return math.abs((a - b + 180) % 360 - 180) > 1 end
 local function scanMoves()
-    if NOFALL or not readyFor then return end
+    if NOFALL or not next(readyFor) then return end
     poseRows, poseBytes = {}, 0
     -- a resting item is read every ~5 s, a new or moving one every tick (all of them each tick held host frames, playtest 2026-10-31)
     local now = os.clock()
@@ -969,7 +973,7 @@ LoopInGameThreadWithDelay(100,function()
     local mode=common.netMode()
     if mode~='listen'and mode~='client'then return end
     if mode=='client'and (not fullAt or net.lifecycle()~='active')then return end
-    if mode=='listen'and not readyFor then return end
+    if mode=='listen'and not next(readyFor) then return end
     for id,e in pairs(ents)do
         if (e.kind=='I'or e.kind=='L')and not e.busy and not e.pending and e.last then
             local c=e.get()
@@ -1017,7 +1021,9 @@ local function handle(l, guest, pc)
     if op == nil then
     elseif op == "H" and not guest then
         -- a list under way is not restarted by the guest asking again, nor one just finished (its H crossed our F)
-        if not allQueue and os.clock() - fullSentAt > 10 then sendAll() end
+        local who = pc and pc:GetAddress()
+        if allQueue then if who ~= listFor then listNext = who end
+        elseif os.clock() - fullSentAt > 10 or who ~= listFor then listFor = who; sendAll() end
     elseif guest and op == "A" then
         onAdd(id, f[3], tonumber(f[4]), tonumber(f[5]), tonumber(f[6]), tonumber(f[7]), f[8])
     elseif guest and op == "F" then
@@ -1093,7 +1099,8 @@ local function handle(l, guest, pc)
             local e = register("W" .. nextId, "W", w)
             nextId, byName[w:GetAddress()] = nextId + 1, e.id
             e.hotUntil = os.clock() + 5
-            say("K|" .. e.id .. "|" .. key)
+            -- to the dropper only: each guest counts its own keys, another guest's same key is a different drop (3-4 players)
+            if pc then net.toGuest(pc, "g.loot.b", "K|" .. e.id .. "|" .. key) end
         end
     elseif op == "K" and guest then
         local a = common.resolve(pendingDrops[f[3]])
@@ -1107,7 +1114,7 @@ local function handle(l, guest, pc)
         local e = ents[id]
         ents[id], byName[e.addr] = nil, nil
         if entityAlive(e) then e.actor:K2_DestroyActor() end
-        if e.kind == "W" then ov.post(ov.other() .. " picked up an item", "info", "pick") end
+        if e.kind == "W" then ov.post(ov.nameOf(pc) .. " picked up an item", "info", "pick") end
         say("D|" .. id)
     end
 end
@@ -1119,7 +1126,7 @@ net.on("g.loot.b", function(pc, data)
     lastRx = os.clock()
     local lease = common.lease(pc)
     for l in data:gmatch("[^\n]+") do
-        if l == "H" then readyFor = pc:GetAddress() end
+        if l == "H" then readyFor[pc:GetAddress()] = true end
         inbox[#inbox + 1] = { line = l, lease = lease }
     end
 end)
@@ -1182,9 +1189,10 @@ local function tick()
     end
     local mode = common.netMode()
     if mode == "listen" then
-        local here = false
-        for _, pc in ipairs(net.guests()) do here = here or pc:GetAddress() == readyFor end
-        if not here then readyFor, allQueue, fullSentAt = nil, nil, -math.huge end
+        local here = {}
+        for _, pc in ipairs(net.guests()) do here[pc:GetAddress()] = true end
+        for a in pairs(readyFor) do if not here[a] then readyFor[a] = nil end end
+        if not next(readyFor) then allQueue, fullSentAt = nil, -math.huge end
         listening = #net.guests() > 0
         if not listening then return end
         -- discovery every 2 s: it took ~340 ms of each 500 ms tick in a zone (local playtest 2026-10-22); until the guest's
@@ -1245,7 +1253,7 @@ end)
 
 RegisterLoadMapPreHook(function() replicas = replica.new(nil) end)
 RegisterLoadMapPostHook(function()
-    hostScanned, fullAt, allQueue, readyFor, lastRx, fullSentAt = false, nil, nil, nil, -math.huge, -math.huge
+    hostScanned, fullAt, allQueue, readyFor, lastRx, fullSentAt, listFor, listNext = false, nil, nil, {}, -math.huge, -math.huge, nil, nil
     ents, byName, claimed, reported, out, partial, partIds, skip = {}, {}, {}, {}, {}, {}, {}, {}
     inbox, head, cands, made = {}, 1, {}, { claimed = 0, spawned = 0 }
 end)

@@ -4,6 +4,7 @@ local UEHelpers = require("UEHelpers")
 local common = require("common")
 local safety = require("safety")
 local health = require("health")
+local net = require("net")
 local log = common.log
 
 local M = { NEAR = 1500, FAR = 5000, QUIET = 800, QUIET_FADE = 700 } -- uu: full strength up to NEAR, gone at FAR
@@ -68,7 +69,7 @@ local function showUi(tag, i, label, a)
     local scale = StaticFindObject("/Script/UMG.Default__WidgetLayoutLibrary"):GetViewportScale(pc)
     b.slot:SetPosition({ X = v.X / scale, Y = v.Y / scale })
     if b.shown ~= label then b.shown = label; b.text:SetText(FText(label)) end
-    b.text:SetColorAndOpacity({ SpecifiedColor = { R = 1, G = 1, B = 1, A = a }, ColorUseRule = 0 })
+    b.text:SetColorAndOpacity({ SpecifiedColor = { R = 0.883, G = 0.915, B = 0.646, A = a }, ColorUseRule = 0 }) -- the HUD's cream
     b.text:SetVisibility(3)
 end
 
@@ -145,7 +146,8 @@ local function update()
             seen[key] = true
             -- P4: the other player's health under the name (health.lua), once they have reported it
             local n = playerName(c)
-            local hp = health.label()
+            if (tag.id or -1) < 0 then tag.id = net.idOf(c) end -- read once: the tag is redrawn every frame
+            local hp = health.label(tag.id)
             if hp and not LOUD and (tonumber(hp:match("^(%d+)")) or 0) >= 100 then hp = nil end -- health only when hurt
             local label = hp and (n .. "\n" .. hp) or n
             local viaUi = needsUi(label)
@@ -162,7 +164,7 @@ local function update()
             local a = tag.a
             fitSize(tag, d)
             tag.actor:K2_SetActorRotation({ Pitch = 0, Yaw = math.deg(math.atan(dy, dx)), Roll = 0 }, false)
-            tag.text:SetTextRenderColor({ R = 255, G = 255, B = 255, A = math.floor(a * 255 + 0.5) })
+            tag.text:SetTextRenderColor({ R = 241, G = 245, B = 209, A = math.floor(a * 255 + 0.5) }) -- the HUD's cream (sRGB)
             tag.actor:SetActorHiddenInGame(a <= 0)
             if a > 0 then allHidden = false end
             if viaUi then

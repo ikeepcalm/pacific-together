@@ -12,6 +12,7 @@ local M = {}
 if os.getenv("PT_MUTATE") == "nooverlay" then
     function M.post() end
     function M.other() return "Player" end
+    function M.nameOf() return "Player" end
     function M.settled() return false end
     function M.hostPaused() end
     function M.transition() end
@@ -22,10 +23,15 @@ end
 
 local LINES, LIFE, SETTLE = 5, 6, 6 -- visible lines, seconds a line lives, seconds into a session before loot-style chatter is allowed
 local Z = 10000
-local COLOR = { -- linear RGB: off-white text, a teal accent for the status, muted warn and good
-    label = { R = 0.78, G = 0.78, B = 0.74 }, status = { R = 0.25, G = 0.8, B = 0.72 }, card = { R = 0.86, G = 0.84, B = 0.7 },
-    info = { R = 0.78, G = 0.78, B = 0.74 }, warn = { R = 0.9, G = 0.45, B = 0.3 }, good = { R = 0.3, G = 0.75, B = 0.5 },
+-- linear RGB. The game's HUD draws everything in one cream (sRGB 241,245,209: health box, key boxes, prompts; sampled 2026-11-14),
+-- so the mod does too: no teal or green accents, amber only for warnings, the status a little dimmer than the label.
+local CREAM = { R = 0.883, G = 0.915, B = 0.646 }
+local COLOR = {
+    label = CREAM, status = { R = 0.66, G = 0.69, B = 0.49 }, card = CREAM, info = CREAM, good = CREAM,
+    warn = { R = 0.87, G = 0.40, B = 0.08 }, dark = { R = 0.016, G = 0.017, B = 0.014 },
 }
+M.CREAM = CREAM
+local LABEL_S = 10 -- s the version label shows after a map load (always in the main menu and with the F9 card open)
 
 local function valid(o) return o ~= nil and o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) end
 
@@ -59,8 +65,8 @@ M.fontOf = fontOf
 local function text(tree, name, size, kind, which, spacing, justify)
     local t = StaticConstructObject(StaticFindObject("/Script/UMG.TextBlock"), tree, FName(name))
     t:SetJustification(justify or 2) -- right
-    t:SetShadowOffset({ X = 1.5, Y = 1.5 })
-    t:SetShadowColorAndOpacity({ R = 0, G = 0, B = 0, A = 1 })
+    t:SetShadowOffset({ X = 1, Y = 1 }) -- the HUD's text has a faint shadow at most
+    t:SetShadowColorAndOpacity({ R = 0, G = 0, B = 0, A = 0.55 })
     local f = t.Font
     f.Size = size
     local fo = fontOf(which)
@@ -113,14 +119,26 @@ local function build()
     cs:SetAutoSize(true)
     frame:SetVisibility(1)
     n.card = frame
-    -- heal.lua's key hint, under the crosshair
-    n.hint = text(tree, "PTHint", 20, "good", "body", nil, 1)
-    local hs = canvas:AddChildToCanvas(n.hint)
+    -- heal.lua's key hint under the crosshair, as the HUD's own prompts: the key in a cream outline box, then the action
+    local row = StaticConstructObject(StaticFindObject("/Script/UMG.HorizontalBox"), tree, FName("PTHintRow"))
+    local keyFrame = StaticConstructObject(B, tree, FName("PTHintKeyFrame"))
+    local keyInner = StaticConstructObject(B, tree, FName("PTHintKeyInner"))
+    keyFrame:SetBrushColor({ R = CREAM.R, G = CREAM.G, B = CREAM.B, A = 1 })
+    keyFrame:SetPadding({ Left = 1, Top = 1, Right = 1, Bottom = 1 }) -- the HUD's key boxes: a thin outline, dark inside
+    keyInner:SetBrushColor({ R = 0.004, G = 0.012, B = 0.016, A = 0.9 })
+    keyInner:SetPadding({ Left = 5, Top = 1, Right = 5, Bottom = 1 })
+    n.hintKey = text(tree, "PTHintKey", 18, "label", "body", nil, 1)
+    keyFrame:SetContent(keyInner); keyInner:SetContent(n.hintKey)
+    row:AddChildToHorizontalBox(keyFrame):SetVerticalAlignment(2) -- centre
+    n.hint = text(tree, "PTHint", 18, "label", "body", nil, 0)
+    row:AddChildToHorizontalBox(n.hint):SetPadding({ Left = 10, Top = 0, Right = 0, Bottom = 0 })
+    local hs = canvas:AddChildToCanvas(row)
     hs:SetAnchors({ Minimum = { X = 0.5, Y = 0.5 }, Maximum = { X = 0.5, Y = 0.5 } })
     hs:SetAlignment({ X = 0.5, Y = 0 })
     hs:SetPosition({ X = 0, Y = 90 })
     hs:SetAutoSize(true)
-    n.hint:SetVisibility(1)
+    row:SetVisibility(1)
+    n.hintRow, n.hintKeyBox = row, keyFrame
     for i = 1, LINES do
         n.lines[i] = text(tree, "PTFeed" .. i, 16, "info")
         n.lines[i]:SetVisibility(1)
@@ -128,6 +146,9 @@ local function build()
     end
     n.banner = text(tree, "PTBanner", 30, "warn"); n.banner:SetVisibility(1); add(n.banner) -- last child: "Paused by host"
     n.label:SetText(FText("Pacific Together " .. common.MOD_VERSION))
+    n.builtAt = os.clock()
+    local wd = UEHelpers.GetWorld() -- the widget lives as long as its world: the menu check holds for it
+    n.menu = valid(wd) and UEHelpers.GetGameplayStatics():GetCurrentLevelName(wd, true):ToString() == "RB_MainMenu"
     -- nothing of it takes input or hit tests: the whole tree is HitTestInvisible
     box:SetVisibility(3); canvas:SetVisibility(3); w:SetVisibility(3)
     w:AddToViewport(Z)
@@ -152,13 +173,22 @@ local panelText
 function M.panel(t) panelText = t end
 
 local hintText
-function M.hint(t) hintText = t end -- a short key hint under the crosshair; nil hides it
+function M.hint(t) hintText = t end -- a short key hint under the crosshair, "[H] Patch up Rex"; nil hides it
 
 local function render()
     local now = os.clock()
     local hv = hintText and 3 or 1
-    if ui.cache.hv ~= hv then ui.cache.hv = hv; ui.hint:SetVisibility(hv) end
-    if hintText then set(ui.hint, "hint", hintText) end
+    if ui.cache.hv ~= hv then ui.cache.hv = hv; ui.hintRow:SetVisibility(hv) end
+    if hintText then
+        local key, rest = hintText:match("^%[(.-)%]%s*(.*)$")
+        set(ui.hintKey, "hintKey", key or "")
+        local kv = key and 3 or 1
+        if ui.cache.hkv ~= kv then ui.cache.hkv = kv; ui.hintKeyBox:SetVisibility(kv) end
+        set(ui.hint, "hint", rest or hintText)
+    end
+    -- the version: in the main menu, shortly after a load and with the F9 card; the game's HUD has no standing labels
+    local lv = (panelText or now - ui.builtAt < LABEL_S or ui.menu) and 3 or 1
+    if ui.cache.lv ~= lv then ui.cache.lv = lv; ui.label:SetVisibility(lv) end
     local pnv = panelText and 3 or 1
     if ui.cache.pnv ~= pnv then ui.cache.pnv = pnv; ui.card:SetVisibility(pnv) end
     if panelText then
@@ -230,7 +260,12 @@ function M.hostPaused(on) pausedAt = on and os.clock() or nil end
 function M.transition(on) transitionOn = on end
 
 -- the other player's name as this side knows it
-function M.other() return hostName or next(names) or "Player" end
+function M.other()
+    if hostName then return hostName end
+    local a = next(names)
+    if a and next(names, a) then return "A player" end -- several guests: ov.nameOf(pc) names the one meant
+    return a or "Player"
+end
 
 -- false until a few seconds into a session: the first full state sync is not news
 function M.settled() return sessionSince ~= nil and os.clock() - sessionSince > SETTLE end
@@ -254,6 +289,16 @@ end
 local function realName(ps)
     local n = ps:GetPlayerName():ToString()
     return not n:find("PT|", 1, true) and n ~= "" and n or nil
+end
+
+-- one player's name (3-4 players): x = a controller, a character or a PlayerState.PlayerId; M.other() when unknown
+function M.nameOf(x)
+    local ps
+    if type(x) == "number" then
+        local w = UEHelpers.GetWorld()
+        for _, p in ipairs(valid(w) and playerStates(w) or {}) do if p.PlayerId == x then ps = p end end
+    elseif valid(x) then ps = x.PlayerState end
+    return valid(ps) and realName(ps) or M.other()
 end
 
 -- ARC energy, in run maps during a session: the guest's values are the host's (guestact.lua g.act.arc)

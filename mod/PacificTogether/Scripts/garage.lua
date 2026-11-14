@@ -249,18 +249,18 @@ local function hookCharger()
     if chargeHooked or not live(FindFirstOf("BP_Garage_BatteryCharger_C")) then return end
     chargeHooked = pcall(RegisterHook, "/Game/Gameplay/CarGarage/Stations/BatteryCharger/BP_Garage_BatteryCharger.BP_Garage_BatteryCharger_C:" .. CHARGE, function()
         if replaying or not (M.enabled and safety.active()) then return end
-        if safety.guest() then net.toHost("g.garage.charge", "") else net.toGuests("g.garage.charge", "") end
+        net.send("g.garage.charge", "")
         log("PT|garage charger pulled, sent")
     end)
 end
-net.on("g.garage.charge", function()
+net.share("g.garage.charge", function() -- the host passes a guest's pull on to the other guests
     local c = FindFirstOf("BP_Garage_BatteryCharger_C")
     if not (M.enabled and safety.active() and live(c)) then return end
     replaying = true
     try("charger", function() c[CHARGE](c, c.Highlight, nil) end)
     replaying = false
     log("PT|garage charger pulled by the other player")
-end)
+end, true) -- an event: not replayed to a guest who joins later
 
 LoopInGameThreadWithDelay(500, function()
     if not M.enabled or not netted() then last, want = nil, nil return end

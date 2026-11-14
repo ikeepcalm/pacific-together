@@ -241,7 +241,7 @@ net.on("g.bp.death", function(pc, line)
     for _, e in ipairs(rec.hand) do all[#all + 1] = e end
     writeC(a.InventoryContainer, all, false) -- shortcut: stack grid spots are the game's, durability is kept on the host's bag only
     a.RolledOnOpenItems = true -- no random loot on top of the guest's
-    ov.post(ov.other() .. "'s death crate dropped", "warn")
+    ov.post(ov.nameOf(pc) .. "'s death crate dropped", "warn")
     log("PT|bp death bag for %s at %.0f,%.0f,%.0f with %d items", id, l.X, l.Y, l.Z, count(rec))
 end)
 

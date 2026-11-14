@@ -72,7 +72,7 @@ local function partComps(slot)
     return m, m and car.propComps(m)
 end
 
-net.on("g.act.heal", function(_, data)
+net.on("g.act.heal", function(pc, data)
     if not hostCar() then return end
     local f = split(data)
     local m, c = partComps(f[1])
@@ -80,11 +80,11 @@ net.on("g.act.heal", function(_, data)
     if c and c.h and amount and amount > 0 and amount < 1000 then
         c.h:HealDamage(amount, false, {}, {}, {})
         log("PT|act heal %s %.2f", f[1], amount)
-        ov.post(ov.other() .. " repaired " .. f[1]:match("[^%.]+$"), "good", "act.heal")
+        ov.post(ov.nameOf(pc) .. " repaired " .. f[1]:match("[^%.]+$"), "good", "act.heal")
     end
 end)
 
-net.on("g.act.fuel", function(_, data)
+net.on("g.act.fuel", function(pc, data)
     if not hostCar() then return end
     local f = split(data)
     local cm = car.carManager()
@@ -95,13 +95,13 @@ net.on("g.act.fuel", function(_, data)
         if c:GetClass():GetFName():ToString() == f[2] then
             if amount > 0 then c["Give Fuel"](c, amount, {}, {}) else c["Take Fuel"](c, -amount, {}, {}) end
             log("PT|act fuel %s %.2f", f[1], amount)
-            ov.post(ov.other() .. (amount > 0 and " refuelled " or " siphoned fuel from ") .. f[1]:match("[^%.]+$"), "good", "act.fuel")
+            ov.post(ov.nameOf(pc) .. (amount > 0 and " refuelled " or " siphoned fuel from ") .. f[1]:match("[^%.]+$"), "good", "act.fuel")
             return
         end
     end
 end)
 
-net.on("g.act.bat", function(_, data)
+net.on("g.act.bat", function(pc, data)
     if not hostCar() then return end
     local f = split(data)
     local m, c = partComps(f[1])
@@ -113,12 +113,12 @@ net.on("g.act.bat", function(_, data)
         c.b["Set Battery"](c.b, math.min(t[1].BATTERY + amount, t[2]["Battery Capacity"] or math.huge))
         pcall(function() car.carManager():UpdateAggregateBattery() end)
         log("PT|act battery %s %.2f", f[1], amount)
-        ov.post(ov.other() .. " charged " .. f[1]:match("[^%.]+$"), "good", "act.bat")
+        ov.post(ov.nameOf(pc) .. " charged " .. f[1]:match("[^%.]+$"), "good", "act.bat")
     end
 end)
 
 -- the gateway: the ARC screen's own gate (charged, able to choose) is checked here because the guest's UI is not trusted
-net.on("g.act.gate", function(_, data)
+net.on("g.act.gate", function(pc, data)
     if not hostCar() then return end
     local screen, sm
     for _, o in ipairs(FindAllOf("BP_Carpart_Internal_GobblerScreen_C") or {}) do if valid(o) then screen = o break end end
@@ -129,10 +129,10 @@ net.on("g.act.gate", function(_, data)
     if not p then log("PT|act gate: no portal at %s", data) return end
     sm["Select Exit Portal Actor"](sm, p)
     log("PT|act gate selected %s (%s)", data, p:GetFName():ToString())
-    ov.post(ov.other() .. " summoned the gateway", "good")
+    ov.post(ov.nameOf(pc) .. " summoned the gateway", "good")
 end)
 
-net.on("g.act.anchor", function(_, data)
+net.on("g.act.anchor", function(pc, data)
     if not hostCar() then return end
     local gob
     for _, o in ipairs(FindAllOf("BP_Carpart_Internal_Gobbler_C") or {}) do if valid(o) then gob = o break end end
@@ -140,7 +140,7 @@ net.on("g.act.anchor", function(_, data)
     if not (gob and valid(arch)) then log("PT|act anchor: no gobbler or archetype %s", data); return end
     gob:AddingAnchorCompleteLogic(arch:CreateInstance(UEHelpers.GetWorldContextObject(), 0))
     log("PT|act anchor %s", data)
-    ov.post(ov.other() .. " deposited an anchor", "good")
+    ov.post(ov.nameOf(pc) .. " deposited an anchor", "good")
 end)
 
 -- ARC energy: the host's charge (Gobbler item properties) and the screen's "charged" flag are mirrored once a second, so the guest's
@@ -318,14 +318,14 @@ local function grabHook(self)
     log("PT|act grab intent %s", name)
     net.toHost("g.act.grab", name)
 end
-net.on("g.act.grab", function(_, data)
+net.on("g.act.grab", function(pc, data)
     if not hostCar() then return end
     for _, o in ipairs(FindAllOf("BP_Resource_Narrative_Q01_RadioBitsGrabbable_C") or {}) do
         if valid(o) and o:GetFName():ToString() == data then
             local first = not o.SuccessfullyGrabbed -- both grab hooks may send: one toast
             if first then pcall(o.ShortGrabComplete, o, {}) end
             log("PT|act grab %s grabbed=%s", data, tostring(o.SuccessfullyGrabbed))
-            if first then ov.post(ov.other() .. " picked up a story item", "good") end
+            if first then ov.post(ov.nameOf(pc) .. " picked up a story item", "good") end
             return
         end
     end

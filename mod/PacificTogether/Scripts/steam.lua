@@ -121,7 +121,7 @@ local function hostTick()
         return
     end
     creating = os.clock()
-    log("PT|steam creating lobby, create=%s", tostring(PTNative_SteamCreateLobby(2)))
+    log("PT|steam creating lobby, create=%s", tostring(PTNative_SteamCreateLobby(4))) -- host + 3 guests (D1)
 end
 
 -- answers the guests' warm-up pings on channel 1 (a reliable ping gets a reliable echo, an unreliable one an unreliable echo), 4 times a second

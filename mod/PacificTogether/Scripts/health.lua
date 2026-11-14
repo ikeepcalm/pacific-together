@@ -24,13 +24,14 @@ local function health()
     return valid(h) and h or nil
 end
 
--- the other player's last report
-local other, lastSent, lastAt, clamped = nil, "", 0, false
+-- the other players' last reports: PlayerState.PlayerId -> { pct, t }
+local others, lastSent, lastAt, clamped = {}, "", 0, false
 
 function M.pct(cur, max) return cur <= 1.01 and 0 or math.floor(cur / max * 100 + 0.5) end
 
--- "70%" for the name tag, nil when we have no fresh report
-function M.label()
+-- "70%" for the name tag of the player with that PlayerId, nil when we have no fresh report
+function M.label(id)
+    local other = others[id]
     return other and os.time() - other.t <= M.STALE and (other.pct .. "%") or nil
 end
 
@@ -146,9 +147,9 @@ net.on("g.health.respawn", function(pc)
     net.toGuest(pc, "g.health.revive", "")
 end)
 
-net.on("g.health.hp", function(_, data)
+net.share("g.health.hp", function(_, data, from)
     local c, m = data:match("^([%d.]+),([%d.]+)$")
-    if c then other = { pct = M.pct(tonumber(c), tonumber(m)), t = os.time() } end
+    if c then others[from] = { pct = M.pct(tonumber(c), tonumber(m)), t = os.time() } end
 end)
 
 -- every 500 ms ---------------------------------------------------------------------------------------------------------
@@ -157,7 +158,7 @@ local function tick()
     if not killHooked and valid(FindFirstOf("BP_MainCharacterManager_C")) then hookKill() end
     local h = health()
     if not safety.active() then
-        if other or dying then other, dying, lastSent = nil, false, "" end
+        if next(others) or dying then others, dying, lastSent = {}, false, "" end
         if clamped and h then h.Minimum, clamped = 0, false end -- left the session: single player dies as the game does
         return
     end
@@ -178,7 +179,7 @@ local function tick()
     local msg = string.format("%.1f,%.1f", cur, max)
     if msg ~= lastSent or os.time() - lastAt >= 2 then
         lastSent, lastAt = msg, os.time()
-        if safety.guest() then net.toHost("g.health.hp", msg) else net.toGuests("g.health.hp", msg) end
+        net.send("g.health.hp", msg)
     end
 end
 

@@ -7,10 +7,20 @@ return function(T)
     local L = require("scenarios.sessionlib")(T)
     local mapName = "Rural_Forest_Radio_Scylla_02"
     local fly = { run = function() local m = T.ROLE == "host" and L.own() or T.myPawn(); m.CharacterMovement:SetMovementMode(5, 0) end }
-    local function hint() -- text of the visible hint, nil when hidden
-        for _, b in ipairs(FindAllOf("TextBlock") or {}) do
-            if b:IsValid() and b:GetFName():ToString() == "PTHint" and b:GetVisibility() == 3 then return b:GetText():ToString() end
+    local function hint() -- "[key] text" of the visible hint (overlay.lua: a key box beside the text in PTHintRow), nil when hidden
+        local row
+        for _, b in ipairs(FindAllOf("HorizontalBox") or {}) do
+            if b:IsValid() and b:GetFName():ToString() == "PTHintRow" and b:GetVisibility() == 3 and b:GetOuter():GetOuter():IsInViewport() then row = b end
         end
+        if not row then return nil end
+        local key, text = "", ""
+        for _, t in ipairs(FindAllOf("TextBlock") or {}) do
+            if t:IsValid() and t:GetOuter():GetAddress() == row:GetOuter():GetAddress() then
+                local n = t:GetFName():ToString()
+                if n == "PTHintKey" then key = t:GetText():ToString() elseif n == "PTHint" then text = t:GetText():ToString() end
+            end
+        end
+        return (key ~= "" and ("[" .. key .. "] ") or "") .. text
     end
     local function send(kind, data)
         local a

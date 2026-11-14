@@ -8,7 +8,7 @@ Current player-facing behavior: [../README.md](../README.md). Results and remain
 
 | # | Decision |
 |---|---|
-| D1 | **2 players**: host + one guest. 3-4 players is a later phase, not designed against but not built for. |
+| D1 | **2-4 players**: host + up to three guests (owner 2026-11-14; was 2). Guests talk only to the host, which relays each guest's own state (`net.share`); no guest-to-guest links. Seats: driver, passenger, rear seat behind the driver (the ARC body keeps the other rear seat); a fourth player rides outside. |
 | D2 | **Host's save only.** The guest plays in the host's world. Nothing the mod does may write to the guest's own saves. |
 | D3 | **Steam invite / join** is the target way to connect. Direct IP stays for tests and VPN users. |
 | D4 | **v1.0 = full run loop**: garage -> junctions -> gateway -> garage together, with shared car state and loot. Story plays as far as the host's save allows. |

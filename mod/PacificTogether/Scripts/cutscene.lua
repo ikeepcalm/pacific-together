@@ -41,7 +41,7 @@ end
 local function skip(why)
     if not (M.enabled and safety.active()) or not skippable() then return end
     skipHere(why)
-    if safety.guest() then net.toHost("g.cut.skip", "") else net.toGuests("g.cut.skip", "") end
+    net.send("g.cut.skip", "")
 end
 common.onKey("E", function() skip("E") end)
 -- the test mod is another Lua state: its scenario presses E through the console ("ptskip"), same handler, on the game thread
@@ -49,12 +49,9 @@ local wanted = false
 pcall(RegisterConsoleCommandHandler, "ptskip", function() wanted = true return true end)
 LoopInGameThreadWithDelay(100, function() if wanted then wanted = false; skip("ptskip") end end)
 
-net.on("g.cut.skip", function(pc)
+net.share("g.cut.skip", function() -- the host passes a guest's skip on to the other guests
     if not (M.enabled and safety.active()) then return end
     skipHere(safety.guest() and "the host's skip" or "the guest's E")
-    if not safety.guest() then
-        for _, g in ipairs(net.guests()) do if g:GetAddress() ~= pc:GetAddress() then net.toGuest(g, "g.cut.skip", "") end end
-    end
-end)
+end, true)
 
 return M

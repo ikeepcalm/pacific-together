@@ -37,14 +37,15 @@ local ui, loading = nil, nil -- { widget, msg, cache }
 local function text(tree, name, size)
     local t = StaticConstructObject(StaticFindObject("/Script/UMG.TextBlock"), tree, FName(name))
     t:SetJustification(1) -- centre
-    t:SetShadowOffset({ X = 1.5, Y = 1.5 })
-    t:SetShadowColorAndOpacity({ R = 0, G = 0, B = 0, A = 1 })
+    t:SetShadowOffset({ X = 1, Y = 1 })
+    t:SetShadowColorAndOpacity({ R = 0, G = 0, B = 0, A = 0.55 })
     local f = t.Font
     f.Size = size
     local fo = require("overlay").fontOf and require("overlay").fontOf("body") -- the game's HUD font
     if fo then f.FontObject = fo end
     t:SetFont(f)
-    t:SetColorAndOpacity({ SpecifiedColor = { R = 0.9, G = 0.9, B = 0.86, A = 1 }, ColorUseRule = 0 })
+    local c = require("overlay").CREAM or { R = 0.883, G = 0.915, B = 0.646 } -- the HUD's cream
+    t:SetColorAndOpacity({ SpecifiedColor = { R = c.R, G = c.G, B = c.B, A = 1 }, ColorUseRule = 0 })
     t:SetVisibility(1)
     return t
 end
