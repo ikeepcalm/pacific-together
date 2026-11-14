@@ -42,11 +42,18 @@ local function startClock(pc)
 end
 -- the hold ends once every guest has its character and its clock (or its clock timed out); starts a missing guest's clock
 local function allReady()
-    for _, g in ipairs(net.guests()) do
+    local list = net.guests()
+    if #list == 0 then return false end -- after the load the guests reconnect: none yet is not "all ready" (dayclock 2026-11-14)
+    for _, g in ipairs(list) do
+        -- its character is there ("baseline": loot and visual copies still coming): since the intent queue (0.9.0) net.ready waits
+        -- for the whole baseline, and the host held its loading screen ~30 s at every zone change (transition 2026-11-14)
         local life = net.lifecycle(g)
-        if life ~= "active" and life ~= "disconnected" then return false end -- a stalled guest holds everyone until HOLD_MAX
+        if life ~= "baseline" and life ~= "active" then return false end -- a stalled guest holds everyone until HOLD_MAX
+        -- its capabilities first: before they arrive clock.ready() answers "no clock, nothing to wait for" (dayclock 2026-11-14);
+        -- every guest of this mod version has the world clock
+        if not net.peerSupports(g, 'world-clock') then return false end
         local c = clocks[g:GetAddress()]
-        if not clock.ready(g) and not (c and c.done) then startClock(g); return false end -- ready = true without the capability
+        if not clock.ready(g) and not (c and c.done) then startClock(g); return false end
     end
     return true
 end
@@ -196,6 +203,7 @@ LoopInGameThreadWithDelay(100, function()
             end
         end
         hookAll()
+        if holdSince then release("guests here") end -- lets go once allReady() holds (or starts their clocks)
         if holdSince and os.clock() - holdSince > HOLD_MAX then
             overlay.post(others() .. " did not load in time", "warn")
             release("timeout", true)

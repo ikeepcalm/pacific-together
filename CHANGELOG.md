@@ -3,13 +3,6 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
-## [Unreleased]
-
-### Added
-
-- Performance mode is automatic by default: when your FPS stays under 25 for 30 seconds it switches on by itself, and switches
-  off again (for 10 minutes) if it did not help. F9 5 cycles automatic, on, off; your own choice always wins.
-
 ## [0.9.3.1] - 2026-11-14
 
 Preview for 3-4 player testing. Network protocol **8**: everyone needs 0.9.3.1; a 0.9.3 player cannot join.
@@ -21,6 +14,10 @@ Preview for 3-4 player testing. Network protocol **8**: everyone needs 0.9.3.1; 
   (H) patches up the player you look at. The third player rides on the rear seat behind the driver (next to the ARC body);
   a fourth stays outside and gets "The car is full". The host's loading screen waits for every guest. Feed lines name the
   player who did it.
+- Performance mode is automatic by default: when your FPS stays under 25 for 30 seconds it switches on by itself, and switches
+  off again (for 10 minutes) if it did not help. F9 5 cycles automatic, on, off; your own choice always wins. (A player who
+  toggled it in an earlier build has that choice saved: press F9 5 until it shows "auto".)
+- F9 8 (host): co-op weather on/off. Off gives the game's own weather at midday, to compare FPS with the darker co-op weather.
 
 ### Changed
 
@@ -33,6 +30,8 @@ Preview for 3-4 player testing. Network protocol **8**: everyone needs 0.9.3.1; 
 ### Fixed
 
 - The loading screen's "WAITING FOR HOST..." ran off the right edge of the screen; the box now grows to the left.
+- The host's loading screen after a zone change waited about 30 s for the guest since 0.9.1; it now lets go once every guest's
+  character is in and its clock synced (about 1-4 s).
 - Loot with more than one guest: a dropped item could be taken over by the wrong guest, a guest joining while another got
   the full item list only got its tail, and loot stopped flowing to the others when the first guest left.
 

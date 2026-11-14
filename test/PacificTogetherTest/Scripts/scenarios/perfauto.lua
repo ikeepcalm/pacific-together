@@ -16,7 +16,10 @@ return function(T)
     local steps = {}
     local function add(s) steps[#steps + 1] = s end
     for _, s in ipairs(T.loadFixture("garage")) do add(s) end
+    -- from automatic (a choice left by an earlier run is in the shared mod folder: the cycle started at "on", 2026-11-14), then
     -- auto -> on -> off (the player's choice)
+    local FILE = "ue4ss/Mods/PacificTogether/performance.txt"
+    add({ run = function() os.remove(FILE) end })
     add({ run = function() T.console("ptperfwin 2"); T.console("ptperflow 100000"); T.console("ptperfmode"); T.console("ptperfmode") end })
     local t0
     add({ run = function() t0 = os.clock() end })
@@ -27,6 +30,6 @@ return function(T)
     add({ run = function() T.console("ptperfmode") end }) -- off -> auto
     add({ check = "auto_on", timeout = 60, cond = function() return count("PT|perf auto on") >= 1 end })
     add({ check = "auto_reverts_no_gain", timeout = 60, cond = function() return count("PT|perf auto off, no gain") >= 1 end })
-    add({ run = function() T.console("ptperflow 25") end })
+    add({ run = function() T.console("ptperflow 25"); os.remove(FILE) end }) -- leave it automatic
     return steps
 end
