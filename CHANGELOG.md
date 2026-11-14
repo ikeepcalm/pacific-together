@@ -3,6 +3,22 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
+## [0.9.3.2] - 2026-11-14
+
+Host performance and a song transfer bar. Network protocol **8**, as in 0.9.3.1; everyone needs 0.9.3.2 (the mod version must match).
+
+### Added
+
+- Custom radio songs: while one travels to a player, a small bar in the bottom right shows "Receiving song: <name>" (the host
+  sees "Sending song: <name>" with the slowest player's progress).
+
+### Changed
+
+- Less host stutter: the loot checks that held a host's frame for 23-35 ms at a time now do at most 4 ms per tick and continue
+  on the next one; the car, the player list and the game's feedback system are looked up far less often.
+- The performance log (`PT|perf`, once a minute) lists every part of the mod that took more than 10 ms, not only the top 8, and
+  names any step of the zone props mirror that takes over 8 ms.
+
 ## [0.9.3.1] - 2026-11-14
 
 Preview for 3-4 player testing. Network protocol **8**: everyone needs 0.9.3.1; a 0.9.3 player cannot join.

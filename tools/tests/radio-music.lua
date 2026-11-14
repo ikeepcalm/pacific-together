@@ -10,7 +10,7 @@ local function pair(options)
     local source = { id = A, size = 25001, ext = "mp3", bytes = string.rep("ab", 25001) }
     local pc = { uid = 1, GetAddress = function() return 1 end }
     local function context(mode)
-        local s = { mode = mode, epoch = "world", handlers = {}, loops = {}, resets = {}, begins = 0, infoCalls = 0, cache = {}, bytes = nil }
+        local s = { mode = mode, epoch = "world", handlers = {}, loops = {}, resets = {}, begins = 0, infoCalls = 0, cache = {}, bytes = nil, bars = {} }
         local net = {
             worldToken = function() return s.epoch end,
             hostSupports = function() return options.supported ~= false end,
@@ -34,7 +34,7 @@ local function pair(options)
         end
         local env = setmetatable({
             os = { clock = function() return time end },
-            require = function(n) if n == "net" then return net elseif n == "common" then return common else assert(n == "overlay"); return { post = function() end } end end,
+            require = function(n) if n == "net" then return net elseif n == "common" then return common else assert(n == "overlay"); return { post = function() end, progress = function(t, f) s.bars[#s.bars + 1] = { t = t, f = f } end } end end,
             PTNative_MusicInfo = info,
             PTNative_MusicCached = function(id)
                 s.cacheCalls = (s.cacheCalls or 0) + 1
@@ -84,6 +84,16 @@ local function pair(options)
 end
 check("missing file arrives intact and schedules a shared restart", function()
     local p = pair(); assert(p.run() == "file://cache/" .. A .. ".mp3"); assert(p.guest.begins == 1 and p.done() == 1); assert(p.chunks() == 4)
+end)
+check("the transfer shows a bar on both sides and clears it when done", function()
+    local p = pair(); assert(p.run())
+    local function seen(s, prefix)
+        local mid, last = false, s.bars[#s.bars]
+        for _, b in ipairs(s.bars) do if b.t and b.t:find(prefix, 1, true) and b.f > 0 and b.f < 1 then mid = true end end
+        return mid and last and last.t == nil
+    end
+    assert(seen(p.guest, "Receiving song: same name"), "guest bar")
+    assert(seen(p.host, "Sending song: same name"), "host bar")
 end)
 check("same filename with different contents is replaced only in the cache", function()
     local p = pair({ sameNameWrongBytes = true }); assert(p.run()); assert(p.guest.begins == 1)

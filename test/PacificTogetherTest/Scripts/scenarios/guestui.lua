@@ -94,7 +94,7 @@ return function(T)
             if b:IsValid() and b:GetFName():ToString() == "PTOverlayBox" and b:GetOuter():GetOuter():IsInViewport() then
                 for i = 2, b:GetChildrenCount() - 1 do
                     local t = b:GetChildAt(i)
-                    if t:GetVisibility() ~= 1 then r[#r + 1] = t:GetText():ToString() end
+                    if t:GetVisibility() ~= 1 and t:IsA(StaticFindObject("/Script/UMG.TextBlock")) then r[#r + 1] = t:GetText():ToString() end
                 end
             end
         end

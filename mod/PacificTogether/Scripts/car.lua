@@ -76,16 +76,19 @@ local function gone(c)
     return p.X == 0 and p.Y == 0 and p.Z == 0
 end
 -- read several times per tick by several modules (665 lookups a minute on a guest, PT|perf 2026-10-22): reused for 100 ms,
--- each car is still checked on every call
+-- each car is still checked on every call. 100 ms was still ~550 lookups a minute (rendered host 2026-11-12): 500 ms, sooner
+-- when no live car is in the list (a car that just arrived)
 local carList, carAt = {}, -1
 RegisterLoadMapPreHook(function() carList, carAt = {}, -1 end)
 local function cars()
-    if os.clock() - carAt > 0.1 then carList, carAt = FindAllOf("BP_PlayerCarNew_C") or {}, os.clock() end
-    local r = {}
-    for _, c in ipairs(carList) do
-        if inWorld(c) and not gone(c) then r[#r + 1] = c end
+    for pass = 1, 2 do
+        if os.clock() - carAt > (pass == 1 and 0.5 or 0.1) then carList, carAt = FindAllOf("BP_PlayerCarNew_C") or {}, os.clock() end
+        local r = {}
+        for _, c in ipairs(carList) do
+            if inWorld(c) and not gone(c) then r[#r + 1] = c end
+        end
+        if #r > 0 or pass == 2 then return r end
     end
-    return r
 end
 -- the host's car: on the host its only car; on the guest the replicated one (Role 3 = the guest's own copy)
 local function theCar(isHost)

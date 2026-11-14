@@ -27,7 +27,11 @@ local function try(what, fn, ...)
     local t = os.clock()
     local ok, err = pcall(fn, ...)
     if not ok then log("PT|error visual %s %s", what, tostring(err)) end
-    spent[what] = (spent[what] or 0) + os.clock() - t
+    local d = os.clock() - t
+    spent[what] = (spent[what] or 0) + d
+    -- which step hitches (visual.lua's 250 ms loop peaked at 23 ms on a rendered host, 2026-11-12; the scan is budgeted, its start
+    -- (FindAllOf Actor) and its finished-sweep diff are not)
+    if d > 0.008 then log("PT|slow visual step %s %.0f ms", what, d * 1000) end
     if t - spentAt > 60 then
         local l = {}
         for k, v in pairs(spent) do l[#l + 1] = string.format("%s=%.0f", k, v * 1000) end

@@ -1,7 +1,7 @@
 local UEHelpers = require("UEHelpers")
 
 local M = {
-    MOD_VERSION = "0.9.3.1",
+    MOD_VERSION = "0.9.3.2",
     PROTOCOL_VERSION = 8, -- 8: 3-4 players (net.share: "<PlayerId>|" on per-player state, targeted heal, g.car.full); 7: map icons (g.map.icons), currencies (g.st.cur), map north; 6: loot drop adoption ("K"), keypad and anchor-take messages; 5: msg.cpp chunks are confirmed ("PT1A|"); a 4 peer never confirms and a 5 sender would stall
 }
 
@@ -117,7 +117,8 @@ FindAllOf, FindFirstOf = counted("FindAllOf", FindAllOf), counted("FindFirstOf",
 local SINGLE = { DrivingGameInstance = true, BP_ResourceManager_C = true, BP_InventoryManager_C = true, BP_MainCharacterManager_C = true,
     BP_CarManager_C = true, BP_StatusEffectManager_C = true, BP_ProgressionManager_C = true, BP_QuestManager_C = true,
     BP_DialogueManager_C = true, MessageSystem = true, InventorySystem = true, BP_SaveGameManager_C = true, BP_MusicManager_C = true,
-    BP_ToDManager_C = true, BP_StormManager_C = true }
+    BP_ToDManager_C = true, BP_StormManager_C = true,
+    BP_FeedbackManager_C = true } -- carfeel.lua: ~500 lookups a minute on a rendered host (PT|perf 2026-11-12)
 local singles = {}
 local rawFirst = FindFirstOf
 function FindFirstOf(class)

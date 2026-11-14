@@ -119,7 +119,8 @@ RegisterLoadMapPreHook(function()
     if os.getenv("PT_MUTATE") ~= "nomessageepoch" then PTNative_MsgReset() end
 end)
 local function controllers(fresh)
-    if fresh or os.clock() - pcsAt > 0.1 then pcs, pcsAt = FindAllOf("PlayerController") or {}, os.clock() end
+    -- 500 ms (100 ms was still ~640 lookups a minute, rendered host 2026-11-12); every user checks IsValid, a sender not in it looks again
+    if fresh or os.clock() - pcsAt > 0.5 then pcs, pcsAt = FindAllOf("PlayerController") or {}, os.clock() end
     return pcs
 end
 

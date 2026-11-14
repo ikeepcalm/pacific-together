@@ -13,6 +13,7 @@ if os.getenv("PT_MUTATE") == "nooverlay" then
     function M.post() end
     function M.other() return "Player" end
     function M.nameOf() return "Player" end
+    function M.progress() end
     function M.settled() return false end
     function M.hostPaused() end
     function M.transition() end
@@ -31,6 +32,7 @@ local COLOR = {
     warn = { R = 0.87, G = 0.40, B = 0.08 }, dark = { R = 0.016, G = 0.017, B = 0.014 },
 }
 M.CREAM = CREAM
+local PROG_W = 170 -- the song transfer bar's width
 local LABEL_S = 10 -- s the version label shows after a map load (always in the main menu and with the F9 card open)
 
 local function valid(o) return o ~= nil and o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) end
@@ -139,6 +141,26 @@ local function build()
     hs:SetAutoSize(true)
     row:SetVisibility(1)
     n.hintRow, n.hintKeyBox = row, keyFrame
+    -- radiomusic.lua's song transfer: a line and a thin bar like the HUD's health bar (cream outline, cream fill), above the feed
+    local SB = StaticFindObject("/Script/UMG.SizeBox")
+    n.progText = text(tree, "PTProgText", 14, "status", "small"); add(n.progText)
+    local pFrame = StaticConstructObject(B, tree, FName("PTProgFrame"))
+    local pInner = StaticConstructObject(B, tree, FName("PTProgInner"))
+    local pTrack = StaticConstructObject(SB, tree, FName("PTProgTrack"))
+    local pFill = StaticConstructObject(SB, tree, FName("PTProgFill"))
+    local pBar = StaticConstructObject(B, tree, FName("PTProgBar"))
+    pFrame:SetBrushColor({ R = CREAM.R, G = CREAM.G, B = CREAM.B, A = 0.6 })
+    pFrame:SetPadding({ Left = 1, Top = 1, Right = 1, Bottom = 1 })
+    pInner:SetBrushColor({ R = 0.004, G = 0.012, B = 0.016, A = 0.85 })
+    pInner:SetPadding({ Left = 2, Top = 2, Right = 2, Bottom = 2 })
+    pTrack:SetWidthOverride(PROG_W); pTrack:SetHeightOverride(8) -- 5 read as one cream line in a small window (2026-11-14)
+    pFill:SetWidthOverride(0); pFill:SetHeightOverride(8)
+    pBar:SetBrushColor({ R = CREAM.R, G = CREAM.G, B = CREAM.B, A = 1 })
+    pFrame:SetContent(pInner); pInner:SetContent(pTrack); pTrack:SetContent(pFill); pFill:SetContent(pBar)
+    pcall(function() pFill.Slot:SetHorizontalAlignment(1) end) -- left (0 is Fill: the bar showed full at any progress)
+    box:AddChildToVerticalBox(pFrame):SetHorizontalAlignment(3)
+    n.progText:SetVisibility(1); pFrame:SetVisibility(1)
+    n.progFrame, n.progFill = pFrame, pFill
     for i = 1, LINES do
         n.lines[i] = text(tree, "PTFeed" .. i, 16, "info")
         n.lines[i]:SetVisibility(1)
@@ -172,6 +194,10 @@ end
 local panelText
 function M.panel(t) panelText = t end
 
+local progText, progFrac
+-- radiomusic.lua: "Receiving song: Name" and 0..1 while a custom song is on its way; nil hides it
+function M.progress(t, frac) progText, progFrac = t, frac end
+
 local hintText
 function M.hint(t) hintText = t end -- a short key hint under the crosshair, "[H] Patch up Rex"; nil hides it
 
@@ -185,6 +211,14 @@ local function render()
         local kv = key and 3 or 1
         if ui.cache.hkv ~= kv then ui.cache.hkv = kv; ui.hintKeyBox:SetVisibility(kv) end
         set(ui.hint, "hint", rest or hintText)
+    end
+    local gv = progText and 3 or 1
+    if ui.cache.gv ~= gv then ui.cache.gv = gv; ui.progText:SetVisibility(gv); ui.progFrame:SetVisibility(gv) end
+    if progText then
+        local f = math.max(0, math.min(1, progFrac or 0))
+        set(ui.progText, "prog", string.format("%s  %d%%", progText, math.floor(f * 100)))
+        local w = math.floor(f * PROG_W + 0.5)
+        if ui.cache.pw ~= w then ui.cache.pw = w; ui.progFill:SetWidthOverride(w) end
     end
     -- the version: in the main menu, shortly after a load and with the F9 card; the game's HUD has no standing labels
     local lv = (panelText or now - ui.builtAt < LABEL_S or ui.menu) and 3 or 1

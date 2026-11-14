@@ -23,7 +23,8 @@ return function(T)
                     r.anchored = a.Minimum.X == 1 and a.Minimum.Y == 1 and a.Maximum.X == 1 and a.Maximum.Y == 1
                     for i = 0, b:GetChildrenCount() - 1 do
                         local t = b:GetChildAt(i)
-                        local s = t:GetText():ToString()
+                        -- the song transfer bar (a Border) sits among the lines since 0.9.3.2
+                        local s = t:IsA(StaticFindObject("/Script/UMG.TextBlock")) and t:GetText():ToString() or ""
                         if i == 0 then r.label = s
                         elseif i == 1 then r.status = t:GetVisibility() ~= 1 and s or ""
                         elseif t:GetVisibility() ~= 1 and s ~= "" then r.lines[#r.lines + 1] = s end

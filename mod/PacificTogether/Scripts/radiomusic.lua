@@ -5,6 +5,13 @@ if not M.enabled then return M end
 local MAX, BLOCK, WINDOW = 64 * 1024 * 1024, 8192, 2
 local current, peers, incoming, serial = nil, {}, nil, 0
 local function now() return os.clock() end
+-- "Rain Song" from "L:rain_song.mp3" (radio.lua's key: the file name, lower case)
+local function title(key)
+    local n = (key or ""):match("^L:(.+)$") or "song"
+    n = n:gsub("%.%w+$", ""):gsub("[_%-]+", " ")
+    if #n > 28 then n = n:sub(1, 27) .. "\226\128\166" end -- an ellipsis
+    return n
+end
 local function number(s, max)
     local n = tonumber(s)
     return n and n == n and n % 1 == 0 and n >= 0 and n <= max and n or nil
@@ -145,12 +152,25 @@ LoopInGameThreadWithDelay(50, function()
     local mode = common.netMode()
     if mode ~= "client" and mode ~= "listen" then
         if incoming or current then PTNative_MusicCancel(); current, peers, incoming = nil, {}, nil end
+        ov.progress(nil)
         return
     end
+    -- the transfer in the overlay (owner request 2026-11-14): a custom song took a while with no sign of it
     if mode == "client" then
         if incoming and incoming.started and not incoming.url and now() - incoming.at > 15 then fail() end
+        local r = incoming
+        if r and r.started and not r.url and r.size > 0 then ov.progress("Receiving song: " .. title(r.key), r.offset / r.size)
+        else ov.progress(nil) end
         return
     end
+    local slowest
+    for _, p in pairs(peers) do
+        if current and current.size and current.size > 0 and p.ticket and not p.complete and common.resolve(p.lease) then
+            local f = p.ack / current.size
+            if not slowest or f < slowest then slowest = f end
+        end
+    end
+    if slowest then ov.progress("Sending song: " .. title(current.key), slowest) else ov.progress(nil) end
     if not current or not current.id then return end
     for _, p in pairs(peers) do
         local pc = common.resolve(p.lease)

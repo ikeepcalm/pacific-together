@@ -902,13 +902,26 @@ local function inReach(a, spots)
 end
 
 -- both: contents changed here since we last looked (the game moved items in or out)
+local CHANGES_BUDGET, passIds, passAt, wreckIds, wreckPos = 0.004, nil, 1, nil, 1
 local function scanChanges()
     local spots = tickN % 4 == 1 and playerSpots()
     -- the other parts, round robin: each one at least every ~30 s, 3 per tick (10 per tick, every 10 s, was ~0.5 s of each
     -- minute on both sides in a zone; FPS hunt 2026-11-01)
     local far, farR, farW = 3, 6, 3
     local now = os.clock()
-    for id, e in pairs(ents) do
+    -- a pass over all entities, spread over ticks: in one go it was ~550 ms a minute with 23-35 ms hitches on a rendered host
+    -- (loot time changes=557, PT|perf max 35 ms, 2026-11-12). CHANGES_BUDGET per tick; the next tick goes on where this one stopped.
+    if not passIds then
+        passIds, passAt = {}, 1
+        for id in pairs(ents) do passIds[#passIds + 1] = id end
+    end
+    local t0 = os.clock()
+    while passAt <= #passIds do
+        if os.clock() - t0 > CHANGES_BUDGET then return end
+        local id = passIds[passAt]
+        passAt = passAt + 1
+        local e = ents[id]
+        if e then
         if e.kind == "R" then
             -- a resource breaks under a player's tool: near ones every tick (the near list every 2 s), the rest round robin
             if spots and listening then e.near = entityAlive(e) and inReach(e.actor, spots) end
@@ -964,7 +977,9 @@ local function scanChanges()
                 end
             end
         end
+        end
     end
+    passIds = nil
     dirty = {} -- containers nobody tracks (the player's own hands, crafting) are not kept
 end
 
@@ -1256,6 +1271,7 @@ RegisterLoadMapPostHook(function()
     hostScanned, fullAt, allQueue, readyFor, lastRx, fullSentAt, listFor, listNext = false, nil, nil, {}, -math.huge, -math.huge, nil, nil
     ents, byName, claimed, reported, out, partial, partIds, skip = {}, {}, {}, {}, {}, {}, {}, {}
     inbox, head, cands, made = {}, 1, {}, { claimed = 0, spawned = 0 }
+    passIds, wreckIds = nil, nil
 end)
 
 LoopInGameThreadWithDelay(500, function()
@@ -1403,8 +1419,17 @@ LoopInGameThreadWithDelay(500,function()
             end
         end
     end
-    for id,e in pairs(ents)do
-        if (e.kind=='B' or e.kind=='P')and entityAlive(e)and(e.kind~='P' or alive(e.actor.ItemInstance))then
+    -- spread over ticks like scanChanges (this loop was 0.8 s a minute with 23 ms hitches, loot.lua:1375, 2026-11-12)
+    if not wreckIds then
+        wreckIds, wreckPos = {}, 1
+        for id in pairs(ents) do wreckIds[#wreckIds + 1] = id end
+    end
+    local t0 = os.clock()
+    while wreckPos <= #wreckIds and os.clock() - t0 <= CHANGES_BUDGET do
+        local id = wreckIds[wreckPos]
+        wreckPos = wreckPos + 1
+        local e = ents[id]
+        if e and (e.kind=='B' or e.kind=='P')and entityAlive(e)and(e.kind~='P' or alive(e.actor.ItemInstance))then
             local a=e.actor
             if e.pendingPartState then
                 local c=partBox(a)
@@ -1435,5 +1460,6 @@ LoopInGameThreadWithDelay(500,function()
             end
         end
     end
+    if wreckPos > #wreckIds then wreckIds = nil end
 end)
 return M

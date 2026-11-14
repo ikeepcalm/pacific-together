@@ -38,8 +38,10 @@ local function account(where, d)
     local rows = {}
     for w, q in pairs(perf) do rows[#rows + 1] = { w, q } end
     table.sort(rows, function(a, b) return a[2].total > b[2].total end)
-    for i = 1, math.min(8, #rows) do
+    -- every site over 10 ms a minute (the top 8 hid the rest of a friend's slow host, 2026-11-14), heaviest first
+    for i = 1, #rows do
         local w, q = rows[i][1], rows[i][2]
+        if q.total < 0.01 then break end
         log("PT|perf %s total=%.0f ms max=%.0f ms n=%d", w, q.total * 1000, q.max * 1000, q.n)
     end
     rows = {}
@@ -47,7 +49,7 @@ local function account(where, d)
         for class, q in pairs(byClass) do rows[#rows + 1] = { fn .. " " .. tostring(class), q } end
     end
     table.sort(rows, function(a, b) return a[2].n > b[2].n end)
-    for i = 1, math.min(8, #rows) do
+    for i = 1, math.min(15, #rows) do
         log("PT|perf lookup %s total=%.0f ms n=%d", rows[i][1], rows[i][2].total * 1000, rows[i][2].n)
     end
     perf, perfAt, common.lookups = {}, os.clock(), {}
