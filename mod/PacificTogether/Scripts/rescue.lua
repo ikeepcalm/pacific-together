@@ -278,7 +278,7 @@ local function show(note)
         L[#L + 1] = "[2]  Resync with host"
         L[#L + 1] = "[3]  Reset controls"
         L[#L + 1] = "[4]  Story tasks: fix a stuck objective"
-        L[#L + 1] = "[5]  Performance mode: " .. (require("perf").enabled() and "on" or "off")
+        L[#L + 1] = "[5]  Performance mode: " .. require("perf").label()
         L[#L + 1] = "[6]  Performance check (10 s)"
         local ga = package.loaded.guestauth
         -- guest only: the host switching it off would ignore a guest that still simulates

@@ -3,6 +3,13 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
+## [Unreleased]
+
+### Added
+
+- Performance mode is automatic by default: when your FPS stays under 25 for 30 seconds it switches on by itself, and switches
+  off again (for 10 minutes) if it did not help. F9 5 cycles automatic, on, off; your own choice always wins.
+
 ## [0.9.3.1] - 2026-11-14
 
 Preview for 3-4 player testing. Network protocol **8**: everyone needs 0.9.3.1; a 0.9.3 player cannot join.

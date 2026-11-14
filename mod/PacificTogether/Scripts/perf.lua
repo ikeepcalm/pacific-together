@@ -21,12 +21,20 @@ local ON = {
     "r.SceneColorFringeQuality 0", "r.BloomQuality 2", "r.MaxAnisotropy 4",
 }
 
-local function enabled()
+-- performance.txt: "on" or "off" = the player's own choice, which always wins; no file = automatic (owner request 2026-11-14,
+-- a friend hosting ran 10-40 FPS with the mod): see autoTick below.
+local function manual()
     local f = io.open(FILE, "r")
-    if not f then return false end
+    if not f then return nil end
     local s = f:read("*l")
     f:close()
-    return s == "on"
+    return (s == "on" or s == "off") and s or nil
+end
+local autoOn = false -- the automatic mode has switched it on
+local function enabled()
+    local m = manual()
+    if m then return m == "on" end
+    return autoOn
 end
 
 local function run(cmd)
@@ -84,13 +92,26 @@ end
 
 -- F10 opened the UE4SS console instead (hand test 2026-11-01): the F9 menu calls this
 M.enabled = enabled
+M.WIN = 10 -- seconds per FPS window of the automatic mode; tests shorten it
+function M.autoActive() return autoOn end
+function M.label()
+    local m = manual()
+    return m or ("auto (" .. (autoOn and "on" or "off") .. ")")
+end
+-- F9 item 5 cycles automatic -> on -> off -> automatic
 function M.toggle()
-    local on = not enabled()
-    local f = io.open(FILE, "w")
-    if f then f:write(on and "on" or "off"); f:close() end
-    apply(on)
-    log("PT|perf mode %s", on and "on" or "off")
-    return on and "Performance mode on" or "Performance mode off"
+    local before, m = enabled(), manual()
+    local nxt = (m == nil and "on") or (m == "on" and "off") or nil
+    if nxt then
+        local f = io.open(FILE, "w")
+        if f then f:write(nxt); f:close() end
+    else
+        os.remove(FILE)
+    end
+    autoOn = false
+    if enabled() ~= before then apply(enabled()) end
+    log("PT|perf mode %s", M.label())
+    return "Performance mode: " .. M.label()
 end
 
 -- Performance check (F9 item 6; owner request 2026-11-01: a friend's RTX 3050 laptop ran 30 FPS on low): 5 s of frames as set,
@@ -125,6 +146,39 @@ function M.check(done)
     log("PT|perf check started")
     return "Performance check: 10 s, keep playing as usual"
 end
+-- Automatic mode: 3 windows in a row under LOW FPS (not within 6 windows of a map load) switch performance mode on. Two settled
+-- windows later the FPS must be GAIN times the FPS before; if not, it did not help (CPU or game thread limits, not what it
+-- changes): back off and do not try again for 10 minutes. Mutations: noautoperf (never), autoignoresmanual (ignores the player's choice).
+local GAIN = 1.15
+M.LOW = 25 -- FPS; tests raise it (a headless game ignores t.MaxFPS)
+local wf, wAt, loadedAt = 0, os.clock(), os.clock()
+local low, base, trial, acc, blockedUntil = 0, 0, 0, 0, 0
+local function autoTick(fps)
+    local mut = os.getenv("PT_MUTATE")
+    if mut == "noautoperf" then return end
+    if manual() and mut ~= "autoignoresmanual" then low, autoOn = 0, false; return end
+    if os.clock() - loadedAt < 6 * M.WIN then low = 0; return end
+    if not autoOn then
+        low = fps < M.LOW and low + 1 or 0
+        if low >= 3 and os.clock() >= blockedUntil then
+            base, low, trial, acc, autoOn = fps, 0, 0, 0, true
+            apply(true)
+            log("PT|perf auto on (%.1f FPS)", fps)
+            pcall(function() require("overlay").post(string.format("Performance mode switched on automatically (%.0f FPS)", fps), "info", "perfauto") end)
+        end
+        return
+    end
+    if trial == nil then return end -- kept
+    trial = trial + 1
+    if trial == 1 then return end -- the settings take a moment
+    acc = acc + fps
+    if trial < 3 then return end
+    trial = nil
+    if acc / 2 >= base * GAIN then log("PT|perf auto kept (%.1f -> %.1f FPS)", base, acc / 2); return end
+    autoOn, blockedUntil = false, os.clock() + 600
+    apply(false)
+    log("PT|perf auto off, no gain (%.1f -> %.1f FPS)", base, acc / 2)
+end
 -- FPS every minute next to the PT|perf rows (friend host 10 FPS vs 30 alone, 2026-11-11: no number to compare); this loop runs once a frame
 local frames, fpsAt = 0, os.clock()
 LoopInGameThreadWithDelay(1, function()
@@ -133,6 +187,14 @@ LoopInGameThreadWithDelay(1, function()
     if dt >= 60 then
         log("PT|perf fps %.1f peers=%d", frames / dt, #(FindAllOf("PlayerController") or {}))
         frames, fpsAt = 0, os.clock()
+    end
+    wf = wf + 1
+    local wdt = os.clock() - wAt
+    if wdt >= M.WIN then
+        local fps = wf / wdt
+        wf, wAt = 0, os.clock()
+        local ok, err = pcall(autoTick, fps)
+        if not ok then log("PT|error perf auto %s", tostring(err)) end
     end
     local c = check
     if not c then return end
@@ -158,11 +220,13 @@ end)
 pcall(RegisterConsoleCommandHandler, "ptperfcheck", function() M.check(); return true end)
 -- tests: performance mode on and off without the F9 menu (a single game has no session)
 pcall(RegisterConsoleCommandHandler, "ptperfmode", function() M.toggle(); return true end)
+pcall(RegisterConsoleCommandHandler, "ptperfwin", function(full) M.WIN = tonumber(tostring(full):match("(%d+)")) or 10; return true end)
+pcall(RegisterConsoleCommandHandler, "ptperflow", function(full) M.LOW = tonumber(tostring(full):match("(%d+)")) or 25; return true end)
 
 -- a map load resets nothing of these, but the first start needs a controller: try until it took, then after every map load
 -- (the game re-applies its own settings when a level loads its world settings)
 local pending = enabled()
-RegisterLoadMapPostHook(function() pending = enabled() end)
+RegisterLoadMapPostHook(function() pending = enabled(); loadedAt = os.clock(); low = 0 end)
 LoopInGameThreadWithDelay(2000, function()
     if pending and apply(true) then pending = false; log("PT|perf mode applied") end
 end)
