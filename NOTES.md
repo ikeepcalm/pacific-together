@@ -1390,3 +1390,43 @@ Fixes:
   not the car's driving camera. Guest-side prediction or the car camera are the next options (not started).
 - Tests: new scenario guestdrive (coop-zone) 34/34 (`20261109-114139-guestdrive`); mutation nothrottlehook 31/34 (forward, turn, reverse fail);
   guestctl 52/52 (`20261109-114555-guestctl`). Door-shut after driver's-door entry checked by guestdrive; flicker mirror only by the owner's eye.
+
+## 2026-11-15: friend session on 0.9.3.2-dev-65086d1, ~1 h (owner = guest), log reading only, no fixes
+
+Logs: local/playtest-20261115-friend/ (a = friend/host, b = owner/guest; guest clock = host + 1h00m). Detailed reports there:
+findings-net-perf.md, findings-driving-jumper.md, findings-world-radio-energy.md. Guest PT lines of the direct-start runs are in
+b/ue4ss/run-04/05.log (the full UE4SS.log of direct starts is not archived; only the launcher archives it). Owner reports and leads:
+
+1. Guest ping 361 ms in Discord, other games too. PT layer host->guest avg 17-20 KB/s, bursts to 59 KB/s at zone entry (g.loot.b);
+   tunnel = Steam Messages unreliable, defaults. Cannot saturate Wi-Fi; lead = owner's link (Wi-Fi/Radmin VPN). Test clients had stopped
+   21:33 (loopback). Unknown: no RTT/UE-replication/guest->host bytes logged (PTNative_TunnelStats only used by tests).
+2. "More FPS without the launcher": confounded. Launcher passes no args/priority; same adapter (RTX 5060, hybrid) in every run. Guest FPS
+   is 103-127 solo and 55-65 joined in both paths; direct runs had 3 min solo, launcher runs joined within 20 s.
+3. Guest driving: host-authoritative at host 15-22 FPS + follower 0.1-0.25 s, no prediction, guest-auth off. Junction with a guest
+   driving: BP_LevelTransition_EnterExit counts CarChassis only when BP_CarManager.PlayerCarState == 1; nothing sets it while a guest
+   drives (high confidence). Exit teleport: glide over the moving car then snap to the absolute exit-time spot, no speed gate
+   (car.lua ~570-604, ~1273-1307). The 233 m move + death in 3 s (host 20:58:15) unexplained, nothing logged. "Starting engine"
+   stuck: car.lua:709 toggles the intermediate ignition state to 0 (guess). One E press sends exit + enter intents together.
+4. Battery jumper: guest sends `act send bat Internal.ChargePort`; car.lua:161 propComps skips ChargePort -> host g.act.bat
+   (guestact.lua:104) drops it silently; host state restores the guest's local rise in ~1 s. Fix direction: cm:ChargeAllBatteries.
+5. 0 energy after the Visions run (~11k Klim): setpiece exits (BP_LevelTransition_ExitPortal/Custom -> TravelToGarage) show no
+   DepositPostRunItems; the mod never calls it. Unproven where a normal return deposits. Ask the friend whether the host had it.
+6. Radio: host burst 20:50:56-20:53:35 (track every 2-3 s right after the join): custom-song resync (r=1, host OpenUrl) ends the host's
+   song -> next track -> resync again; cr flips each cycle. Every custom song also restarts 1 s in; guest hops through custom songs
+   before a built-in one (SkipTrack playlist trick).
+7. Host FPS 14-16 in expedition (8.6-31): performance.txt = on (manual, auto never ran). Host Lua 14.5-19.4 s/min joined (~30%),
+   top world.lua:455, loot.lua:988/1278, foliage.lua:94/206, car.lua:450, anomalies3.lua:65, radiation.lua:106, progression.lua:130.
+   Zero Lua would still be ~21 FPS. Guest foliage.lua:115 up to 9.8 s/min.
+8. Unsynced: friendly dumpster = BP_WorldStation_FriendlyDumpster_C (no code covers WorldStation); repair machine likely a
+   BP_Boon_Frame_Shelter_* (not in BOONS); acid thrower BP_Hazard_AcidLobb_C: damage forwarded, glob BP_Hazard_AcidGlob_C only via
+   periodic sweep and the thrower's tick off on the guest; coral reef class unknown (needs a live find).
+9. ARC map hidden for the host: car.lua:41 ARC_AT screen X=25 is behind the front seats (X=46.2); old X=85 hid the starter key.
+10. Partner map pins invisible both ways: every g.map.wp arrives (host logs each guest waypoint within 1 s), so the draw fails
+    (showPartnerPin on BP_GobblerMapBounds, mapmark.lua:136-151); mapmark scenario only checks IsIconVisible, not the rendered map.
+11. Guest trunk with no cells until rejoin: after the transition into the battery farm (guest 22:19:30) no Tier2 part install and no
+    `got new container I:Inventory_Trunk` on the guest; the host sent the trunk at 21:19:20, before the guest's map loaded. Rejoin re-ran both.
+    Lead: part-state/container not resent across travel (65086d1 trunk-tier swap untested across transitions).
+12. Crashes (guest): crafting button (AV 0x100, ended run-04) and settings menu (AV 0x280, ended run-05; seen before in pt8).
+    "Last Lua" car.lua:1218/1324 are 1 ms riding loops, not suspects.
+13. Side bug (verified): car.lua:347 probe() calls fn() without args, the BP_HealthComponent probes (car.lua:368-373) index nil self:
+    12,870 errors in one host log; part-health dirty flag never set from them. Also guest feed `%d item{s} put into dumpster` unformatted.
