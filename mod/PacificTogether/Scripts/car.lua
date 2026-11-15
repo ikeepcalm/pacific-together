@@ -1479,6 +1479,12 @@ local function applyState(data)
             slot:SetItem(arch:CreateInstance(UEHelpers.GetWorldContextObject(), 0), {})
             changed = changed + 1
             log("PT|car part installed %s %s", name, want.arch)
+            -- the part swap alone leaves the old trunk grid; the game's upgrade call rebuilds it
+            local tier = tonumber(want.arch:match("IA_Trunk_Storage_Tier(%d)"))
+            if tier then
+                local ok, err = pcall(function() cm:UpgradeCarStorageTrunk(tier) end)
+                log("PT|car trunk storage tier %d %s", tier, ok and "applied" or tostring(err))
+            end
             if ov.settled() then ov.post("%d car part{s} changed by the host", "info", "carpart") end
         end
         if want.h or want.f or want.b then
