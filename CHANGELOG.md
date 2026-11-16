@@ -3,6 +3,39 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
+## [0.9.4] - 2026-11-16
+
+Guest experience: shared radio, maps, guest driving, doors. Network protocol **9**: everyone needs 0.9.4; a 0.9.3.x player cannot join.
+
+### Added
+
+- **Map in the corner:** while you sit in the car in a zone, the ARC screen's map shows in the bottom-right corner (view only),
+  so the driver still sees it with a passenger in the seat. Your partner's waypoint pin shows on it in their colour.
+- **Route map for the guest:** when the host drives into a junction and picks the next route, the guest sees the same route
+  map (read-only); it closes when the host confirms.
+
+### Fixed
+
+- **Radio:** the host's custom songs no longer restart or skip every few seconds after a guest joins. The guest now plays the
+  host's custom song from the host's position (kept within about a second), and a guest with their own custom music folder no
+  longer hops through their own songs while the host plays a built-in track.
+- **Guest driving:** driving into a junction with the guest at the wheel now starts the transition (the game used to park the
+  car). Getting out of a moving car puts the guest beside the car where it is now, not back where E was pressed; above about
+  5 m/s E waits until the car slows. One E press no longer gets out and straight back in. Pressing start while the engine is
+  starting finishes the start instead of sticking.
+- **Battery jumper:** a guest using the jumper on the car's charge port now charges the batteries.
+- **Doors:** car doors and the hood close with a swing and the game's own sounds on the guest; the garage doors play their
+  start/stop sounds.
+- **Scrapping:** a guest scrapping a part sees its health drop hit by hit instead of 100 % until it breaks.
+- Host log: car part health hooks no longer raise thousands of errors per session.
+
+### Known issues
+
+- The trunk can have no grid for the guest after a zone change until they rejoin.
+- The corner map slightly overlaps the bottom of the status text at 1080p.
+- Not tested yet by hand: the guest route map's look and Esc on it, the radio over a real VPN, guest at the wheel through a
+  junction with the host as passenger.
+
 ## [0.9.3.2] - 2026-11-14
 
 Host performance and a song transfer bar. Network protocol **8**, as in 0.9.3.1; everyone needs 0.9.3.2 (the mod version must match).
