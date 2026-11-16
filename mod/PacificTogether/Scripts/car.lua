@@ -340,11 +340,11 @@ local healthDirty=false
 local probeOk, probeLogged = {}, {} -- hook name -> registered; -> failure logged once
 local function probe(name, fn)
     if probeOk[name] then return true end
-    local ok, err = pcall(RegisterHook, name, function()
+    local ok, err = pcall(RegisterHook, name, function(self, ...)
         if common.netMode() ~= "listen" then return end
         probeN[name] = (probeN[name] or 0) + 1
         if probeN[name] <= 3 then log("PT|probe car hook %s n=%d", name:match("[^:/%.]+$"), probeN[name]) end
-        fn()
+        fn(self, ...)
     end)
     if not ok and not probeLogged[name] then
         probeLogged[name] = true
