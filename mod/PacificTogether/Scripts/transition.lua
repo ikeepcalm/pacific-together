@@ -19,6 +19,7 @@ local log = common.log
 
 local M = {}
 local OFF = os.getenv("PT_MUTATE") == "notransition" -- tests only
+local NOMAP = os.getenv("PT_MUTATE") == "noroutemap" -- tests only: the guest does not open the route map
 local MENU, Z, HOLD_MAX = "RB_MainMenu", 20000, 60
 local function valid(o) return o ~= nil and o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) end
 local function screen()
@@ -33,7 +34,7 @@ end
 
 -- host ----------------------------------------------------------------------------------------------------------------------
 
-local expectGuest, holdSince = false, nil
+local expectGuest, holdSince, routeAt = false, nil, nil
 local clock=require("worldclock")
 local clocks = {} -- guest controller address -> { lease, since, done }: its world-clock handshake (3-4 players: one per guest)
 local function startClock(pc)
@@ -96,7 +97,11 @@ end
 local function hookAll()
     hook("/Game/Gameplay/LevelTransitions/BP_LevelTransition_EnterExit.BP_LevelTransition_EnterExit_C:Fadeout__UpdateFunc", onFirst(function() tell("fade") end))
     hook("/Game/Gameplay/LevelTransitions/BP_LevelTransition_ExitPortal.BP_LevelTransition_ExitPortal_C:Final Transition Fade In Timeline__UpdateFunc", onFirst(function() tell("fade") end))
-    hook("/Game/Systems/Managers/BP_ProgressionManager.BP_ProgressionManager_C:Open Map UI", function() tell("route") end)
+    hook("/Game/Systems/Managers/BP_ProgressionManager.BP_ProgressionManager_C:Open Map UI", function() routeAt = os.clock(); tell("route") end)
+    -- the route menu closes (travel confirmed, or backed out); Open Map UI itself closes a menu first, hence the 0.5 s
+    hook("/Game/Systems/Managers/BP_InventoryManager.BP_InventoryManager_C:RequestPlayerMenuClose", function()
+        if routeAt and os.clock() - routeAt > 0.5 then routeAt = nil; tell("routeend") end
+    end)
     -- runs after the Blueprint body: FadeGoal is 0 now, the fade has not ticked yet
     hook("/Game/UI/System/LoadingScreen.LoadingScreen_C:K2_OnLevelReady", function(self)
         if OFF or not expectGuest or common.netMode() ~= "listen" then return end
@@ -152,6 +157,22 @@ local function hideScreen()
     local ls = screen()
     if ls and ls:IsInViewport() then ls:RemoveFromParent() end
 end
+-- the host's route menu: the game's own player menu on its drive page, opened with empty parameters (AllowRouteSelection false =
+-- read-only) over the route state the guest already has. shortcut: the host's hovered leg is not mirrored
+local routeOpen = false
+local function closeRoute()
+    if not routeOpen then return end
+    routeOpen = false
+    local im = common.first("BP_InventoryManager_C")
+    if valid(im) then pcall(function() im:RequestPlayerMenuClose() end) end
+end
+local function openRoute()
+    if NOMAP or routeOpen then return end
+    local im = common.first("BP_InventoryManager_C")
+    if not valid(im) then return end
+    routeOpen = pcall(function() im:OpenPlayerMenu(FName("drive"), {}) end)
+    log("PT|trans guest route map %s", tostring(routeOpen))
+end
 local function setPhase(p, why)
     if phase == p then return end
     log("PT|trans guest %s -> %s (%s)", tostring(phase), tostring(p), why)
@@ -163,11 +184,13 @@ end
 
 net.on("g.trans", function(_, data)
     if OFF or common.netMode() ~= "client" then return end
-    if data == "route" then overlay.post("Host is choosing a route")
+    if data == "route" then overlay.post("Host is choosing a route"); openRoute()
+    elseif data == "routeend" then closeRoute()
     elseif data == "fade" then
+        closeRoute()
         if phase == nil then fadeCamera(0, 1, 1.2, true); overlay.post("Host is travelling\226\128\166") end
         if phase ~= "load" then setPhase("fade", "host fades") end
-    elseif data == "load" then setPhase("load", "host loads")
+    elseif data == "load" then closeRoute(); setPhase("load", "host loads")
     elseif data == "go" then setPhase(nil, "host says go")
     end
 end)
