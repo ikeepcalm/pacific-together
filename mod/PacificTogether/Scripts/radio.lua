@@ -140,16 +140,32 @@ local function haveList() -- custom files this copy knows (library scan results 
 end
 
 -- play a chosen track now: see the header. `done` waits for the game to start it, then restores the list.
-local playing -- { key, at, mm }
-local function playTrack(mm, key)
+local playing -- { key, at, mm, tries }
+-- In the game's custom-music mode SkipTrack draws from the player's own library as well as from the playlist (playtest 2026-11-15: the
+-- guest hopped through 4-12 of its own songs before the wanted track came up; live test 2026-11-16: the share of wrong draws is
+-- library/(library+playlist)). It cannot be steered, so a wrong draw is retried at once with the radio muted: the wanted track comes up
+-- after a second or two without the other songs being heard.
+local savedVol
+local function hasLibrary(mm)
+    local ok, n = pcall(function() return mm:GetNumLocalFilesScanned() end)
+    return ok and (tonumber(n) or 0) > 0
+end
+local function quiet(mm, on)
+    pcall(function()
+        if on and not savedVol then savedVol = mm.MusicVolume; mm:SetRadioVolume(0)
+        elseif not on and savedVol then mm:SetRadioVolume(savedVol); savedVol = nil end
+    end)
+end
+local function playTrack(mm, key, tries)
     local t = findTrack(mm, key)
     if not t then return false end
+    if not tries and MUT ~= "noquietretry" and hasLibrary(mm) then quiet(mm, true) end
     local pl = mm.RadioPlaylist
     local n = pl:GetArrayNum()
     if n < 3 then mm.RadioPlaylist = mm.DefaultRadioPlaylist; pl = mm.RadioPlaylist; n = pl:GetArrayNum() end
     for i = 1, n - 1 do pl[i] = t end
     mm:SkipTrack(1)
-    playing = { key = key, at = now(), mm = mm, t = t }
+    playing = { key = key, at = now(), mm = mm, t = t, tries = tries or 1 }
     log("PT|radio play %s", key)
     return true
 end
@@ -159,8 +175,15 @@ local function finishPlay()
     if not p then return end
     local mm = p.mm
     local k = valid(mm) and curKey(mm)
-    if k ~= p.key and now() - p.at < 4 then return end -- the game picks it a moment after SkipTrack
+    -- the game picks it a moment after SkipTrack (0.2-0.4 s)
+    if k ~= p.key and now() - p.at < (MUT == "noquietretry" and 4 or 1) then return end
+    if k ~= p.key and p.tries < 20 and MUT ~= "noquietretry" and hasLibrary(mm) and not isCustom(p.key) then
+        playing = nil
+        if not playTrack(mm, p.key, p.tries + 1) then quiet(mm, false) end
+        return
+    end
     playing = nil
+    quiet(mm, false)
     pcall(function()
         mm.RadioPlaylist = mm.DefaultRadioPlaylist
         local pl, n = mm.RadioPlaylist, mm.RadioPlaylist:GetArrayNum()
@@ -169,7 +192,7 @@ local function finishPlay()
         pl[at] = pl[n]
         pl[n] = p.t -- the current track is last
     end)
-    log("PT|radio played %s now=%s", p.key, tostring(k))
+    log("PT|radio played %s now=%s after %d", p.key, tostring(k), p.tries)
     -- a made track the game would not start: its SkipTrack picked another file and the 5 s resync tried again, so the guest's
     -- song changed every 5 s (live test 2026-11-01). Tell the host it cannot play here; the host skips it.
     if k ~= p.key and isCustom(p.key) and mode() == "client" then
@@ -222,6 +245,25 @@ end
 
 -- Guest: every half second, bring the radio to the host's track and fix only what differs (live tests 2026-11-01: reacting to
 -- messages lost the host's song whenever the guest's game moved on or reopened its own file by itself).
+local hostPos, hostPosAt, hostPosKey, seekAt = nil, 0, nil, 0
+-- The song position (custom files only: the media player has Seek, the Wwise tracks have none). The guest opens the file when it has
+-- it, mostly after the host started, so it jumps to the host's position (+ the time the message took) when it is off by 0.8 s.
+local function mediaMs(mm)
+    if not PTNative_MediaTime then return nil end
+    local ok, ms = pcall(function() local mp = mm.ExternalMediaPlayer; return valid(mp) and mp:IsPlaying() and PTNative_MediaTime(mp:GetAddress()) end)
+    return ok and ms and ms >= 0 and ms or nil
+end
+local function syncPosition(mm, want)
+    if MUT == "noseek" or not PTNative_MediaSeek or hostPosKey ~= want or now() - hostPosAt > 12 or now() - seekAt < 3 then return end
+    local mp = mm.ExternalMediaPlayer
+    if not valid(mp) or not mp:IsPlaying() then return end
+    local mine, expect = PTNative_MediaTime(mp:GetAddress()), hostPos + (now() - hostPosAt) * 1000
+    if mine >= 0 and math.abs(mine - expect) > 800 then
+        seekAt = now()
+        PTNative_MediaSeek(mp:GetAddress(), math.floor(expect))
+        log("PT|radio seek %s %d -> %d ms", want, mine, math.floor(expect))
+    end
+end
 local followAt, actAt, holdUntil, openAt, openKey, restartNext = 0, 0, 0, 0, nil, false
 local mutedManager
 local function holdSongFinished(mm, enabled)
@@ -240,7 +282,9 @@ local function stopBuiltin(mm)
 end
 local function guestFollow(mm)
     local want = hostKey
-    holdSongFinished(mm, isCustom(want))
+    -- the guest's game never moves on by itself: in custom-music mode its own next song is one of its library files (the host's next
+    -- track arrives within a moment and is played then)
+    holdSongFinished(mm, want ~= nil and MUT ~= "nohold")
     if not want or playing or now() < holdUntil or now() - followAt < 0.5 then return end
     followAt = now()
     if carrier and now() - actAt > 3 then
@@ -304,10 +348,12 @@ local function guestFollow(mm)
         mp:OpenUrl(url)
         openAt, openKey, restartNext = now(), want, false
         log("PT|radio opened %s", want)
+        seekAt = 0
     elseif openKey == want and now() - openAt > 4 and now() - openAt < 15 and not mp:IsPlaying() then
         failed[want], openKey = now(), nil -- the file did not start (an accented name the game cannot open)
         reportMiss(want)
     end
+    syncPosition(mm, want)
 end
 local guestHave = {}   -- host: guest controller name -> set of custom keys
 local denied = {}      -- host: custom keys a guest said it cannot play
@@ -341,6 +387,7 @@ local function sendState(s, mm, restartKey, all)
     if k and not lacking(k) then
         t.trk = k; lastTrk = k
         local track=mm:CurrentRadioTrack()
+        if isCustom(k) then t.pos = mediaMs(mm) end
         if valid(track) then
             t.title=track.Title:ToString():gsub("%c"," "):sub(1,1024)
             t.artist=track.Artist:ToString():gsub("%c"," "):sub(1,1024)
@@ -405,6 +452,15 @@ net.on("g.radio.s", function(_, data)
         if music.enabled then music.discard(t.trk) end
         if t.trk ~= hostKey or t.r == "1" then followAt, holdUntil = 0, 0 end -- a new track: at once, not after a guest skip's wait
         hostKey = t.trk
+        if t.pos then
+            hostPos, hostPosAt, hostPosKey = tonumber(t.pos), now(), t.trk
+            -- how far the guest is from the host as the message arrives (the test reads these)
+            local ok, mine = pcall(function()
+                local mp = mm.ExternalMediaPlayer
+                return openKey == t.trk and PTNative_MediaTime and valid(mp) and mp:IsPlaying() and PTNative_MediaTime(mp:GetAddress())
+            end)
+            if ok and mine and mine >= 0 then log("PT|radio pos %s drift=%d", t.trk, math.floor(mine - hostPos)) end
+        end
         if t.r == "1" then
             -- restart: both sides start the track now
             if isCustom(t.trk) then restartNext = MUT == "radioreopen" elseif not playing then actAt = now(); playTrack(mm, t.trk) end
