@@ -3,6 +3,15 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
+## [0.9.4.1] - 2026-11-16
+
+Network protocol **9**, as in 0.9.4; everyone needs 0.9.4.1 (the mod version must match).
+
+### Fixed
+
+- **ARC screen from the driver's seat:** the screen between the seats is turned toward the driver, so opening it shows the whole
+  screen instead of the back of the driver's seat covering most of it.
+
 ## [0.9.4] - 2026-11-16
 
 Guest experience: shared radio, maps, guest driving, doors. Network protocol **9**: everyone needs 0.9.4; a 0.9.3.x player cannot join.
