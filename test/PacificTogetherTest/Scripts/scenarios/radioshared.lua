@@ -28,7 +28,7 @@ return function(T)
             f:write("RIFF",string.pack("<I4",36+#audio),"WAVEfmt ",string.pack("<I4I2I2I4I4I2I2",16,1,1,8000,8000,1,8),"data",string.pack("<I4",#audio),audio);f:close()
             track=StaticConstructObject(StaticFindObject("/Script/PenDriverPro.MusicTrack"),m)
             track.Title=FText("PT shared test");track.Artist=FText("PT fixture")
-            track.ExternalUrl="file://D:/PTLanes/vehicle-proxy/client1/PenDriverPro/Binaries/Win64/ue4ss/pt-radio-test.wav"
+            track.ExternalUrl="file://C:/PTLanes/guestact/client1/PenDriverPro/Binaries/Win64/ue4ss/pt-radio-test.wav"
             m.DefaultRadioPlaylist[1]=track;m.RadioPlaylist=m.DefaultRadioPlaylist
             for i=1,m.RadioPlaylist:GetArrayNum()-1 do m.RadioPlaylist[i]=track end
             m:SkipTrack(1);send("start")
