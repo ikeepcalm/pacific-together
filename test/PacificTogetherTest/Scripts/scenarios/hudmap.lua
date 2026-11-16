@@ -131,6 +131,7 @@ return function(T)
         add(placeMarker())
         add({ wait = 8 })
         add(pinDrawn("host_minimap_pin"))
+        add({ wait = 3 }); add({ run = function() if os.getenv("PT_HEADLESS") ~= "1" then T.console("Shot ShowUI") end end }) -- rendered runs: the HUD map with both pins
         add({ check = "guest_out_hud_hidden", timeout = 150, cond = function() return has("t.out") end }) -- the guest leaves first, the host stays at the wheel
         add({ run = function() id = T.act_begin("exit_car", {}) end })
         add({ check = "host_left_car", timeout = 40, cond = function() return (T.act_done(id)) end })
@@ -153,6 +154,8 @@ return function(T)
     add(placeMarker())
     add({ wait = 8 })
     add(pinDrawn("guest_minimap_pin"))
+    add({ wait = 3 }); add({ run = function() if os.getenv("PT_HEADLESS") ~= "1" then T.console("Shot ShowUI") end end })
+    add({ wait = 3 })
     add({ run = function() sendHost("t.hud", "1") end })
     add({ wait = 2 })
     add({ run = function() id = T.act_begin("door_press", { passenger = true }) end }) -- the game's own exit through the passenger door
