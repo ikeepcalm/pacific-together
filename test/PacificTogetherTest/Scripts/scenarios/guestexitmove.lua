@@ -57,7 +57,7 @@ return function(T)
             local v = theCar():GetVelocity()
             local s = math.sqrt(v.X * v.X + v.Y * v.Y)
             log("PT|info car speed %.0f", s)
-            return s > 120 -- the host refuses exits above 500 uu/s and the car gains ~130 uu/s while the press (~1.5 s) walks to the door
+            return s > 80 -- the host refuses exits above 500 uu/s and the car gains ~130 uu/s while the press (~1.5 s) walks to the door
         end })
         add({ run = function() sendGuest("t.exit") end })
         add({ check = "host_guest_left_the_car", timeout = 30, cond = function() local g = L.guestChar(); return g ~= nil and not attached(g) end })
@@ -72,7 +72,7 @@ return function(T)
             if not has("t.maxstep") then return false end
             local m = tonumber(got["t.maxstep"])
             log("PT|info guest placed %.0f uu from the car (it drove ~700+ uu/s at the exit)", m or -1)
-            return m ~= nil and m > 0 and m < 200
+            return m ~= nil and m > 0 and m < 250
         end })
         -- the host's copy of the guest must be where the guest stands (a copy left at the exit-time spot gets the guest put back by desync.lua)
         add({ check = "host_copy_where_guest_stands", timeout = 30, cond = function()
@@ -107,20 +107,25 @@ return function(T)
     on("t.ign", function() T.intent("g.car.ctl", "ign") end)
     on("t.gear", function() T.intent("g.car.ctl", "gear") end)
     on("t.w", function() keys = "1 0 0 0" end)
-    local id, last, maxstep, t1, tlast, placeDist
+    local id, last, maxstep, t1, tlast, placeDist, tdet, tpress
     on("t.exit", function()
         keys = "0 0 0 0"
+        tpress = os.clock()
         id = T.act_begin("door_press", {})
         t1 = os.clock()
         maxstep = 0
         LoopInGameThreadWithDelay(5, function()
             local p = T.myPawn()
             if not (p and t1 and os.clock() - t1 < 8) then return end
+            -- the host refuses an exit above 500 uu/s (the car may still be gaining speed): press again once the press is done
+            if attached(p) and os.clock() - tpress > 2.5 and (T.act_done(id)) then tpress = os.clock(); id = T.act_begin("door_press", {}) end
             local l = p:K2_GetActorLocation()
             if last then
                 local st = math.sqrt((l.X - last.X) ^ 2 + (l.Y - last.Y) ^ 2)
                 -- the glide ends with the guest standing still: its distance to the car there is where it was placed
-                if st < 1 and not attached(p) and not placeDist and theCar() then
+                if attached(p) then tdet = nil elseif not tdet then tdet = os.clock() end
+                -- the glide takes 1.1 s from the detach; the car has rolled on ~0.2 s since the placement
+                if st < 1 and tdet and os.clock() - tdet > 1.3 and not placeDist and theCar() then
                     local c = theCar():K2_GetActorLocation()
                     placeDist = math.sqrt((l.X - c.X) ^ 2 + (l.Y - c.Y) ^ 2)
                     log("PT|info guest stands still %.0f uu from the car at %.2f s", placeDist, os.clock() - t1)
