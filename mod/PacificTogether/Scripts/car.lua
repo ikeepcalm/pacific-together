@@ -41,7 +41,9 @@ local SPOTS = { D = { X = 46.2, Y = -45.8, Z = -12.3 }, P = { X = 46.2, Y = 45.8
 -- body 74x80 cm centred 56,43; screen unit 36x48 cm centred 85,34): the guest sat inside them, also after the old fixed -70 shift
 -- (measured 2026-11-09, friend's save). Screen: the gap between the front seats, behind the dash (X8's spot by the dash hid the
 -- starter key); body (anchor slot): the rear seat behind the guest.
-local ARC_AT = { BP_Carpart_Internal_GobblerScreen_C = { X = 25, Y = 0 }, BP_Carpart_Internal_Gobbler_C = { X = -45, Y = 43 } }
+-- Screen Yaw 48: the game's focus camera hangs 73 uu off the screen; unturned it sat behind the driver's seat (car-local -6,-66) and
+-- the seat back hid the screen; turned, it is at 53,-67 in front of the seat, facing the screen (measured 2026-11-16).
+local ARC_AT = { BP_Carpart_Internal_GobblerScreen_C = { X = 25, Y = 0, Yaw = 48 }, BP_Carpart_Internal_Gobbler_C = { X = -45, Y = 43 } }
 if os.getenv("PT_MUTATE") == "arcold" then -- test mutation: the old X8 spot by the dash
     ARC_AT = { BP_Carpart_Internal_GobblerScreen_C = { X = 85, Y = -8 }, BP_Carpart_Internal_Gobbler_C = { X = 56, Y = 0 } }
 end
@@ -200,14 +202,21 @@ local function moveArc(car)
         for _, a in ipairs(FindAllOf(class) or {}) do
             if inWorld(a) and same(a:GetAttachParentActor(), car) then
                 local slot = a.RootComponent:GetAttachParent()
+                local r = valid(slot) and at.Yaw and slot.RelativeRotation
+                local turned = r and math.abs(r.Yaw - at.Yaw) > 1
+                if turned then -- turned about the slot's pivot; its bounds lag a frame, so it is placed at the next look 0.5 s on
+                    slot:K2_SetRelativeRotation({ Pitch = r.Pitch, Yaw = at.Yaw, Roll = r.Roll }, false, {}, true)
+                    arcAt[k] = os.clock() + 0.5
+                end
                 local o, e = {}, {}
                 a:GetActorBounds(true, o, e, false)
                 local c = toLocal(car, o)
                 -- no collision yet (bounds empty): next look; within 2 cm: already there
-                if valid(slot) and e.X > 1 and (math.abs(c.X - at.X) > 2 or math.abs(c.Y - at.Y) > 2) then
+                if not turned and valid(slot) and e.X > 1 and (math.abs(c.X - at.X) > 2 or math.abs(c.Y - at.Y) > 2) then
                     local w = toWorld(car, vec(at.X, at.Y, c.Z))
                     slot:K2_AddWorldOffset(vec(w.X - o.X, w.Y - o.Y, w.Z - o.Z), false, {}, true)
                     log("PT|car arc slot moved %s from %.0f,%.0f to %.0f,%.0f", slot:GetFullName(), c.X, c.Y, at.X, at.Y)
+                    arcAt[k] = os.clock() + 1 -- bounds can lag the move: look again until it is within 2 cm
                 end
             end
         end
@@ -400,7 +409,6 @@ local function hostHooks()
 end
 
 local lastSent, lastAt, lastGuests, lastH = nil, 0, 0, nil
-local arcAt = -10
 local function hostTick()
     hostHooks()
     local guests = net.guests()
@@ -413,7 +421,7 @@ local function hostTick()
         car.bAlwaysRelevant = true
         log("PT|car always relevant for the guest")
     end
-    if os.clock() - arcAt > 5 then arcAt = os.clock(); moveArc(car) end -- a slot is moved once
+    moveArc(car) -- throttled inside (5 s per car, 0.5 s after turning the screen)
     local s = sample(car, cm)
     if not s then return end
     local t = now()
