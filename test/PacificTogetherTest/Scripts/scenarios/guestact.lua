@@ -155,6 +155,7 @@ return function(T)
     add({ run = function() hold(CHARGER) end })
     add({ check = "guest_holds_charger2", timeout = 20, cond = function() return tool("BP_Tool_Target_Consumable_ChargeBattery_Base_C") ~= nil end })
     add({ wait = 3 })
+    add({ check = "guest_battery_flat_again", timeout = 30, cond = function() return batOf(BAT_SLOT) <= 3 end }) -- a full battery takes no charge
     add({ run = function()
         local t = tool("BP_Tool_Target_Consumable_ChargeBattery_Base_C")
         t.TargetedActor = manif("Internal.ChargePort")
