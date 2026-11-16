@@ -114,6 +114,13 @@ net.on("g.act.bat", function(pc, data)
         pcall(function() car.carManager():UpdateAggregateBattery() end)
         log("PT|act battery %s %.2f", f[1], amount)
         ov.post(ov.nameOf(pc) .. " charged " .. f[1]:match("[^%.]+$"), "good", "act.bat")
+    elseif m and amount and amount > 0 and amount < 1000 and f[1]:find("ChargePort", 1, true) and os.getenv("PT_MUTATE") ~= "nojumper" then
+        -- the charge port owns no battery: the game's ModifyBattery charges every battery through the car manager
+        car.carManager():ChargeAllBatteries(amount, {}, {})
+        log("PT|act battery %s %.2f (all batteries)", f[1], amount)
+        ov.post(ov.nameOf(pc) .. " charged the car", "good", "act.bat")
+    else
+        log("PT|act battery refused %s %s (no battery part)", tostring(f[1]), tostring(f[2]))
     end
 end)
 

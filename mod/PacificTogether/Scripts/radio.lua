@@ -407,7 +407,7 @@ net.on("g.radio.s", function(_, data)
         hostKey = t.trk
         if t.r == "1" then
             -- restart: both sides start the track now
-            if isCustom(t.trk) then restartNext = true elseif not playing then actAt = now(); playTrack(mm, t.trk) end
+            if isCustom(t.trk) then restartNext = MUT == "radioreopen" elseif not playing then actAt = now(); playTrack(mm, t.trk) end
         end
         guestFollow(mm)
     end
@@ -527,8 +527,9 @@ local function tick()
         -- restart the track on both sides now (the guest's own copy joined mid-track); not before the guest has told what it has
         local restarted = audible and k and not lacking(k)
         if restarted and isCustom(k) then
-            -- the game's skip ignores the list for custom files (it played another one, live test 2026-11-01): reopen the file instead
-            pcall(function() local mp = mm.ExternalMediaPlayer; mp:OpenUrl(mp:GetUrl():ToString()) end)
+            -- never reopen the host's own file: that ended the song (next track, resync again: a track every 2-3 s after a join, playtest
+            -- 2026-11-15) and restarted it ~1 s in. The guest opens the file by itself when it has it (guestFollow); no seek exists.
+            restarted = MUT == "radioreopen" and pcall(function() local mp = mm.ExternalMediaPlayer; mp:OpenUrl(mp:GetUrl():ToString()) end)
         elseif restarted then restarted = playTrack(mm, k) end
         sendState(s, mm, restarted and k or nil, true)
         hbAt = now()

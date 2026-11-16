@@ -37,6 +37,16 @@ return function(T)
             local t=mm():CurrentRadioTrack();return t:IsValid() and t.ExternalUrl:ToString():find("pt-radio-test.wav",1,true)~=nil
         end})
         add({check="guest_playback_stable",timeout=120,cond=function() return has("stable") end})
+        -- the playtest loop (2026-11-15): a resync reopened the host's file, ending its song. Over ~40 s the host keeps one track and
+        -- sends no further restart (r=1), and its file is never reopened
+        local mark
+        add({run=function() mark={r=count("r=1"),opens=count("PT|radio play"),key=mm():CurrentRadioTrack():GetFName():ToString()} end})
+        add({wait=40})
+        add({check="host_track_not_restarted_or_skipped",timeout=3,cond=function()
+            local t=mm():CurrentRadioTrack();local same=t:IsValid() and t:GetFName():ToString()==mark.key
+            T.log("PT|info host radio same=%s r=%d->%d",tostring(same),mark.r,count("r=1"))
+            return same and count("r=1")<=mark.r
+        end})
         add({run=function() send("done") end});add({wait=2});return steps
     end
     add(T.onMap("RB_MainMenu",90))
