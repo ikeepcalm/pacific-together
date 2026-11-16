@@ -159,7 +159,10 @@ return function(T)
     add({ run = function()
         local t = tool("BP_Tool_Target_Consumable_ChargeBattery_Base_C")
         t.TargetedActor = manif("Internal.ChargePort")
+        log("PT|info guest port target=%s bat=%.1f", T.name(t.TargetedActor), batOf(BAT_SLOT))
+        for _, x in ipairs(t.TargetedActor:K2_GetComponentsByClass(StaticFindObject(COMP .. "BP_BatteryComponent.BP_BatteryComponent_C"))) do log("PT|info guest port comp %s", T.name(x:get())) end
         t:ChargeBattery()
+        log("PT|info guest port charged bat=%.1f", batOf(BAT_SLOT))
     end })
     -- C5 refuel: a fuel can into the gas cap
     add({ run = function() hold(CAN) end })
