@@ -25,6 +25,9 @@ $Defaults = @{ boot = @(2, 150); listen = @(2, 330); dump = @(1, 600); travel = 
 # M2: in these scenarios the shipping mod's guest joins by itself (PT_JOIN), the test mod never runs `open`
 $AutoJoin = @("repl", "session", "sessionlook", "sessionprobe", "sessionrejoin", "sessionabrupt", "sessionabruptzone", "sessiontravel", "carenter", "reload", "channel", "playerhealth", "worldsync", "weathersync", "anchordup", "carsync", "lootsync", "backpacksync", "guestact", "lootsync2", "storysync", "anomalies", "progsync", "overlay", "playpath", "anomalies2", "pausemenu", "garagesync", "guestparts", "lootcar", "dropfall", "guestdeath", "guestcraft", "carexit", "carsit", "arckey", "runloop", "carfeel", "guestswap", "anomalies3", "storyprog", "mapmark", "ping", "upgrades", "stations", "hands", "visual", "visualgarage", "carrelevant", "netflow", "zoneexit", "zonespawn", "guestui", "worlddoors", "worldzone", "radiation", "wheelflat", "portals", "pausehost", "anomtesla", "transition", "arcui", "radio", "bigjoin", "frames", "desync", "netspeed", "cutscene", "carcrash", "carseat", "storagelayout", "doubledoor", "guestctl", "q01anchor", "sharedworld", "rescue", "keypad", "guestdrive", "healhint", "hudmap")
 $Defaults.guestauth = @(2, 900)
+$Defaults.guestjunction = @(2, 900)
+$Defaults.guestexitmove = @(2, 900)
+$AutoJoin += "guestjunction", "guestexitmove"
 $AutoJoin += "guestauth"
 $Defaults.boons = @(2, 600)
 $AutoJoin += "boons"
