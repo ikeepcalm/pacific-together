@@ -285,7 +285,7 @@ local function guestFollow(mm)
     local cur = mm:CurrentRadioTrack()
     if not valid(cur) or cur.ExternalUrl:ToString() == "" then
         -- a built-in track plays through Wwise and the media player stays silent under it: first onto a custom carrier
-        if now() - actAt > 2 then actAt = now(); toCustom(mm, url, want) end
+        if now() - actAt > 8 then actAt = now(); toCustom(mm, url, want) end -- each lend skips a track: every 2 s hopped through songs (2026-11-15)
         return
     end
     -- a lent built-in still starts its own Wwise music next to the file (live test 2026-11-01, "1964" under the host's song):
