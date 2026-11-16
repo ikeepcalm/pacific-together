@@ -28,7 +28,7 @@ return function(T)
             f:write("RIFF",string.pack("<I4",36+#audio),"WAVEfmt ",string.pack("<I4I2I2I4I4I2I2",16,1,1,8000,8000,1,8),"data",string.pack("<I4",#audio),audio);f:close()
             track=StaticConstructObject(StaticFindObject("/Script/PenDriverPro.MusicTrack"),m)
             track.Title=FText("PT shared test");track.Artist=FText("PT fixture")
-            track.ExternalUrl="file://D:/PTLanes/vehicle-proxy/client1/PenDriverPro/Binaries/Win64/ue4ss/pt-radio-test.wav"
+            track.ExternalUrl="file://C:/PTLanes/guestact/client1/PenDriverPro/Binaries/Win64/ue4ss/pt-radio-test.wav"
             m.DefaultRadioPlaylist[1]=track;m.RadioPlaylist=m.DefaultRadioPlaylist
             for i=1,m.RadioPlaylist:GetArrayNum()-1 do m.RadioPlaylist[i]=track end
             m:SkipTrack(1);send("start")
@@ -37,6 +37,16 @@ return function(T)
             local t=mm():CurrentRadioTrack();return t:IsValid() and t.ExternalUrl:ToString():find("pt-radio-test.wav",1,true)~=nil
         end})
         add({check="guest_playback_stable",timeout=120,cond=function() return has("stable") end})
+        -- the playtest loop (2026-11-15): a resync reopened the host's file, ending its song. Over ~40 s the host keeps one track and
+        -- sends no further restart (r=1), and its file is never reopened
+        local mark
+        add({run=function() mark={r=count("r=1"),opens=count("PT|radio play"),key=mm():CurrentRadioTrack():GetFName():ToString()} end})
+        add({wait=40})
+        add({check="host_track_not_restarted_or_skipped",timeout=3,cond=function()
+            local t=mm():CurrentRadioTrack();local same=t:IsValid() and t:GetFName():ToString()==mark.key
+            T.log("PT|info host radio same=%s r=%d->%d",tostring(same),mark.r,count("r=1"))
+            return same and count("r=1")<=mark.r
+        end})
         add({run=function() send("done") end});add({wait=2});return steps
     end
     add(T.onMap("RB_MainMenu",90))
