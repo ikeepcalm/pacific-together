@@ -121,12 +121,18 @@ local function pre(self, msg)
     local e = acc[k] or { dmg = 0 }
     e.dmg, e.ht, e.ni = e.dmg + dmg, ht, ni
     acc[k] = e
-    m.Damage = 0
-    -- a car part still took a hit with the damage zeroed (a modifier ran before): lift it to full health too, the loop puts it back
+    -- the copy takes the hit itself so its health drops like the host's (the owner saw 100% until the break); it never reaches 0
+    -- locally (no break, no ghost drops: the host's break removes it). shortcut: damage modifiers that scale up can still kill it, the loop lifts it to 1 HP.
     local hp, max = healthOf(hc)
     local key = hc:GetAddress()
-    if not held[key] then held[key] = { hc = hc, hp = hp, max = max } end
-    hc:SetHealth(max)
+    if os.getenv("PT_MUTATE") == "noguestscrapvis" then
+        m.Damage = 0
+        if not held[key] then held[key] = { hc = hc, hp = hp, max = max } end
+        hc:SetHealth(max)
+    else
+        m.Damage = math.min(dmg, math.max(0, hp - 1))
+        held[key] = { hc = hc, floor = true }
+    end
 end
 
 local hooked = false
@@ -141,7 +147,12 @@ LoopInGameThreadWithDelay(200, function()
         if hooked then log("PT|guestparts hooked") end
     end
     -- only undo our lift: a host-synced health that arrived meanwhile stays
-    for _, h in pairs(held) do if valid(h.hc) and math.abs(healthOf(h.hc) - h.max) < 0.5 then h.hc:SetHealth(h.hp) end end
+    for _, h in pairs(held) do
+        if valid(h.hc) then
+            if h.floor then if healthOf(h.hc) < 1 then h.hc:SetHealth(1) end
+            elseif math.abs(healthOf(h.hc) - h.max) < 0.5 then h.hc:SetHealth(h.hp) end
+        end
+    end
     held = {}
     for key, e in pairs(acc) do
         log("PT|parts send %s %.2f", (key:gsub("\t", " ")), e.dmg)

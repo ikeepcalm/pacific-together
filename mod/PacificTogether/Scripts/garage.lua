@@ -30,9 +30,11 @@ local function netted() local m = common.netMode(); return m == "listen" or m ==
 -- MoveDoorPosition is the call the state machine makes every tick; here it runs over MoveDuration seconds.
 -- shortcut: no obstruction check (the machine reverses a rear door that hits something); add one if players get crushed.
 local lastDrive = os.clock()
+local moving = {} -- door address -> "Opening" or "Closing": the state machine's start/stop sound events (pro_garageDoor_start/stop) never ran either
+local function sound(d, what) if os.getenv("PT_MUTATE") ~= "nogaragedoorvisual" then pcall(function() d["On" .. what]() end) end end
 local doors, doorsAt = {}, -math.huge
 local quietUntil = 0 -- doors are torn down across a map load: reading them then returned garbage property types (suite 2026-10-22)
-RegisterLoadMapPreHook(function() quietUntil, doors, doorsAt = math.huge, {}, -math.huge end)
+RegisterLoadMapPreHook(function() quietUntil, doors, doorsAt, moving = math.huge, {}, -math.huge, {} end)
 RegisterLoadMapPostHook(function() quietUntil = os.clock() + 3 end)
 local function driveDoors()
     local now = os.clock()
@@ -49,9 +51,19 @@ local function driveDoors()
             if a:IsValid() then
                 local target = g:GetGlobalSwitch(a) and 1 or 0
                 local pos = d.CurrentDoorPosition
+                local key = d:GetAddress()
                 if type(pos) == "number" and math.abs(target - pos) > 0.001 then
+                    local dir = target > pos and "Opening" or "Closing"
+                    if moving[key] ~= dir then
+                        if moving[key] then sound(d, moving[key] .. "End") end
+                        moving[key] = dir
+                        sound(d, dir .. "Start")
+                    end
                     local step = math.min(dt / math.max(d.MoveDuration, 0.5), math.abs(target - pos))
                     d:MoveDoorPosition(target > pos and step or -step)
+                elseif moving[key] then
+                    sound(d, moving[key] .. "End")
+                    moving[key] = nil
                 end
             end
         end
