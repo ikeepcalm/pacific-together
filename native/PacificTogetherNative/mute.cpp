@@ -5,11 +5,16 @@
 //   PTNative_Unmute(address)
 //   PTNative_MuteClear()                  e.g. before a map change, so a reused address is never muted by accident
 //   PTNative_MuteCount() -> calls dropped so far (for tests)
+//   PTNative_MediaTime(player) -> ms   UMediaPlayer::GetTime / Seek(FTimespan): Lua cannot read or build an FTimespan (no reflected
+//   PTNative_MediaSeek(player, ms)     properties), the shared radio needs the song position (radio.lua)
 #include <LuaMadeSimple/LuaMadeSimple.hpp>
 #include <Unreal/Hooks/Hooks.hpp>
 #include <Unreal/UObject.hpp>
 #include <Unreal/CoreUObject/UObject/Class.hpp>
+#include <Unreal/UObjectGlobals.hpp>
 
+#include <algorithm>
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -42,6 +47,19 @@ auto on_pre(Hook::TCallbackIterationData<void>& data, UObject* context, UFunctio
 auto ensure_hook() -> void
 {
     if (!g_id) g_id = Hook::RegisterProcessEventPreCallback(on_pre, {false, false, STR("PacificTogether"), STR("Mute")});
+}
+// UMediaPlayer: GetTime() has no parameters (the FTimespan return value, in ticks of 100 ns, is at offset 0); Seek(FTimespan) is
+// the first parameter at offset 0 followed by a bool return value
+auto media_call(uintptr_t address, const wchar_t* name, int64_t* ticks) -> bool
+{
+    auto* mp = reinterpret_cast<UObject*>(address);
+    auto* fn = address ? UObjectGlobals::StaticFindObject<UFunction*>(nullptr, nullptr, name) : nullptr;
+    if (!mp || !fn) return false;
+    std::vector<unsigned char> parms(std::max<size_t>(fn->GetStructureSize(), 16), 0);
+    if (*ticks >= 0) std::memcpy(parms.data(), ticks, sizeof(int64_t));
+    mp->ProcessEvent(fn, parms.data());
+    if (*ticks < 0) std::memcpy(ticks, parms.data(), sizeof(int64_t));
+    return true;
 }
 } // namespace
 
@@ -84,6 +102,18 @@ auto pt_register_mute(const LuaMadeSimple::Lua& lua) -> void
         g_muted.clear();
         g_any = false;
         l.set_bool(true);
+        return 1;
+    });
+    lua.register_function("PTNative_MediaTime", [](const LuaMadeSimple::Lua& l) -> int {
+        int64_t t = -1;
+        if (media_call(static_cast<uintptr_t>(l.get_integer()), STR("/Script/MediaAssets.MediaPlayer:GetTime"), &t)) l.set_integer(t / 10000);
+        else l.set_integer(-1);
+        return 1;
+    });
+    lua.register_function("PTNative_MediaSeek", [](const LuaMadeSimple::Lua& l) -> int {
+        auto address = static_cast<uintptr_t>(l.get_integer());
+        int64_t t = l.get_integer() * 10000;
+        l.set_bool(t >= 0 && media_call(address, STR("/Script/MediaAssets.MediaPlayer:Seek"), &t));
         return 1;
     });
     lua.register_function("PTNative_MuteCount", [](const LuaMadeSimple::Lua& l) -> int {
