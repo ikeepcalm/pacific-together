@@ -233,7 +233,29 @@ local entryDoor -- host: the door a guest opened last { part, at }; shut once th
 local doorHeld -- guest: the host's last state during the hold, applied when it ends (else a shut showed only 3 s later)
 local doorRest, doorSwung = {}, {} -- guest: part address -> the mesh's shut pose on its part; parts we posed open
 local doorTargets = {}
-RegisterLoadMapPreHook(function() doorTargets = {} end)
+M.dw = { ret = {}, last = {} } -- guest: ret = part address -> a door tweening back to its shut pose; sound() below (the chunk is at the 200 local-variable limit: keep these on M)
+RegisterLoadMapPreHook(function() doorTargets, M.dw.ret = {}, {} end)
+-- guest: the game's own door sounds, played on the door's audio component (the host's physics play them on its side only)
+function M.dw.sound(part, slot, opened)
+    if os.getenv("PT_MUTATE") == "nodoorvisual" then return end
+    local k = tostring(slot) .. tostring(opened)
+    if os.clock() - (M.dw.last[k] or -9) < 1.5 then return end -- a pose reset that repeats must not repeat the thud
+    M.dw.last[k] = os.clock()
+    local ok, err = pcall(function()
+        -- no LoadAsset: loading a Wwise event here crashed the client (0x18); the trunk events are not always in memory, the side ones are
+        local ev, n
+        for _, kind in ipairs((slot:find("Trunk", 1, true) or slot == "SLOT_Hood") and { "trunk", "side" } or { "side" }) do
+            n = "sfx_car_door_" .. kind .. (opened and "_opened_fully" or "_close_start")
+            ev = StaticFindObject("/Game/WwiseAudio/Events/Vehicle/veh_incidentals/" .. n .. "." .. n)
+            if valid(ev) then break end
+        end
+        local lib = StaticFindObject("/Game/Sound/Blueprints/BPFL_AudioFunctions.Default__BPFL_AudioFunctions_C")
+        log("PT|car door sound %s ev=%s lib=%s", n, tostring(valid(ev)), tostring(valid(lib)))
+        local at = valid(part.MainMesh) and part.MainMesh or part.RootComponent -- a hood panel has no MainMesh: a nil attach point crashed the client
+        if valid(ev) and valid(lib) and valid(at) then lib:SpawnAndAttachOneShotAkComponent(at, ev, part, {}, {}) end
+    end)
+    if not ok then log("PT|error car door sound %s", tostring(err)) end
+end
 
 -- host -------------------------------------------------------------------------------------------------------------------
 
@@ -1552,8 +1574,16 @@ local function applyState(data)
             elseif doorSwung[key] and doorRest[key] then
                 local rest = doorRest[key]
                 if m:IsSimulatingPhysics(FName("None")) then m:SetSimulatePhysics(false) end
-                if valid(rest.parent) then m:K2_AttachToComponent(rest.parent, FName("None"), 0, 0, 0, false) end
-                m:K2_SetRelativeLocationAndRotation(rest.loc, rest.rot, false, {}, true)
+                if os.getenv("PT_MUTATE") == "nodoorvisual" then
+                    if valid(rest.parent) then m:K2_AttachToComponent(rest.parent, FName("None"), 0, 0, 0, false) end
+                    m:K2_SetRelativeLocationAndRotation(rest.loc, rest.rot, false, {}, true)
+                else
+                    -- the host's door latched (its physics stopped): swing the last 50 degrees shut here instead of jumping, with the close thud
+                    if valid(rest.parent) then m:K2_AttachToComponent(rest.parent, FName("None"), 1, 1, 1, false) end
+                    local l, r = m.RelativeLocation, m.RelativeRotation
+                    M.dw.ret[key] = { m = m, rest = rest, fl = vec(l.X, l.Y, l.Z), fr = { Pitch = r.Pitch, Yaw = r.Yaw, Roll = r.Roll }, t0 = os.clock() }
+                    M.dw.sound(part, slot, false)
+                end
                 doorSwung[key] = nil
             end
         end)
@@ -2083,6 +2113,10 @@ net.on("g.motion.doors", function(_, data)
     local t=os.clock()
     for slot, target in pairs(targets) do
         local old=doorTargets[slot]
+        if not old then
+            local part = doorsOf(theCar(false) or {GetAddress=function() return 0 end}) [slot]
+            if part then common.defer(400, function() M.dw.sound(part, slot, true) end) end
+        end
         target.fromP,target.fromR,target.at=old and old.shownP or target.p,old and old.shownR or target.r,t
     end
     doorTargets=targets
@@ -2102,6 +2136,18 @@ LoopInGameThreadWithDelay(16,function()
             mesh:K2_SetWorldLocationAndRotation(kml():TransformLocation(ct,m.shownP),kml():TransformRotation(ct,m.shownR),false,{},true)
             doorSwung[part:GetAddress()]=true
         end
+    end
+end)
+LoopInGameThreadWithDelay(16, function()
+    if not next(M.dw.ret) then return end
+    for key, tw in pairs(M.dw.ret) do
+        local ok = pcall(function()
+            local u = math.min(1, (os.clock() - tw.t0) / 0.3)
+            u = u * u * (3 - 2 * u)
+            tw.m:K2_SetRelativeLocationAndRotation(kml():VLerp(tw.fl, tw.rest.loc, u), kml():RLerp(tw.fr, tw.rest.rot, u, true), false, {}, true)
+            if u >= 1 then M.dw.ret[key] = nil end
+        end)
+        if not ok then M.dw.ret[key] = nil end
     end
 end)
 M.swingWork = 0 -- debug counter for scenarios: passes that read door physics

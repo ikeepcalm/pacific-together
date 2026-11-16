@@ -26,6 +26,10 @@ $Defaults = @{ boot = @(2, 150); listen = @(2, 330); dump = @(1, 600); travel = 
 $AutoJoin = @("repl", "session", "sessionlook", "sessionprobe", "sessionrejoin", "sessionabrupt", "sessionabruptzone", "sessiontravel", "carenter", "reload", "channel", "playerhealth", "worldsync", "weathersync", "anchordup", "carsync", "lootsync", "backpacksync", "guestact", "lootsync2", "storysync", "anomalies", "progsync", "overlay", "playpath", "anomalies2", "pausemenu", "garagesync", "guestparts", "lootcar", "dropfall", "guestdeath", "guestcraft", "carexit", "carsit", "arckey", "runloop", "carfeel", "guestswap", "anomalies3", "storyprog", "mapmark", "ping", "upgrades", "stations", "hands", "visual", "visualgarage", "carrelevant", "netflow", "zoneexit", "zonespawn", "guestui", "worlddoors", "worldzone", "radiation", "wheelflat", "portals", "pausehost", "anomtesla", "transition", "arcui", "radio", "bigjoin", "frames", "desync", "netspeed", "cutscene", "carcrash", "carseat", "storagelayout", "doubledoor", "guestctl", "q01anchor", "sharedworld", "rescue", "keypad", "guestdrive", "healhint")
 $Defaults.guestauth = @(2, 900)
 $AutoJoin += "guestauth"
+$Defaults.guestvisual = @(2, 900)
+$AutoJoin += "guestvisual"
+$Defaults.guestgarage = @(2, 600)
+$AutoJoin += "guestgarage"
 $Defaults.boons = @(2, 600)
 $AutoJoin += "boons"
 $Defaults.legacy5 = @(2, 260)
