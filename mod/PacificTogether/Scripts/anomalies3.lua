@@ -122,6 +122,31 @@ LoopInGameThreadWithDelay(2000, function()
     end)
 end)
 
+-- The bunny (Loot Creature) has its own check, BP_Boon_LootCreature:IsPlayerInRange: flat distance from the host's camera (and the car) to
+-- the creature against Distance. Same fix: a guest that is closer counts as the player (docs/spikes/anomwake.md).
+local BRANGE = "/Game/Gameplay/Boons/ChubbyBunny/BP_Boon_LootCreature.BP_Boon_LootCreature_C:IsPlayerInRange"
+local bRangeHooked = false
+LoopInGameThreadWithDelay(2000, function()
+    if bRangeHooked then return end
+    bRangeHooked = pcall(RegisterHook, BRANGE, function(self, dist, _, _, inRange, pDist)
+        if not (M.enabled and M.fix and safety.active() and not safety.guest()) then return end
+        try("bunny range", function()
+            local at, best = self:get().Cube:K2_GetComponentLocation(), nil
+            for _, pc in ipairs(net.guests()) do
+                local p = pc:IsValid() and pc.Pawn or nil
+                if p and p:IsValid() then
+                    local l = p:K2_GetActorLocation()
+                    local d = math.sqrt((l.X - at.X) ^ 2 + (l.Y - at.Y) ^ 2)
+                    if not best or d < best then best = d end
+                end
+            end
+            if best and best <= dist:get() and not inRange:get() then
+                inRange:set(true); pDist:set(best); M.branged = (M.branged or 0) + 1
+            end
+        end)
+    end)
+end)
+
 -- ---------------------------------------------------------------- Spark Tower effects show on the guest
 
 -- The guest's copy of a Tesla does not tick (world.lua), so its beams, flashes and sounds never ran there. A hook on the game's own calls
