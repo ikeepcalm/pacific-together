@@ -1050,6 +1050,7 @@ local function handle(l, guest, pc)
         if layoutIntent and (not pc or not net.peerSupports(pc,'wreck-state')or not validLayout(f[3]:match(';(.*)$')))then return end
         log("PT|loot got S %s (%s)", id, f[3]:sub(1, 80))
         local before = ents[id].n
+        if guest then ents[id].rx = f[3] end
         applyState(ents[id], f[3])
         announce(ents[id], before)
         -- the guest's change: the host applies it and the other players see it
@@ -1058,7 +1059,7 @@ local function handle(l, guest, pc)
         -- a container of the game's that the guest has not registered yet
         local name = id:match("^I:(.+)$")
         log("PT|loot got new container %s (%d bytes)", id, #f[3])
-        if name then applyState(register(id, "I", nil, name), f[3]) end
+        if name then local e = register(id, "I", nil, name); e.rx = f[3]; applyState(e, f[3]) end
     elseif op == "D" and guest then
         replica.remove(replicas, id)
         if not ents[id] then return end
@@ -1298,6 +1299,12 @@ function M.idOf(a)
     local id = n and partIds[n]
     local e = id and ents[id]
     if e and e.kind == "P" and e.name == n and entityAlive(e) and common.identity(a) == e.lease.key then return id end
+end
+-- guest: the host's last state of a container applied again (its container was rebuilt, car.lua trunkFix); the tick works off e.pending
+-- shortcut: the guest's own edits since that state are overwritten, fine right after a rebuild
+function M.reapply(id)
+    local e = ents[id]
+    if e and e.rx then e.pending, e.busy = e.rx, nil end
 end
 function M.actorOf(id)
     local e = ents[id]
