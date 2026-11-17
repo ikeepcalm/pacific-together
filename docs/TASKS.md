@@ -34,7 +34,6 @@ Client notifications, damage feedback, passenger controls and item physics: [PT4
 | Guest tutorial progress | `story.lua`, `progression.lua`; Oppy/tutorial whiteboard | Reproduce a guest-only tutorial step and prove the intended host progress |
 | Passenger re-entry pose | `car.lua`, `zoneexit` | Rendered passenger-door re-entry after travel; guest stays in the passenger seat |
 | T06: full-run playtest | Packaged `PacificTogether.exe`, `tools/play-local.ps1` | Garage, junctions, gateway, death/failure, leave/rejoin; both logs and observed defects |
-| T09: name-tag fade mutation | `nametag.lua` and its scenario | Normal fade passes; disabled fade fails the distance checks |
 | T10 / R10: DLC handshake and compatibility | `session.lua`, game files from an authorized copy | Report ownership; establish which base/DLC combinations actually load, without assuming support |
 | F1: current lag/loss regression | Tunnel emulation, `run-test.ps1` | Core gameplay and travel at 150 ms / 2% loss, with results; early tunnel passes alone are insufficient |
 | L9: two-hour soak | Run-loop scenarios and fixtures | Repeated runs without crash or observed desync; retain logs |

@@ -17,7 +17,8 @@ local HEIGHT = 115 -- uu above the capsule centre, just over the head
 -- translucent, so the colour's alpha fades the text (the default text material is opaque)
 local MAT = "/Engine/EngineMaterials/AntiAliasedTextMaterialTranslucent.AntiAliasedTextMaterialTranslucent"
 
-function M.alpha(d) return math.max(0, math.min(1, (M.FAR - d) / (M.FAR - M.NEAR))) end
+local NOFADE = os.getenv("PT_MUTATE") == "nofade" -- T09: fade off, the distance checks must fail
+function M.alpha(d) if NOFADE then return 1 end return math.max(0, math.min(1, (M.FAR - d) / (M.FAR - M.NEAR))) end
 function M.target(d, occluded)
     if LOUD then return M.alpha(d) end
     return M.alpha(d) * (occluded and 1 or math.max(0, math.min(1, (d - M.QUIET) / M.QUIET_FADE)))

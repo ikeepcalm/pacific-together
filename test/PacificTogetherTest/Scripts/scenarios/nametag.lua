@@ -1,7 +1,7 @@
 -- P7: the shipping name tag (with health.lua a second line "<n>%" follows the name). The host gives the guest a character 300 uu in front of it; each side must show a tag with
 -- the other's PlayerState name on the other's character (never on its own), full strength near, faded in between
 -- (NEAR 1500, FAR 5000) and hidden at 6000. Quiet tag (2026-10-30): in plain sight within 8 m there is no tag (fades in to 15 m),
--- behind something it shows (host_tag_near_behind_wall: a block between them); mutation loudtag (the old always-on tag) fails. -Mutate nosession: the guest never joins, so no tag may exist and the
+-- behind something it shows (host_tag_near_behind_wall: a block between them); mutation loudtag (the old always-on tag) fails; nofade (alpha always 1) fails the faded/hidden checks. -Mutate nosession: the guest never joins, so no tag may exist and the
 -- tag checks FAIL. -Mutate shot: screenshots at each distance (run without -Headless).
 return function(T)
     local L = require("scenarios.safety_lib")
