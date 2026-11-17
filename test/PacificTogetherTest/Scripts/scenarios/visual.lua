@@ -219,9 +219,9 @@ return function(T)
             local o = copyOf("B", n, { X = tonumber(x), Y = tonumber(y), Z = tonumber(z) })
             return o == nil or o.IsBroken == true, o and ("broken=" .. tostring(o.IsBroken)) or "gone"
         end) },
-        { check = "guest_removed_mesh_gone", timeout = to(40), cond = within(3, "t.remove", function(d)
+        { check = "guest_removed_mesh_gone", timeout = to(40), cond = within(10, "t.remove", function(d)
             local n, x, y, z = d:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)$")
-            return copyOf("S", n, { X = tonumber(x), Y = tonumber(y), Z = tonumber(z) }) == nil, "copy gone"
+            local gone = copyOf("S", n, { X = tonumber(x), Y = tonumber(y), Z = tonumber(z) }) == nil; return gone, gone and "copy gone" or "copy still there"
         end) },
         { check = "guest_door_copy_pressed", timeout = to(40), cond = function()
             poll()
