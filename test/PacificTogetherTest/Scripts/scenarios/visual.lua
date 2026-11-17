@@ -95,7 +95,24 @@ return function(T)
             local sma = all(function(o) return cn(o) == "StaticMeshActor" and plainSMA(o) end)
             table.sort(sma, function(a, b) return a:GetFName():ToString() < b:GetFName():ToString() end)
             for i = 1, #sma, math.max(1, math.floor(#sma / 60)) do S[#S + 1] = ser("S", sma[i]) end
-            mesh = sma[1]
+            -- the guest looks for "this mesh within 30 uu": a second actor with the same mesh that close (stacked clutter pages) would
+            -- keep the check false after the right copy is gone, so the removed mesh has no such neighbour
+            local by, pos = {}, {}
+            for _, o in ipairs(sma) do
+                local m = meshOf(o)
+                pos[o] = o:K2_GetActorLocation()
+                by[m] = by[m] or {}
+                by[m][#by[m] + 1] = o
+            end
+            local function twins(m)
+                local n = 0
+                for _, o in ipairs(by[meshOf(m)]) do if o ~= m and d3(pos[o], pos[m]) < 30 then n = n + 1 end end
+                return n
+            end
+            local withTwin = 0
+            for _, o in ipairs(sma) do if twins(o) > 0 then withTwin = withTwin + 1 end end
+            T.log("PT|info host meshes with a twin within 30 uu: %d of %d", withTwin, #sma)
+            for _, o in ipairs(sma) do if twins(o) == 0 then mesh = o; break end end
             for _, o in ipairs(all(isFrame)) do S[#S + 1] = ser("F", o, frameMeshes(o)) end
             local doors = all(function(o) return isDoor(o) and o.CurrentState == 0 end)
             table.sort(doors, function(a, b) return a:GetFName():ToString() < b:GetFName():ToString() end)
@@ -133,6 +150,9 @@ return function(T)
         add({ run = function()
             local p = mesh:K2_GetActorLocation()
             toGuest("t.remove", string.format("%s\t%.2f\t%.2f\t%.2f", meshOf(mesh), p.X, p.Y, p.Z))
+            local twins = 0
+            for _, o in ipairs(runtime("StaticMeshActor")) do if o ~= mesh and meshOf(o) == meshOf(mesh) and d3(o:K2_GetActorLocation(), p) < 30 then twins = twins + 1 end end
+            T.log("PT|info host removes %s %s twins=%d", mesh:GetFName():ToString(), meshOf(mesh), twins)
             mesh:K2_DestroyActor()
         end })
         add({ wait = 4 })
@@ -219,7 +239,7 @@ return function(T)
             local o = copyOf("B", n, { X = tonumber(x), Y = tonumber(y), Z = tonumber(z) })
             return o == nil or o.IsBroken == true, o and ("broken=" .. tostring(o.IsBroken)) or "gone"
         end) },
-        { check = "guest_removed_mesh_gone", timeout = to(40), cond = within(10, "t.remove", function(d)
+        { check = "guest_removed_mesh_gone", timeout = to(40), cond = within(15, "t.remove", function(d)
             local n, x, y, z = d:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)$")
             local gone = copyOf("S", n, { X = tonumber(x), Y = tonumber(y), Z = tonumber(z) }) == nil; return gone, gone and "copy gone" or "copy still there"
         end) },

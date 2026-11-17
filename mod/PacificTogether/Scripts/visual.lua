@@ -828,8 +828,9 @@ net.on("g.vis.p", function(_, data)
             gone[line:match("^%a\t([^\t]*)")] = nil
             M.rx = (M.rx or 0) + 1
         end
-    elseif kind == "D" then
+    elseif kind == "D" and M.mutate ~= "noremovesync" then
         for name in rest:gmatch("[^\n]+") do
+            log("PT|visual host removed %s: copy %s", name, live(mine[name]) and "disposed" or "none")
             dispose(mine[name])
             mine[name], specs[name], gone[name] = nil, nil, true -- a line for it that is still waiting must not bring it back
         end
