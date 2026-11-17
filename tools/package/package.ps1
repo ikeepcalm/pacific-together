@@ -26,7 +26,11 @@ $ini = "$game\ue4ss\UE4SS-settings.ini"
 $dst = New-Item -ItemType Directory -Force "$game\ue4ss\Mods\PacificTogether"
 Copy-Item "$mod\enabled.txt", "$mod\Scripts" $dst -Recurse
 $ndst = New-Item -ItemType Directory -Force "$game\ue4ss\Mods\PacificTogetherNative"
-Copy-Item "$native\enabled.txt", "$native\dlls" $ndst -Recurse
+Copy-Item "$native\enabled.txt" $ndst
+# T08: players get main.dll without the test-only natives, built from this checkout
+& powershell -File "$Repo\tools\build-mod-fast.ps1" -Public -Root $Repo -Out "$ndst\dlls\main.dll"
+if ($LASTEXITCODE) { throw "public native build failed ($LASTEXITCODE)" }
+if ([IO.File]::ReadAllText("$ndst\dlls\main.dll", [Text.Encoding]::ASCII) -match 'PTNative_Test|PTNative_ReloadLua') { throw "public main.dll still has test natives" }
 Set-Content "$dst\version.txt" $name -Encoding ascii  # install.ps1 skips the copy and backup when this matches
 Copy-Item "$PSScriptRoot\install.ps1", "$PSScriptRoot\install.cmd", "$PSScriptRoot\README.txt", "$PSScriptRoot\GUIDE.md", "$Repo\CHANGELOG.md" $stage
 

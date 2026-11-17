@@ -25,7 +25,7 @@ Record the evidence for the candidate commit; implementation alone does not sati
 2. New gameplay checks have failing mutations. Core scenarios pass at 150 ms lag and 2% loss through the tunnel.
 3. Complete the human full-run playtest and two-account Steam join check. Historical passes do not validate a new build.
 4. Update the changelog; verify the game build/hash in [../CLAUDE.md](../CLAUDE.md) and the pinned UE4SS archive hash.
-5. Before 1.0, finish the two-hour soak, the firewalled crash-upload proof, and removal of test-only native registrations.
+5. Before 1.0, finish the two-hour soak, the firewalled crash-upload proof (test-only natives are out of the packaged DLL since 2026-11-17, T08).
 
 See [TESTING.md](TESTING.md) for commands and [TASKS.md](TASKS.md) for outstanding work.
 
@@ -55,7 +55,7 @@ game/                               payload installed into PenDriverPro/Binaries
 ```
 
 The package bundles UE4SS without debug symbols/docs and disables its console windows. No game files or test bots ship.
-Test-only native functions are currently gated at runtime by `PT_SCENARIO`; exclude them from public builds before 1.0.
+Test-only native functions are gated at runtime by `PT_SCENARIO`; `package.ps1` also builds main.dll with `PT_PUBLIC` (T08), which leaves them out, and fails if they are present.
 
 The installer verifies the game exe hash, backs up saves on the first install of each build and writes the chosen join
 address. Uninstall removes the entire `ue4ss` folder, including other UE4SS mods. Player instructions live in

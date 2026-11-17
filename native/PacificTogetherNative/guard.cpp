@@ -193,6 +193,7 @@ namespace pt_guard
             g_crash_info = std::string(l.get_string());
             return 0;
         });
+#ifndef PT_PUBLIC // T08
         if (!std::getenv("PT_SCENARIO")) return;
         // test runs only: PTNative_TestCrash(noMarker) crashes the game on purpose to check what the crash leaves behind
         l.register_function("PTNative_TestCrash", [](const LuaMadeSimple::Lua& l) -> int {
@@ -205,5 +206,6 @@ namespace pt_guard
             g_test_allow_sentry = l.get_bool();
             return 0;
         });
+#endif
     }
 } // namespace pt_guard

@@ -238,6 +238,7 @@ class PacificTogetherNative : public CppUserModBase
                 l.set_bool(g_load_map != nullptr);
                 return 1;
             });
+#ifndef PT_PUBLIC // T08: test-only natives are not compiled into the public DLL (tools/package)
             if (std::getenv("PT_SCENARIO"))
             {
                 // One machine-wide clock lets two test processes compare simultaneous state without estimating network delay.
@@ -266,6 +267,7 @@ class PacificTogetherNative : public CppUserModBase
                     return 1;
                 });
             }
+#endif
             transport_register(*l);
             steam_register(*l);
         }

@@ -1,12 +1,14 @@
 <#
 Fast build of PacificTogetherNative (main.dll) for any checkout/worktree, reusing the MAIN checkout's
 fully built UE4SS (native/build). Compiles this checkout's .cpp files with the template flags and relinks.
-Usage: powershell -File tools/build-mod-fast.ps1 [-MainBuild <dir>] [-Out <main.dll path>] [-Root <checkout>]
+Usage: powershell -File tools/build-mod-fast.ps1 [-MainBuild <dir>] [-Out <main.dll path>] [-Root <checkout>] [-Public]
+-Public: defines PT_PUBLIC (no test-only natives, T08) in its own build-fast-public folder; tools/package builds this one.
 #>
 param(
     [string]$MainBuild = 'C:\Users\ikeepcalm\Documents\PacificTogether\native\build',
     [string]$Out,
-    [string]$Root
+    [string]$Root,
+    [switch]$Public
 )
 $ErrorActionPreference = 'Stop'
 $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -60,12 +62,13 @@ $cl = $Matches.cl; $ccArgs = $Matches.args
 $mainSrc = "$mainRoot\native\PacificTogetherNative"
 if (-not $ccArgs.Contains("-I$mainSrc\.")) { Die 'main include path not found in template' }
 $ccArgs = $ccArgs.Replace("-I$mainSrc\.", "-I$src\.")
+if ($Public) { $ccArgs += " /DPT_PUBLIC" }
 if ($ld -notmatch '(?<wrap>"[^"]*cmake\.exe" -E vs_link_dll .*?) -- "?(?<link>[^" ]*(?: [^" ]+)*?link\.exe)"? /nologo (?<args>.*?) && C:.WINDOWS') {
     Die 'unexpected link template'
 }
 $wrap = $Matches.wrap; $linkExe = $Matches.link; $ldArgs = $Matches.args
 
-$fast = "$root\native\build-fast"
+$fast = "$root\native\build-fast$(if ($Public) { '-public' })"
 $objDir = "$fast\obj"
 New-Item -ItemType Directory -Force $objDir | Out-Null
 
