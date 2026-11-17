@@ -9,6 +9,7 @@ return function(T)
         strip = "/Game/Gameplay/Hazards/SpikeStrips/BP_Hazard_SpikeStrip.BP_Hazard_SpikeStrip_C",
         bush = "/Game/Gameplay/Hazards/SpikeBush/BP_Hazard_SpikeBush.BP_Hazard_SpikeBush_C",
         bounce = "/Game/Gameplay/Hazards/BouncePad/BP_Hazard_BouncePad.BP_Hazard_BouncePad_C",
+        nudge = "/Game/Gameplay/Hazards/NudgePad/BP_Hazard_NudgePad.BP_Hazard_NudgePad_C",
     }
     local mapName = "Rural_Forest_Radio_Scylla_02"
     local function health()
@@ -83,23 +84,30 @@ return function(T)
         end
         hurtBy("spikestrip", "strip", -80)
         hurtBy("spikebush", "bush", -80)
-        -- bounce pad under the guest
-        local pad, z0
-        add({ run = function() pcall(LoadAsset, CLS.bounce) end }) -- a map loads the class with its pads; the mod hooks it within 2 s of that
-        add({ wait = 6 })
-        add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.zreset", "1") end })
-        add({ wait = 4 })
-        add({ run = function()
-            poll(); z0 = guestMaxZ -- the guest's resting height since the reset
-            local at = L.guestChar():K2_GetActorLocation()
-            pad = spawn(CLS.bounce, at.X, at.Y, at.Z - 90)
-            T.log("PT|info bouncepad %s spawned under the guest, z=%.0f", T.name(pad), z0)
-        end })
-        add({ check = "guest_launched_by_bouncepad", timeout = 60, cond = function()
-            poll()
-            T.log("PT|info bouncepad guest z=%.0f max=%.0f (start %.0f)", guestZ, guestMaxZ, z0)
-            return guestMaxZ > z0 + 60 -- the pad's 1000 impulse lifts the guest ~100 uu (gravity scale); a standing guest stays within 5
-        end })
+        -- a launching pad under the guest (bounce pad, nudge pad): the guest lifts, the far-away host does not
+        local function padTest(name, cls)
+            local pad, z0, hz0
+            add({ run = function() pcall(LoadAsset, CLS[cls]) end }) -- a map loads the class with its pads; the mod hooks it within 2 s of that
+            add({ wait = 6 })
+            add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.zreset", "1") end })
+            add({ wait = 4 })
+            add({ run = function()
+                poll(); z0 = guestMaxZ -- the guest's resting height since the reset
+                hz0 = T.myPawn():K2_GetActorLocation().Z
+                local at = L.guestChar():K2_GetActorLocation()
+                pad = spawn(CLS[cls], at.X, at.Y, at.Z - 90)
+                T.log("PT|info %s %s spawned under the guest, z=%.0f", name, T.name(pad), z0)
+            end })
+            add({ check = "guest_launched_by_" .. name, timeout = 60, cond = function()
+                poll()
+                T.log("PT|info %s guest z=%.0f max=%.0f (start %.0f)", name, guestZ, guestMaxZ, z0)
+                return guestMaxZ > z0 + 60 -- the pad's 1000 impulse lifts the guest ~100 uu (gravity scale); a standing guest stays within 5
+            end })
+            add({ check = "host_not_launched_by_" .. name, timeout = 8, cond = L.holds(3, function() return math.abs(T.myPawn():K2_GetActorLocation().Z - hz0) < 60 end) })
+            add({ run = function() pad:K2_DestroyActor() end })
+        end
+        padTest("bouncepad", "bounce")
+        padTest("nudgepad", "nudge")
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.end", "1") end })
         add({ wait = 3 })
         return steps
