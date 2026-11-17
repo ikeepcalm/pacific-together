@@ -506,6 +506,19 @@ LoopInGameThreadWithDelay(16, function()
     local a, b, u, extrapolate = wheelMotion.sample(wheelBuffer, os.clock())
     if not a then return end
     local ct = wheelCar:GetTransform()
+    -- parked (no wheel turning, same pose as shown, car not moved): the same 24 calls every frame set what is already there; redone every 0.25 s
+    local fa, fb, spin, S = 0, 0, 0, wheelBuffer.parked or {} -- (a field: the main chunk is at the 200-locals limit)
+    for i, target in pairs(b.wheels) do
+        local f = a.wheels[i] or target
+        fa = fa + f.p.X + f.p.Y + f.p.Z + f.r.Pitch + f.r.Yaw + f.r.Roll + f.phase
+        fb = fb + target.p.X + target.p.Y + target.p.Z + target.r.Pitch + target.r.Yaw + target.r.Roll + target.phase
+        spin = spin + math.abs(target.omega) + math.abs(f.omega)
+    end
+    local tr, ro = ct.Translation, ct.Rotation
+    local still = spin == 0 and fa == fb and S.fb == fb and S.x == tr.X and S.y == tr.Y and S.z == tr.Z and S.qx == ro.X and S.qy == ro.Y and S.qz == ro.Z and S.qw == ro.W
+    if still and os.clock() - S.at < 0.25 then return end
+    if not (still and S.at) then wheelBuffer.parked = { at = os.clock(), fb = fb, x = tr.X, y = tr.Y, z = tr.Z, qx = ro.X, qy = ro.Y, qz = ro.Z, qw = ro.W }
+    else S.at = os.clock() end
     for i, target in pairs(b.wheels) do
         local from, mesh = a.wheels[i] or target, wheelMeshes[i]
         if valid(mesh) then
@@ -2235,9 +2248,14 @@ LoopInGameThreadWithDelay(16,function()
     if common.netMode()~="client" or os.clock()<doorHold or (M.ga.mine and os.getenv("PT_MUTATE")~="guestauthdoors") then return end
     local car=theCar(false);if not car then return end
     local ct=car:GetTransform()
+    -- doors at their targets and the car not moved since the last pass: nothing to set; redone every 0.25 s (a field of doorTargets' owner: locals limit)
+    local tr,ro,S=ct.Translation,ct.Rotation,M.doorParked or {}
+    if S.t==doorTargets and S.x==tr.X and S.y==tr.Y and S.z==tr.Z and S.qx==ro.X and S.qy==ro.Y and S.qz==ro.Z and S.qw==ro.W and os.clock()-S.at<0.25 then return end
+    local settled=true
     for slot,part in pairs(doorsOf(car)) do
         local m=doorTargets[slot]
         if m and valid(part.MainMesh) then
+            if os.clock()-m.at<0.075 then settled=false end
             local u=math.min(1,(os.clock()-m.at)/0.075)
             m.shownP=kml():VLerp(m.fromP,m.p,u);m.shownR=kml():RLerp(m.fromR,m.r,u,true)
             local mesh=part.MainMesh
@@ -2246,6 +2264,7 @@ LoopInGameThreadWithDelay(16,function()
             doorSwung[part:GetAddress()]=true
         end
     end
+    M.doorParked=settled and{t=doorTargets,at=os.clock(),x=tr.X,y=tr.Y,z=tr.Z,qx=ro.X,qy=ro.Y,qz=ro.Z,qw=ro.W}or nil
 end)
 LoopInGameThreadWithDelay(16, function()
     if not next(M.dw.ret) then return end
