@@ -35,6 +35,7 @@ local function dialogue() local d = FindFirstOf("BP_DialogueManager_C") return l
 
 local hostDone = { o = {}, m = {} } -- what the host finished (paths without the asset-name suffix)
 local hostMask = {}                  -- objective path -> the host's completed-task mask
+local UI_TASKS
 local GUEST_TASKS -- set below (the host handler needs it too)
 local applying = false -- true only while this module starts something on the guest
 
@@ -126,6 +127,11 @@ end
 
 -- a task only the guest can do (it holds the item, stands at the place): the guest says so, the host completes it for the story
 GUEST_TASKS = { BPMT_HasItem_PlayerInventory_C = true, BPMT_HasItem_HandSlot_C = true, BPMT_InRangeOfTag_C = true }
+-- UI-only steps the guest does on its own screen (the host never sees them): open the route planner, the mechanic view
+UI_TASKS = { BPMT_RoutePlannerOpen_C = true, BPMT_MechanicModeChanged_C = true, BPMT_MechanicModeSlotsViewed_C = true }
+if os.getenv("PT_MUTATE") ~= "nostorytask" then
+    for k in pairs(UI_TASKS) do GUEST_TASKS[k] = true end
+end
 net.on("g.story.task", function(_, data)
     if not (PROG and M.enabled) or safety.guest() then return end
     try("task", function()
@@ -268,7 +274,11 @@ local function reportTasks()
             local mask = hostMask[op] or ""
             for j = 1, ms.TaskStates:GetArrayNum() do
                 local t = ms.Tasks[j]
-                if ms.TaskStates[j].bCompleted and mask:sub(j, j) == "0" and live(t) and GUEST_TASKS[t:GetClass():GetFName():ToString()] then
+                local cn = live(t) and t:GetClass():GetFName():ToString()
+                -- a UI-only task on the guest is not always ticked to bCompleted (the game polls only the active task): ask its own check
+                local done = ms.TaskStates[j].bCompleted
+                if not done and cn and UI_TASKS[cn] and GUEST_TASKS[cn] then done = select(2, pcall(function() return t:K2_CheckCompletion() == true end)) == true end
+                if done and mask:sub(j, j) == "0" and cn and GUEST_TASKS[cn] then
                     -- those two read the shared trunk: not the guest's doing. == true: a class without them returns a truthy TrivialObject
                     local ok, car = pcall(function() return t.CheckCar == true or t.CheckZETI == true end)
                     local key = op .. "|" .. mp .. "|" .. j
