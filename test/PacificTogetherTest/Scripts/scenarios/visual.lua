@@ -206,10 +206,13 @@ return function(T)
         { check = "guest_mirrors_doors", timeout = to(120), cond = mirrored(1.0, { D = true }) },
         { check = "guest_mirrors_destructibles", timeout = to(120), cond = mirrored(1.0, { X = true }) },
         { run = function() PTNative_MsgToHost(T.localPC():GetAddress(), "t.mirrored", "1") end },
-        { check = "guest_door_follows_host", timeout = to(40), cond = within(3, "t.door", function(d)
+        -- the guest's door swings by its own highlight (state 1 or 2 = open, visual.lua applyDoor) and a door the host set without a
+        -- player's press is caught by the 5 s sweep: window 10 s, any open state
+        { check = "guest_door_follows_host", timeout = to(40), cond = within(10, "t.door", function(d)
             local n, x, y, z, st = d:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t(%d+)$")
             local o = copyOf("B", n, { X = tonumber(x), Y = tonumber(y), Z = tonumber(z) })
-            return o ~= nil and o.CurrentState == tonumber(st), o and ("state=" .. tostring(o.CurrentState)) or "no copy"
+            local s = o and o.CurrentState
+            return s ~= nil and (s == tonumber(st) or (s == 1 or s == 2) and (tonumber(st) == 1 or tonumber(st) == 2)), o and ("state=" .. tostring(s)) or "no copy"
         end) },
         { check = "guest_destructible_breaks_with_host", timeout = to(40), cond = within(4, "t.break", function(d)
             local n, x, y, z = d:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)$")
