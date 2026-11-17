@@ -1,11 +1,11 @@
 -- Playtest 2026-11-15 (finding 5): 0 energy after a setpiece run. Anchors fed to the ARC are banked as garage energy (CurrencyTable)
--- by BP_InventoryManager:DepositPostRunItems, which only the failure return calls; the gateway/setpiece exit (TravelToGarage(2))
--- never did, and an anchor the guest fed (g.act.anchor) never reached the host's anchor inventory at all.
+-- by the game's own return to the garage (probe 20261117: TravelToGarage(2) banks anchor items itself). The guest's deposit intent only
+-- called the charge logic, so the anchor never became an item in the host's anchor inventory and was never banked.
 --   host_anchor_in_arc_inventory    the guest's deposit intent leaves the anchor item in the host's anchor inventory (once)
---   host_energy_banked_by_exit      after the host's gateway return the garage energy rose by that anchor's value
+--   host_energy_banked_by_return    after the host's gateway return the garage energy rose by that anchor's value
 --   host_energy_banked_once         a second return-to-garage deposit changes nothing
 --   guest_energy_matches_host       the guest's research-screen energy equals the host's
--- Run: tools/run-test.ps1 -Scenario exitdeposit -Fixture garage -Headless      Mutation noexitdeposit: the exit deposit is off.
+-- Run: tools/run-test.ps1 -Scenario exitdeposit -Fixture garage -Headless      Mutation noanchorbank: the old charge-only deposit.
 return function(T)
     local L = require("scenarios.sessionlib")(T)
     local ANCHOR = "/Game/Gameplay/Inventory/Items/Resources/Anchor/AnchorBlue/IA_Resource_Anchor_Unstable_M.IA_Resource_Anchor_Unstable_M"
@@ -59,7 +59,7 @@ return function(T)
         add({ run = function() helpers():TravelToNextLeg(T.world()) end })
         add({ check = "host_listens_zone", timeout = 240, cond = function() return inZone() and T.netMode() == "listen" and T.listening() and T.myPawn() ~= nil end })
         add({ check = "host_guest_in_zone", timeout = 300, cond = function() return L.guestChar() ~= nil end })
-        add({ wait = 15 })
+        add({ wait = 35 }) -- the guest hooks the ARC a few seconds after the map loads
         add({ run = function()
             before = energy()
             T.log("PT|info host energy before %s anchors=%d", before, anchors())
@@ -74,7 +74,7 @@ return function(T)
         add({ check = "host_guest_in_garage_again", timeout = 300, cond = function() return L.guestChar() ~= nil end })
         add({ wait = 5 })
         local after
-        add({ check = "host_energy_banked_by_exit", timeout = 20, cond = function()
+        add({ check = "host_energy_banked_by_return", timeout = 20, cond = function()
             after = energy()
             T.log("PT|info host energy after %s (before %s) anchors=%d", after, tostring(before), anchors())
             return after ~= before and anchors() == 0
@@ -96,9 +96,16 @@ return function(T)
         { check = "guest_reports", timeout = 1500, cond = function()
             poll()
             if got["t.feed"] and not fed and inZone() then
-                fed = true
-                T.intent("g.act.anchor", got["t.feed"])
-                PTNative_MsgToHost(T.localPC():GetAddress(), "t.fed", "1")
+                -- the guest's own ARC takes the anchor; the mod's hook turns that into the intent (guestact.lua anchorHook)
+                local ok, err = pcall(function()
+                    local lib = StaticFindObject("/Script/PenDriverInventory.Default__InventoryBlueprintLibrary")
+                    local g = T.first("BP_Carpart_Internal_Gobbler_C")
+                    local a = StaticFindObject(got["t.feed"])
+                    if not a:IsValid() then pcall(LoadAsset, got["t.feed"]); a = StaticFindObject(got["t.feed"]) end
+                    g:AddingAnchorCompleteLogic(lib:CreateItemInstance(g:GetWorld(), a, 0))
+                end)
+                T.log("PT|info guest fed anchor ok=%s %s map=%s", tostring(ok), tostring(err), T.map())
+                if ok then fed = true; PTNative_MsgToHost(T.localPC():GetAddress(), "t.fed", "1") end
             end
             pcall(function() PTNative_MsgToHost(T.localPC():GetAddress(), "t.energy", energy()) end)
             return got["t.done"] ~= nil

@@ -361,14 +361,6 @@ local HOOKS = {
     { "/Game/Gameplay/Inventory/Items/Car/Internal/Gobbler/BP_Carpart_Internal_GobblerScreen.BP_Carpart_Internal_GobblerScreen_C:OnExitUseComplete", gateHook },
     { "/Game/Gameplay/Inventory/Items/Car/Internal/Gobbler/BP_Carpart_Internal_Gobbler.BP_Carpart_Internal_Gobbler_C:AddingAnchorCompleteLogic", anchorHook },
 }
--- host: the gateway and setpiece exits (BP_LevelTransition_ExitPortal / _Custom) call TravelToGarage(2) and nothing banks the
--- run's anchors; only the failure return does (RunFinished_Failure, state 3). Deposit before the travel (a second call banks nothing).
-local EXIT_HOOK, exitHooked = "/Game/Systems/Managers/BP_ProgressionManager.BP_ProgressionManager_C:TravelToGarage", false
-local function exitDeposit(_, state)
-    if not hostCar() or state:get() ~= 2 or os.getenv("PT_MUTATE") == "noexitdeposit" then return end
-    local ok, err = pcall(function() FindFirstOf("BP_InventoryManager_C"):DepositPostRunItems(false) end)
-    log("PT|act exit deposit %s", ok and "done" or tostring(err))
-end
 local done = {}
 local function hookAll()
     for i, h in ipairs(HOOKS) do
@@ -387,9 +379,6 @@ end
 -- slow on purpose: every call here walks the object array, and the guest's camera in a moving car notices a hitch
 local beat = 0
 LoopInGameThreadWithDelay(1000, function()
-    if hostCar() and not exitHooked then
-        exitHooked = pcall(RegisterHook, EXIT_HOOK, function(...) try("exit deposit", exitDeposit, ...) end)
-    end
     if not guest() then noted = {}; return end
     beat = beat + 1
     try("gate", holdGate)
