@@ -3,7 +3,10 @@ local common,net=require("common"),require("net")
 local UEHelpers=require("UEHelpers")
 local M={}
 local records,pending,seen,work,admitted={}, {}, {}, nil, {}
-local function live(a) return a and a:IsValid() and not a:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) end
+-- not still async-loading/unreachable either: a guest crashed walking FindAllOf here while a sublevel streamed in (AV reading a
+-- class at 0x100000001, soak 20261117-122320, same as the host's loot scan crash)
+local SETTLING = EInternalObjectFlags.PendingKill | EInternalObjectFlags.AsyncLoading | EInternalObjectFlags.Unreachable
+local function live(a) return a and a:IsValid() and not a:HasAnyInternalFlags(SETTLING) end
 local function inWorld(a)
     if not live(a) then return false end
     local w=a:GetWorld()

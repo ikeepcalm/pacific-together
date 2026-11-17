@@ -454,7 +454,7 @@ local function scanHost()
     local function skipped(a, k) return skip[k] ~= nil and skip[k] == common.identity(a) end
     for _, a in ipairs(FindAllOf("BP_Lootable_Base_C") or {}) do
         local k = a:GetAddress()
-        if not known(a) and room() and alive(a) and not transient(a, k) and alive(a.InventoryContainer) then
+        if not known(a) and room() and ids.settled(a) and not transient(a, k) and alive(a.InventoryContainer) then
             local e = register("L" .. nextId, "L", a)
             nextId, byName[k] = nextId + 1, e.id
             e.last, e.n = stateOf(e), e.get():GetNumItems()
@@ -465,7 +465,7 @@ local function scanHost()
     -- abandoned cars: the body (B) and each part still on it (P); the guest has neither
     for _, a in ipairs(not NO2 and FindAllOf("LootableTemplate") or {}) do
         local k = a:GetAddress()
-        if not known(a) and room() and alive(a) and not skipped(a, k) and not transient(a, k) then
+        if not known(a) and room() and ids.settled(a) and not skipped(a, k) and not transient(a, k) then
             local e = register("B" .. nextId, "B", a)
             nextId, byName[k] = nextId + 1, e.id
             say(line(e))
@@ -473,7 +473,7 @@ local function scanHost()
     end
     for _, a in ipairs(not NO2 and FindAllOf("LootableTemplatePart") or {}) do
         local k = a:GetAddress()
-        if not known(a) and room() and alive(a) and not skipped(a, k) and alive(a.ItemInstance) and not transient(a, k) then
+        if not known(a) and room() and ids.settled(a) and not skipped(a, k) and alive(a.ItemInstance) and not transient(a, k) then
             local e = register("P" .. nextId, "P", a)
             nextId, byName[k] = nextId + 1, e.id
             e.last = partKey(a)
@@ -486,7 +486,7 @@ local function scanHost()
         local k = a:GetAddress()
         -- not the class templates in /Engine/Transient: the guest made real copies of them at 0,0,0 (the PC in the middle of the
         -- garage, playtest 2026-10-31)
-        if not known(a) and room() and alive(a) and not skipped(a, k) and not transient(a, k) then
+        if not known(a) and room() and ids.settled(a) and not skipped(a, k) and not transient(a, k) then
             local e = register("R" .. nextId, "R", a)
             nextId, byName[k] = nextId + 1, e.id
             say(line(e))
