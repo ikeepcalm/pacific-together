@@ -444,12 +444,21 @@ local sent, beat = {}, 0
 -- host: the hazard list is refetched every 5 s (and on a map load), the 4 Hz position pass only checks the kept objects
 local hazards, hazardsAt = {}, -99
 RegisterLoadMapPreHook(function() hazardsAt = -99 end)
-local function eachHazard(fn)
+-- host perf (world.lua:455 = 11 ms a call in the 2026-11-15 expedition): names and the world-item filter are read once per refetch,
+-- and a hazard that has not moved for 10 s is only checked on the 2 s full pass (beat % 8 == 0)
+local function eachHazard(fn, full)
     if os.clock() - hazardsAt > 5 then
         hazards, hazardsAt = {}, os.clock()
-        each("BP_Base_Hazard_C", function(o) hazards[#hazards + 1] = o end)
+        each("BP_Base_Hazard_C", function(o)
+            if not (WI:IsValid() and o:IsA(WI)) then hazards[#hazards + 1] = { o = o, n = o:GetFName():ToString() } end
+        end)
     end
-    for _, o in ipairs(hazards) do if o:IsValid() then fn(o) end end
+    local now = os.clock()
+    for _, h in ipairs(hazards) do
+        if h.o:IsValid() and (full or not h.still or now - h.still < 10 or M.mutate == "nohazardidle") then
+            if fn(h.o, h.n) then h.still = nil elseif not h.still then h.still = now end
+        end
+    end
 end
 LoopInGameThreadWithDelay(250, function()
     if not M.enabled or not safety.active() or safety.guest() then return end
@@ -457,9 +466,8 @@ LoopInGameThreadWithDelay(250, function()
     if beat % 8 == 0 then sent = {} end -- everything again every 2 s (a late guest, a copy that drifted)
     try("pos", function()
         local L = {}
-        eachHazard(function(o)
-            if WI:IsValid() and o:IsA(WI) then return end
-            local n, l = o:GetFName():ToString(), o:K2_GetActorLocation()
+        eachHazard(function(o, n)
+            local l = o:K2_GetActorLocation()
             local c = core(o)
             c = c and c:K2_GetComponentLocation()
             local p = sent[n]
@@ -467,8 +475,9 @@ LoopInGameThreadWithDelay(250, function()
                 sent[n] = { X = l.X, Y = l.Y, Z = l.Z, c = c and { X = c.X, Y = c.Y, Z = c.Z } }
                 L[#L + 1] = string.format("%s\t%.1f\t%.1f\t%.1f", n, l.X, l.Y, l.Z)
                     .. (c and string.format("\t%.1f\t%.1f\t%.1f", c.X, c.Y, c.Z) or "")
+                return p ~= nil -- moved (a first send after the 2 s reset is not a move)
             end
-        end)
+        end, beat % 8 == 0)
         if #L > 0 then net.toGuests("g.world.pos", table.concat(L, "\n")) end
     end)
 end)
