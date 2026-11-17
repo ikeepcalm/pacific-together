@@ -25,7 +25,8 @@ return function(T)
         local o = T.otherChar()
         local tag = o and SAFE.tagsOn(T, o)[1]
         local t = tag and SAFE.tagState(T, tag).text or ""
-        return tonumber(t:match("\n(%d+)%%")) or -1
+        -- the quiet tag (nametag.lua) shows health only when hurt: a name without a percent line is a full-health partner
+        return tonumber(t:match("\n(%d+)%%")) or (t ~= "" and 100 or -1)
     end
     local function near(a, b) return math.abs(a - b) <= 6 end
     local function manager() return T.first("BP_MainCharacterManager_C") end

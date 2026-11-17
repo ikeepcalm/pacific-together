@@ -2,13 +2,13 @@
 return function(T)
     return {{check="all_key_subscribers_receive_each_edge",timeout=1,cond=function()
         local poll, down, reads, count, errors = nil, {}, {}, {0,0,0,0}, 0
-        local pc={IsValid=function() return true end,HasAnyInternalFlags=function() return false end,IsLocalController=function() return true end}
+        local pc={IsValid=function() return true end,HasAnyInternalFlags=function() return false end,IsLocalController=function() return true end,GetFullName=function() return "fakepc" end}
         function pc:IsInputKeyDown(key) reads[key.KeyName]=(reads[key.KeyName] or 0)+1; return down[key.KeyName]==true end
         local helpers={GetWorld=function() end}
         local env=setmetatable({
             require=function(name) assert(name=="UEHelpers"); return helpers end,
             FindAllOf=function() return {pc} end, FindFirstOf=function() end,
-            StaticFindObject=function() end, RegisterHook=function() end, PTNative_Find=false,
+            StaticFindObject=function() end, RegisterHook=function() end, PTNative_Find=false, PTNative_ObjectIdentity=false, PTNative_ObjectMatches=false,
             FName=function(s) return s end,
             LoopInGameThreadWithDelay=function(_,fn) poll=fn end,
             RegisterLoadMapPreHook=function() end, RegisterLoadMapPostHook=function() end,
