@@ -339,33 +339,44 @@ end)
 -- the owner against BP_MainCharacterManager's CharacterActor; anything else must be physics-simulating). So a guest was never launched. The host
 -- hooks the begin-overlap, and for a guest pawn tells the guest to do the launch itself: zero its vertical velocity, add the pad's up impulse.
 local PAD = "/Game/Gameplay/Hazards/BouncePad/BP_Hazard_BouncePad.BP_Hazard_BouncePad_C:BndEvt__Box_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature"
-local padHooked, padCool = false, {}
+-- NudgePad (docs/spikes/nudgepad.md): its begin-overlap and repeating Bounce timer both call BounceCmp(PrimCmp), which likewise launches only the
+-- host's character. Same treatment, hooked on BounceCmp (the owner of the component is the pawn).
+-- shortcut: the pad's smart launch toward a nearby anomaly is dropped, a guest gets the plain up impulse (1000) even when an anomaly is near.
+local NUDGE = "/Game/Gameplay/Hazards/NudgePad/BP_Hazard_NudgePad.BP_Hazard_NudgePad_C:BounceCmp"
+local padHooked, nudgeHooked, padCool = false, false, {}
 M.bounced = 0
-LoopInGameThreadWithDelay(2000, function()
-    if padHooked then return end
-    padHooked = pcall(RegisterHook, PAD, function(self, _, other)
+local function launch(self, other, amountOf)
         if not (M.enabled and M.fix and safety.active() and not safety.guest()) then return end
         try("bounce", function()
             local pad, who = self:get(), other:get()
+            if amountOf then who = who:GetOwner() end
             for _, pc in ipairs(net.guests()) do
                 if pc:IsValid() and pc.Pawn and pc.Pawn:IsValid() and pc.Pawn:GetAddress() == who:GetAddress() then
                     local key, now = pad:GetFName():ToString(), os.clock()
                     if (padCool[key] or 0) > now then return end
                     padCool[key] = now + 1.5 -- the pad's own re-arm delay (ReArmTimerOnPlayerLaunch), not read
-                    local u = pad:GetActorUpVector()
-                    net.toGuest(pc, "g.anom3.bounce", string.format("%.3f\t%.3f\t%.3f\t%.0f", u.X, u.Y, u.Z, pad.LaunchPlayerImpulseAmount))
+                    local u, amount = pad:GetActorUpVector(), amountOf or pad.LaunchPlayerImpulseAmount
+                    net.toGuest(pc, "g.anom3.bounce", string.format("%.3f\t%.3f\t%.3f\t%.0f", u.X, u.Y, u.Z, amount))
                     -- the host's copy of the guest's movement takes the same impulse, else its replay of the guest's moves corrects the guest back down
                     local hcm = who.CharacterMovement
                     local v = hcm.Velocity
                     hcm.Velocity = { X = v.X, Y = v.Y, Z = 0 }
-                    hcm:AddImpulse({ X = u.X * pad.LaunchPlayerImpulseAmount, Y = u.Y * pad.LaunchPlayerImpulseAmount, Z = u.Z * pad.LaunchPlayerImpulseAmount }, true)
+                    hcm:AddImpulse({ X = u.X * amount, Y = u.Y * amount, Z = u.Z * amount }, true)
                     M.bounced = M.bounced + 1
                     log("PT|anom3 bounce pad %s launches the guest", key)
                 end
             end
         end)
-    end)
-    if padHooked then log("PT|anom3 bounce pad hook registered") end
+end
+LoopInGameThreadWithDelay(2000, function()
+    if not padHooked then
+        padHooked = pcall(RegisterHook, PAD, function(self, _, other) launch(self, other) end)
+        if padHooked then log("PT|anom3 bounce pad hook registered") end
+    end
+    if not nudgeHooked then
+        nudgeHooked = pcall(RegisterHook, NUDGE, function(self, cmp) launch(self, cmp, 1000) end)
+        if nudgeHooked then log("PT|anom3 nudge pad hook registered") end
+    end
 end)
 
 net.on("g.anom3.bounce", function(_, data)
