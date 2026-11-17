@@ -197,22 +197,13 @@ function M.findPortal(key)
     return best
 end
 
--- ~40 per-frame loops asked every frame (three engine calls each: the biggest fixed cost of a joined session, PT|perf 2026-11-17):
--- kept 50 ms, and dropped at every map load
-local nmAt, nmVal = -1, nil
-local function nmForget() nmVal = nil end
-RegisterLoadMapPreHook(nmForget)
-RegisterLoadMapPostHook(nmForget)
+-- not cached: a 50 ms cache (perf2, 2026-11-17) broke a guest who played solo and then joined (safety: connection timeout,
+-- 30/30 again with the cache off); three engine calls per ask are cheap enough
 function M.netMode()
-    local t = os.clock()
-    if nmVal and t - nmAt < 0.05 then return nmVal end
     local ksl, wco = UEHelpers.GetKismetSystemLibrary(), UEHelpers.GetWorldContextObject()
-    local v
-    if not wco or not wco:IsValid() then v = "none"
-    elseif ksl:IsStandalone(wco) then v = "standalone"
-    else v = ksl:IsServer(wco) and "listen" or "client" end
-    nmAt, nmVal = t, v
-    return v
+    if not wco or not wco:IsValid() then return "none" end
+    if ksl:IsStandalone(wco) then return "standalone" end
+    return ksl:IsServer(wco) and "listen" or "client"
 end
 
 return M
