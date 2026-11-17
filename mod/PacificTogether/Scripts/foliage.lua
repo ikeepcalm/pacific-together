@@ -111,13 +111,36 @@ LoopInGameThreadWithDelay(250,function()
         end
     end
 end)
+-- Guest perf (2026-11-15: 5.9 ms a call, 9.8 s/min): the actor lists and the mesh -> instanced components index are built at most
+-- once a second and shared by every job (retries included) instead of FindAllOf + GetFullName per job.
+local scan={t=-10}
+local function scanned()
+    if os.clock()-scan.t<1 and os.getenv("PT_MUTATE")~="nofoliagecache" then return scan end
+    local function list(actors)
+        local r={}
+        for _,a in ipairs(actors or {})do
+            if inWorld(a) and live(a.BaseMesh) and live(a.BaseMesh.StaticMesh) then r[#r+1]={a=a,s=source(a)} end
+        end
+        return r
+    end
+    local ism={}
+    for _,c in ipairs(FindAllOf("InstancedStaticMeshComponent") or {})do
+        if live(c) and live(c.StaticMesh) and inWorld(c) then
+            local m=path(c.StaticMesh);ism[m]=ism[m] or {};table.insert(ism[m],c)
+        end
+    end
+    scan={t=os.clock(),foliage=list(FindAllOf("BP_Crash_Complex_Foliage_Base_C")),crash=list(listCrash()),ism=ism}
+    return scan
+end
+RegisterLoadMapPreHook(function() scan={t=-10} end)
 LoopInGameThreadWithDelay(16,function()
     if common.netMode()~="client" then return end
     if not work then
         local p=table.remove(pending,1);if not p then return end
-        for _,a in ipairs(p.kind and p.kind~="F" and listCrash() or FindAllOf("BP_Crash_Complex_Foliage_Base_C") or {})do
-            if inWorld(a) and live(a.BaseMesh) and live(a.BaseMesh.StaticMesh) then
-                local s=source(a)
+        local sc=scanned()
+        for _,x in ipairs(p.kind and p.kind~="F" and sc.crash or sc.foliage)do
+            local a,s=x.a,x.s
+            if live(a) and live(a.BaseMesh) then
                 if s.mesh==p.mesh and close(s.p,p.p) then
                     if not a.IsBroken then
                         if p.kind=="S"then
@@ -133,8 +156,8 @@ LoopInGameThreadWithDelay(16,function()
             end
         end
         local components={}
-        for _,c in ipairs(FindAllOf("InstancedStaticMeshComponent") or {})do
-            if live(c) and live(c.StaticMesh) and path(c.StaticMesh)==p.mesh and inWorld(c) then
+        for _,c in ipairs(sc.ism[p.mesh] or {})do
+            if live(c) and live(c.StaticMesh) then
                 local lease=common.lease(c)
                 if lease then
                     local indices={}
@@ -155,7 +178,7 @@ LoopInGameThreadWithDelay(16,function()
                 -- Do what the host's game did: swap the instance into its crash actor (it falls), break that next pass.
                 if not w.job.swapped and swapInstance(c,idx,xf)then
                     common.log('PT|foliage swapped instance %.1f %.1f %.1f',w.job.p.X,w.job.p.Y,w.job.p.Z)
-                    w.job.swapped=true;w.job.tries=0;local j=w.job
+                    w.job.swapped=true;w.job.tries=0;local j=w.job;scan.t=-10 -- the new crash actor is not in the cache yet
                     table.insert(pending,1,j);work=nil;return -- next tick: a far-away swapped actor deswaps itself within a second
                 end
                 if c:RemoveInstance(idx) then
