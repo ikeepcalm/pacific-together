@@ -72,6 +72,8 @@ local function swapInstance(c,idx,xf)
     end))
 end
 local hooked=false
+local polled={} -- broken foliage actors the host poll already published (address)
+RegisterLoadMapPreHook(function() polled={} end)
 RegisterLoadMapPreHook(function() records,pending,seen,work,admitted,crashRows={},{},{},nil,{},{} end)
 net.on("g.foliage.break",function(_,data)
     if common.netMode()~="client" or not net.hostSupports("foliage") or #data>4096 then return end
@@ -97,9 +99,10 @@ LoopInGameThreadWithDelay(250,function()
         hooked=pcall(RegisterHook,"/Game/Gameplay/Destruction/Base/BP_Crash_Base.BP_Crash_Base_C:PostBreakLogic",function(self)publish(self:get())end)
     end
     local guests=net.guests()
+    -- host perf (foliage.lua:94, 2026-11-15): IsBroken first (a plain read), each broken actor published once, inWorld only then
     for _,a in ipairs(FindAllOf("BP_Crash_Complex_Foliage_Base_C") or {}) do
-        if inWorld(a) and live(a.BaseMesh) and live(a.BaseMesh.StaticMesh) then
-            if a.IsBroken then publish(a) end
+        if live(a) and a.IsBroken and not polled[a:GetAddress()] and inWorld(a) and live(a.BaseMesh) and live(a.BaseMesh.StaticMesh) then
+            polled[a:GetAddress()]=true;publish(a)
         end
     end
     for _,pc in ipairs(guests)do
