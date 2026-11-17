@@ -39,7 +39,7 @@ return function(T)
                 if not kind then return end
                 if kind == "t.parts" then guestParts = tonumber(data) or guestParts end
                 if kind == "t.bag" then guestBag = tonumber(data) or guestBag end
-                if kind == "t.hp" then guestHp, guestSpd = data:match("^(%-?[%d%.]+)	([%d%.]+)$"); guestHp, guestSpd = tonumber(guestHp) or guestHp, tonumber(guestSpd) or 0 end
+                if kind == "t.hp" then guestHp, guestSpd = data:match("^(%-?[%d%.]+)	([%d%.]+)$"); guestHp, guestSpd = tonumber(guestHp) or guestHp, tonumber(guestSpd) or 0; maxSpd = math.max(maxSpd, guestSpd) end -- the peak report can arrive while an earlier check polls
                 if kind == "t.haz" then
                     haz = {}
                     for c, role, d in data:gmatch("([^|;]+)|(%d+)|([%d%.]+)") do haz[c] = { role = tonumber(role), dist = tonumber(d) } end
@@ -102,7 +102,6 @@ return function(T)
         add({ run = function()
             poll(); guestHp0, hostHp0, maxSpd = guestHp, health(), 0
             pcall(function() bunny:PushFx() end) -- the game's push step (damage 0.1 intensity, radial force) as a touch starts it
-            pcall(function() bunny.PlayerPusher:FireImpulse() end)
             T.log("PT|info bunny push sent")
         end })
         add({ check = "guest_hurt_by_bunny", timeout = 20, cond = function()
@@ -110,7 +109,7 @@ return function(T)
             T.log("PT|info bunny: guest hp=%.0f (was %.0f) host hp=%.0f", guestHp, guestHp0, health())
             return guestHp < guestHp0 - 0.5
         end })
-        add({ check = "guest_pushed_by_bunny", timeout = 10, cond = function() poll(); maxSpd = math.max(maxSpd, guestSpd); return maxSpd > 100 end })
+        add({ check = "guest_pushed_by_bunny", timeout = 10, cond = function() poll(); T.log("PT|info guest peak speed %.0f", maxSpd); return maxSpd > 100 end })
         add({ check = "host_not_hurt_by_bunny_on_guest", timeout = 5, cond = L.holds(3, function() return health() >= hostHp0 - 0.5 end) })
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.end", "1") end })
         add({ wait = 3 })
@@ -121,7 +120,7 @@ return function(T)
     LoopInGameThreadWithDelay(50, function()
         pcall(function()
             local me = T.netMode() == "client" and T.myPawn()
-            if me and me:IsValid() then local v = me:GetVelocity(); peak = math.max(peak, math.sqrt(v.X ^ 2 + v.Y ^ 2)) end
+            if me and me:IsValid() then local v = me:GetVelocity(); local sp = math.sqrt(v.X ^ 2 + v.Y ^ 2); peak = math.max(peak, sp) end
         end)
     end)
     local home

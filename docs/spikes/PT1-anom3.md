@@ -60,3 +60,10 @@ bunny all pass), `20261022-032241` 26/27 (only the Tesla firing check failed), `
   The bunny only wakes by the host's distance (`IsPlayerInRange`); the test calls `PushFx` directly on the host instead of walking the guest into the creature.
 - Abductor and Can Opener do not exist in this build's classes.
 - Final runs: normal 25/26 (20261022-040137, only guest_pushed_by_bunny failed: the guest's peak speed check is timing-flaky, it passed in 20261022-032241), noanom3 21/26 (20261022-040447: fails the 5 pickpocket and bunny checks).
+
+## 2026-11-17 lane bunnypush: guest_pushed_by_bunny
+
+- Observation: the push is real. Guest log after `g.anom3.push`: 1054 uu/s at once, 591 -> 116 uu/s over ~0.4 s (run `20261117-122729-bunnypush-anomalies3`).
+- Derived: the check was wrong. The guest reports its 50 ms peak once per second; the report with the peak could arrive while the earlier `guest_hurt_by_bunny` check polled, and the old check only read the latest report. `maxSpd` is now updated in `poll()`.
+- The scenario also called `PlayerPusher:FireImpulse()` itself; with `noanom3` that alone pushed the guest to 791 uu/s, so the mutation did not fail the check. Removed it (PushFx alone: guest peak 276 uu/s horizontal, 0 with `noanom3`).
+- Runs: 3x 26/26 (`20261117-125636`, `-125808`, `-125936`), `noanom3` 21/26 incl. guest_pushed_by_bunny (`20261117-125513-...-noanom3`).
