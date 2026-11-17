@@ -42,7 +42,7 @@ return function(T)
                 if not archetype and (name:find("wheel") or name:find("tire") or name:find("tyre")) then archetype=a.Instance.Archetype end
             end)
             if not archetype then -- the fixture may hold no loose wheel: use the spare wheel's archetype
-                local P="/Game/Gameplay/Inventory/Items/Car/Wheels/Wheel_Spare_01/IA_Attach_Wheel.IA_Attach_Wheel"
+                local P="/Game/Gameplay/Inventory/Items/Car/Wheels/Wheel_Spare_01/IA_Attach_Wheel_Spare.IA_Attach_Wheel_Spare"
                 archetype=StaticFindObject(P)
                 if not alive(archetype) then pcall(LoadAsset,P); archetype=StaticFindObject(P) end
             end

@@ -1495,3 +1495,20 @@ Trunk after Tier 2 + a gateway/setpiece exit; guest feeds an anchor -> energy af
 Lucky Junk Heap, Health shelter, sees acid puddles; guest leaves the car right after a junction; guest opens the route planner during the
 tutorial; split up >5000 uu and walk the guest into a Spark Tower / bunny / bounce pad / nudge pad; parked car: guest wheels/doors still
 right after the host drives off; FPS A/B with PT|perf fps lines.
+
+## 2026-11-17 oldchecks lane (suite checks failing on main and 8efa25e)
+Mod bugs (real, timing) vs checks (wrong). Root cause of two: a guest intent waits for the zone baseline (net.lua `held`, ~30 s after a
+join), meanwhile the host's car state message overwrote the guest's own change (hold was 4 s).
+- guestparts guest_door_stays_repaired: MOD. Guest repair sent at +4 s of baseline wait, host state undid it. car.healHold (guestact.lua
+  sets it on send, held 4 s, 64 s while net.lifecycle() is not active; car.slotHeld in applyState). Mutation healholdoff: check fails (72/73,
+  20261117-1550xx); with fix 72/73 (flaky no_ghosts only) then 73/73.
+- guestswap guest_slot_empty_and_stays_so: MOD, same race for a part swap (guestswap HOLD +60 s while baseline is not complete). Race needs
+  a swap in the first ~30 s of a join and a host state message in the gap; not reproduced on the oldchecks pair, so the mutation
+  swapholdshort does NOT fail the scenario (timing luck); fix by reasoning from 20261117-152339-soak-guestswap logs.
+- playerhealth: CHECK. Quiet name tag shows health only when hurt, so otherPct() reads no percent line as 100. Also the guest's lethal
+  hit came 3 s after the arrival transition, inside health.lua's 8 s no-death grace (then the game regenerates): scenario waits for the
+  transition to end + 10 s.
+- keyedges: CHECK. The isolated env lacked PTNative_ObjectIdentity=false and pc:GetFullName (common.identity calls GetAddress).
+- itemphysics: CHECK. Spawns the spare wheel archetype when the fixture holds no loose wheel.
+- safety: HARNESS. run-test.ps1 gave host and guest the same -port; the guest's auto-listen main menu took the host's port. Guest
+  processes now listen on Port+500 (+1, +2 for client3/4). safety 30/30 x3, session 40/40, sessionrejoin 36/36.

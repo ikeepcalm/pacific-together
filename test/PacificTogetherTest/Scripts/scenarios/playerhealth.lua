@@ -81,6 +81,8 @@ return function(T)
     add({ check = "guest_sees_host_damaged", timeout = 90, cond = function() return near(otherPct(), 50) end })
     add({ run = function() adjust(0.3) end })
     add({ check = "guest_health_healed", timeout = 5, cond = function() return near(pct(), 100) end })
+    -- health.lua: no death within 8 s of the arrival transition (a level loads at the minimum), and the game regenerates after ~4 s
+    add({ check = "guest_arrival_settled", timeout = 90, cond = function() local tr = package.loaded["transition"]; return not (tr and tr.state().phase) end })
     add({ wait = 10 })
     add({ run = function() adjust(-1.0) end }) -- dead
     -- respawn: health back, no travel, still connected, the host's car/character near
