@@ -204,14 +204,19 @@ LoopInGameThreadWithDelay(16,function()
 end)
 -- A saved host world can already lack foliage before any break observer runs.
 local presence,readyAt=nil,0
-RegisterLoadMapPreHook(function()presence=nil;readyAt=os.clock()+5 end)
+local lastPresence -- see g.foliage.presence below
+RegisterLoadMapPreHook(function()presence=nil;lastPresence=nil;readyAt=os.clock()+5 end)
 local function vegetation(mesh)
     return mesh and mesh:find('^/Game/') and (mesh:find('/Trees/',1,true)or mesh:find('/Shrubs/',1,true))
 end
 local function inside(p,c,r)return(p.X-c.X)^2+(p.Y-c.Y)^2+(p.Z-c.Z)^2<r*r end
 local function finite(v)return v and v==v and math.abs(v)<1e8 end
+-- lastPresence: the host resends the same rows every second while the car stands: rebuilding the component list each time
+-- (FindAllOf + GetWorld) was the guest's crash site in two soaks (AV in prepare_to_handle, 20261117-122320, -161732)
 net.on('g.foliage.presence',function(_,data)
     if common.netMode()~='client' or not net.hostSupports('foliage-state')or #data>30000 then return end
+    if data==lastPresence and os.getenv('PT_MUTATE')~='presenceeach' then return end
+    lastPresence=data
     local header,body=data:match('^([^\n]+)\n(.*)$');if not header then return end
     local epoch,x,y,z,r=header:match('^([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)$')
     x,y,z,r=tonumber(x),tonumber(y),tonumber(z),tonumber(r)
