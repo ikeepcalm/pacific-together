@@ -437,9 +437,10 @@ function M.dumpUse(d) -- guest: also the scenario's entry point
     net.toHost("g.st.dump", dumpKey(d))
 end
 net.on("g.st.dump", function(pc, key)
+    log("PT|st dump intent received %s", tostring(key))
     if not host() or NODUMP then return end
     local d = dumpAt(key)
-    if not (d and d.AllowHighlightInteraction) then return end
+    if not (d and d.AllowHighlightInteraction) then log("PT|st dump refused at %s (heap %s)", key, tostring(d and d.AllowHighlightInteraction)); return end
     local ch = valid(pc) and pc.Pawn
     if valid(ch) then
         local p, q = ch:K2_GetActorLocation(), d:K2_GetActorLocation()
@@ -451,13 +452,13 @@ net.on("g.st.dump", function(pc, key)
 end)
 net.on("g.st.dumpst", function(_, data)
     if not guest() or NODUMP then return end
-    for line in data:gmatch("[^
-]+") do
+    for line in data:gmatch("[^\n]+") do
         local key, allow, uses = line:match("^([^|]+)|([01])|(%d+)$")
         local d = key and dumpAt(key)
         if d then d.AllowHighlightInteraction = allow == "1"; d.Uses = tonumber(uses) end
     end
 end)
+local dumpSentAt = 0 -- E debounce
 local dumpMuted = {}
 RegisterLoadMapPreHook(function() dumpMuted = {} end)
 common.onKey("E", function()
@@ -466,7 +467,10 @@ common.onKey("E", function()
     local cur = hm and hm.CurrentHighlight
     if not valid(cur) then return end
     local d = cur:GetOwner()
-    if valid(d) and d:GetClass():GetFName():ToString() == DUMP and d.AllowHighlightInteraction then M.dumpUse(d) end
+    if valid(d) and d:GetClass():GetFName():ToString() == DUMP and d.AllowHighlightInteraction and os.clock() - dumpSentAt > 1 then
+        dumpSentAt = os.clock()
+        M.dumpUse(d)
+    end
 end)
 LoopInGameThreadWithDelay(1000, function()
     if NODUMP or not safety.active() then return end
@@ -482,8 +486,7 @@ LoopInGameThreadWithDelay(1000, function()
         for _, d in ipairs(FindAllOf(DUMP) or {}) do
             if real(d) then L[#L + 1] = dumpKey(d) .. "|" .. (d.AllowHighlightInteraction and "1" or "0") .. "|" .. d.Uses end
         end
-        if #L > 0 then net.toGuests("g.st.dumpst", table.concat(L, "
-")) end
+        if #L > 0 then net.toGuests("g.st.dumpst", table.concat(L, "\n")) end
     end
 end)
 

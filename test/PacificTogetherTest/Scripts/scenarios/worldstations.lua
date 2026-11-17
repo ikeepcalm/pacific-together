@@ -4,7 +4,7 @@
 --   shelter     BP_Boon_Frame_Shelter_Health: the host's copy reaches the guest passive with its resource, the guest's own copy is gone
 --   acid glob   BP_Hazard_AcidGlob: replicated the moment it begins play (not at the next 1 s sweep) and seen by the guest
 --   feed        "%d item{s} put into dumpster 03" is logged formatted
--- Mutations: nodumpster (heap intent + mute off), noboons (shelter not replicated), noglobhook (glob only by sweep), nofeedfmt is a code revert.
+-- Mutations: nodumpster (heap intent + mute off), noboons (shelter not replicated), noglobhook (glob only by sweep), nofeedfmt (raw feed log).
 return function(T)
     local L = require("scenarios.sessionlib")(T)
     local UEHelpers = require("UEHelpers")
@@ -71,7 +71,7 @@ return function(T)
         add({ run = function()
             testLevel()
             local l = L.guestChar():K2_GetActorLocation()
-            base = { X = l.X, Y = l.Y + 800, Z = l.Z }
+            base = { X = l.X, Y = l.Y + 300, Z = l.Z }
             send("t.seed", string.format("%.1f|%.1f|%.1f", base.X, base.Y, base.Z))
         end })
         add({ check = "guest_seeded_local_copies", timeout = 60, cond = reported("seeded", "1") })
@@ -94,6 +94,7 @@ return function(T)
         add({ check = "glob_replicated_on_begin_play", timeout = 1, cond = function() return globAtOnce end })
         add({ check = "guest_sees_glob", timeout = 60, cond = reported("glob", "1") })
         -- heap: the guest uses it
+        add({ wait = 30 }) -- the guest's intents are held until its zone baseline (~30-40 s after joining)
         add({ run = function() send("t.use") end })
         add({ check = "host_heap_ran_for_guest", timeout = 30, cond = function()
             T.log("PT|info host heap uses=%d allow=%s", dump.Uses, tostring(dump.AllowHighlightInteraction))
@@ -106,8 +107,15 @@ return function(T)
             T.log("PT|info worldstations guest prizes=%d host prizes=%d", n, #all("BP_WorldItem_C", spot(base, 0), 800))
             return n > 0
         end })
-        add({ check = "guest_heap_shows_host_use", timeout = 30, cond = reported("heapstate", "1|false") })
-        add({ run = function() send("t.feed") end })
+        add({ check = "guest_heap_shows_host_use", timeout = 30, cond = function() poll(); return (got["t.heapstate"] or ""):match("^1|") ~= nil end }) -- the host's Uses came down (allow is back on once the prizes are out)
+        add({ run = function()
+            local STEEL = "/Game/Gameplay/Inventory/Items/Resources/Basic/RawSteel/IA_Resource_Raw_Scrap_Steel.IA_Resource_Raw_Scrap_Steel"
+            local a = StaticFindObject(STEEL)
+            if not a:IsValid() then LoadAsset(STEEL); a = StaticFindObject(STEEL) end
+            local lib = StaticFindObject("/Script/PenDriverInventory.Default__InventoryBlueprintLibrary")
+            T.first("BP_InventoryManager_C").Inventory_Trunk:AddItem(lib:CreateItemInstance(T.world(), a, 0), true)
+            send("t.feedgo")
+        end })
         add({ check = "guest_feed_logged_formatted", timeout = 30, cond = reported("feed", "1") })
         add({ run = function() send("t.done") end })
         add({ wait = 3 })
@@ -155,14 +163,12 @@ return function(T)
         end
         if got["t.use"] then
             got["t.use"] = nil
-            require("stations").dumpUse(localDump)
+            local k = localDump:K2_GetActorLocation()
+            T.log("PT|info worldstations guest sends heap intent")
+            T.intent("g.st.dump", string.format("%.0f,%.0f,%.0f", k.X, k.Y, k.Z)) -- what the E press sends
         end
-        if got["t.feed"] then
-            got["t.feed"] = nil
-            require("overlay").post("%d item{s} put into dumpster 03", "info", "loot.in.test", 2)
-            ExecuteWithDelay(1500, function()
-                PTNative_MsgToHost(T.localPC():GetAddress(), "t.feed", tostring(count("PT|feed (quiet) 2 items put into dumpster 03")))
-            end)
+        if got["t.feedgo"] then
+            PTNative_MsgToHost(T.localPC():GetAddress(), "t.feed", tostring(count("PT|feed (quiet) 1 item put into trunk")))
         end
         if got["t.done"] then finished = true end
     end
