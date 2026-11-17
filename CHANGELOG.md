@@ -3,7 +3,7 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
-## [0.9.5] - unreleased (dev build 2026-11-17, not yet hand-tested)
+## [0.9.5] - 2026-11-17 (preview, not yet hand-tested)
 
 Network protocol **9**, as in 0.9.4; everyone needs 0.9.5 (the mod version must match).
 
@@ -18,6 +18,7 @@ Network protocol **9**, as in 0.9.4; everyone needs 0.9.5 (the mod version must 
 - **Jumper on the charge port:** a guest charging the car through the charge port charges the host's batteries.
 - **Leaving the car after a junction:** the guest can get out about a second after the car arrives instead of waiting up to
   half a minute.
+- **Repairs and part swaps** a guest makes right after joining are no longer undone by the host's car state.
 - **Tutorial:** the guest opening the route planner or looking at mechanic mode ticks the host's objective.
 - **Anomalies when you split up:** a guest far from the host now gets bunnies, bounce pads and nudge pads like the host does
   (Spark Towers, grabbers and part stealers already did).
@@ -28,6 +29,12 @@ Network protocol **9**, as in 0.9.4; everyone needs 0.9.5 (the mod version must 
 ### Changed
 
 - Release builds leave out the test-only native functions.
+
+### Known issues
+
+- Long automated runs still crash now and then on the guest while a new area streams in (loot tick); the crash marker now names
+  the exact step, please send the crash folder.
+- The guest's charge-port jumper works only some of the time in tests.
 
 ## [0.9.4.1] - 2026-11-16
 
