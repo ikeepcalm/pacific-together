@@ -368,18 +368,20 @@ return function(T)
     add({ check = "guest_drive_stopped", timeout = DRIVE_S + 60, cond = function() return got("t.stop") ~= nil end })
     add({ run = function() L.measuring = false; measureMotion(nil, nil, true) end })
     add({check="cosmetics_remain_on_car",timeout=1,cond=function()
-        local pass=true
+        local pass,measured=true,false
         for key,stat in pairs(cosmeticStats)do
             log("PT|info cosmetic %s samples=%d maxDistance=%.2f",key,stat.n,stat.max)
-            if stat.n<30 or stat.max>(key=="key"and 300 or 100) then pass=false end
+            -- a cosmetic the fixture's car does not have (bobble, hanging: 0 samples) is skipped; at least one must be measured
+            if stat.n>0 and (stat.n<30 or stat.max>(key=="key"and 300 or 100)) then pass=false end
+            if stat.n>0 then measured=true end
         end
-        return pass
+        return pass and measured
     end})
     add({check="cosmetics_wobble_in_car_frame",timeout=1,cond=function()
         local pass=true
         for key,stat in pairs(cosmeticStats)do
             log("PT|info cosmetic %s swing=%.3f deg",key,stat.swing or 0)
-            if (stat.swing or 0)<0.1 then pass=false end
+            if stat.n>0 and (stat.swing or 0)<0.1 then pass=false end
         end
         return pass
     end})
