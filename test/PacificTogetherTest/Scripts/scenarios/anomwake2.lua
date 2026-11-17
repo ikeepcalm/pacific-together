@@ -85,7 +85,7 @@ return function(T)
         hurtBy("spikestrip", "strip", -80)
         hurtBy("spikebush", "bush", -80)
         -- a launching pad under the guest (bounce pad, nudge pad): the guest lifts, the far-away host does not
-        local function padTest(name, cls)
+        local function padTest(name, cls, rise)
             local pad, z0, hz0
             add({ run = function() pcall(LoadAsset, CLS[cls]) end }) -- a map loads the class with its pads; the mod hooks it within 2 s of that
             add({ wait = 6 })
@@ -101,13 +101,13 @@ return function(T)
             add({ check = "guest_launched_by_" .. name, timeout = 60, cond = function()
                 poll()
                 T.log("PT|info %s guest z=%.0f max=%.0f (start %.0f)", name, guestZ, guestMaxZ, z0)
-                return guestMaxZ > z0 + 60 -- the pad's 1000 impulse lifts the guest ~100 uu (gravity scale); a standing guest stays within 5
+                return guestMaxZ > z0 + rise -- the pad's 1000 impulse lifts the guest ~100 uu (gravity scale); a standing guest stays within 5
             end })
             add({ check = "host_not_launched_by_" .. name, timeout = 8, cond = L.holds(3, function() return math.abs(T.myPawn():K2_GetActorLocation().Z - hz0) < 60 end) })
             add({ run = function() pad:K2_DestroyActor() end })
         end
-        padTest("bouncepad", "bounce")
-        padTest("nudgepad", "nudge")
+        padTest("bouncepad", "bounce", 60)
+        padTest("nudgepad", "nudge", 200) -- the pad mesh itself rises and lifts a guest ~100 uu without the hook (mutation run), the hook adds repeated launches (~340)
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.end", "1") end })
         add({ wait = 3 })
         return steps
