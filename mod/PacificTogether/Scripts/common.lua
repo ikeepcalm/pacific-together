@@ -118,7 +118,7 @@ local SINGLE = { DrivingGameInstance = true, BP_ResourceManager_C = true, BP_Inv
     BP_CarManager_C = true, BP_StatusEffectManager_C = true, BP_ProgressionManager_C = true, BP_QuestManager_C = true,
     BP_DialogueManager_C = true, MessageSystem = true, InventorySystem = true, BP_SaveGameManager_C = true, BP_MusicManager_C = true,
     BP_ToDManager_C = true, BP_StormManager_C = true,
-    BP_FeedbackManager_C = true } -- carfeel.lua: ~500 lookups a minute on a rendered host (PT|perf 2026-11-12)
+    BP_FeedbackManager_C = true, BP_HighlightManager_C = true } -- carfeel.lua: ~500 lookups a minute on a rendered host (PT|perf 2026-11-12)
 local singles = {}
 local rawFirst = FindFirstOf
 function FindFirstOf(class)
@@ -197,11 +197,22 @@ function M.findPortal(key)
     return best
 end
 
+-- ~40 per-frame loops asked every frame (three engine calls each: the biggest fixed cost of a joined session, PT|perf 2026-11-17):
+-- kept 50 ms, and dropped at every map load
+local nmAt, nmVal = -1, nil
+local function nmForget() nmVal = nil end
+RegisterLoadMapPreHook(nmForget)
+RegisterLoadMapPostHook(nmForget)
 function M.netMode()
+    local t = os.clock()
+    if nmVal and t - nmAt < 0.05 then return nmVal end
     local ksl, wco = UEHelpers.GetKismetSystemLibrary(), UEHelpers.GetWorldContextObject()
-    if not wco or not wco:IsValid() then return "none" end
-    if ksl:IsStandalone(wco) then return "standalone" end
-    return ksl:IsServer(wco) and "listen" or "client"
+    local v
+    if not wco or not wco:IsValid() then v = "none"
+    elseif ksl:IsStandalone(wco) then v = "standalone"
+    else v = ksl:IsServer(wco) and "listen" or "client" end
+    nmAt, nmVal = t, v
+    return v
 end
 
 return M

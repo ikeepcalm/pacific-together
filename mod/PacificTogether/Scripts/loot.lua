@@ -669,6 +669,7 @@ local function onAdd(id, what, x, y, z, yaw, state)
     if e then return end
     local kind = id:sub(1, 1)
     if not replica.adopt(replicas, id) then return end
+    M.motionBusy = true -- a pose may already wait for this entity
     local a
     if kind == "L" then
         a = claim("BP_Lootable_Base_C", x, y, z, function(o) return ids.path2(o:GetClass()) == what end)
@@ -833,6 +834,7 @@ local function acceptPoses(_, data)
     if replicas.epoch ~= epoch then
         replicas = replica.new(epoch)
         for id, e in pairs(ents) do if e.kind == "W" then replica.adopt(replicas, id) end end
+        M.motionBusy = true
     end
     for row in rows:gmatch("[^\n]+") do
         local f = {}; for v in row:gmatch("[^|]+") do f[#f + 1] = v end
@@ -841,7 +843,7 @@ local function acceptPoses(_, data)
             local n = tonumber(f[i]); if not n or n ~= n or math.abs(n) > (i == 2 and 9007199254740991 or 1e8) then valid = false end
             f[i] = n
         end
-        if valid then replica.offer(replicas, epoch, f[1], f[2], f) end
+        if valid then replica.offer(replicas, epoch, f[1], f[2], f); M.motionBusy = true end
     end
 end
 net.on("g.motion.items", acceptPoses)
@@ -1081,6 +1083,7 @@ local function handle(l, guest, pc)
             local e = ents[id]
             local p, r = { X = tonumber(f[3]), Y = tonumber(f[4]), Z = tonumber(f[5]) }, { Pitch = tonumber(f[7]) or 0, Yaw = tonumber(f[6]), Roll = tonumber(f[8]) or 0 }
             e.motion = e.motion or {}
+            M.motionBusy = true -- the per-frame guest loop below has work again
             itemMotion.push(e.motion, p, r, os.clock(), e.actor:K2_GetActorLocation(), e.actor:K2_GetActorRotation())
         end)
     elseif op == "N" and not guest then
@@ -1126,6 +1129,7 @@ local function handle(l, guest, pc)
         local a = common.resolve(pendingDrops[f[3]])
         pendingDrops[f[3]] = nil
         if alive(a) and not ents[id] and replica.adopt(replicas, id) then
+            M.motionBusy = true
             claimed[a:GetFullName()] = common.lease(a)
             register(id, "W", a)
             freezeItem(a)
@@ -1249,6 +1253,9 @@ LoopInGameThreadWithDelay(50, function()
 end)
 LoopInGameThreadWithDelay(16, function()
     if common.netMode() ~= "client" then return end
+    -- nothing offered or adopted since the last pass and no item still gliding: the walk over every entity finds nothing (0.6 ms a frame on a guest)
+    if not M.motionBusy then return end
+    local busy = false
     for id, e in pairs(ents) do
         local pose = replica.take(replicas, id)
         if pose and entityAlive(e) then
@@ -1268,7 +1275,9 @@ LoopInGameThreadWithDelay(16, function()
             e.actor:K2_SetActorLocationAndRotation(p, r, false, {}, true)
             if (not m.lastReceivedAt or os.clock()-m.lastReceivedAt>1) and (#m==1 or (u>=1 and b==m[#m]))then e.motion=nil end
         end
+        if e.motion then busy = true end
     end
+    M.motionBusy = busy
 end)
 
 RegisterLoadMapPreHook(function() replicas = replica.new(nil) end)
