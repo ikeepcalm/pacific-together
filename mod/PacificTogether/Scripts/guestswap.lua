@@ -75,7 +75,8 @@ local function swapHook(self, _, interact, success)
     local s = slotItem(name)
     if not s then return end
     local spec = s.item and ids.spec(s.item) or "-"
-    held[name] = os.clock() + HOLD
+    -- the intent waits for the zone baseline (net.lua held): keep our part until it is sent and the host has answered
+    held[name] = os.clock() + HOLD + ((net.lifecycle() == "active" or os.getenv("PT_MUTATE") == "swapholdshort") and 0 or 60)
     log("PT|swap send %s %s", name, spec)
     net.toHost("g.swap.set", name .. "\t" .. spec)
 end

@@ -277,6 +277,8 @@ local function flushHeals()
     for key, e in pairs(healPend) do
         if e.slot then
             log("PT|act send heal %s %.3f (tool)", e.slot, e.amount)
+            -- the intent waits for the zone baseline (net.lua held): until the host has applied it, its state would undo the repair here
+            if os.getenv("PT_MUTATE") ~= "healholdoff" then car.healHold[e.slot] = os.clock() + 4 + (net.lifecycle() == "active" and 0 or 60) end
             net.toHost("g.act.heal", e.slot .. "	" .. e.amount)
         else
             log("PT|act send heal wreck %s %.3f", e.id, e.amount)

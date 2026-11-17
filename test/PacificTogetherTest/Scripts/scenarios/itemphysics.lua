@@ -41,7 +41,12 @@ return function(T)
                 local name=a.Instance.Archetype:GetFName():ToString():lower()
                 if not archetype and (name:find("wheel") or name:find("tire") or name:find("tyre")) then archetype=a.Instance.Archetype end
             end)
-            assert(archetype,"no loose wheel archetype in garage fixture")
+            if not archetype then -- the fixture may hold no loose wheel: use the spare wheel's archetype
+                local P="/Game/Gameplay/Inventory/Items/Car/Wheels/Wheel_Spare_01/IA_Attach_Wheel_Spare.IA_Attach_Wheel_Spare"
+                archetype=StaticFindObject(P)
+                if not alive(archetype) then pcall(LoadAsset,P); archetype=StaticFindObject(P) end
+            end
+            assert(alive(archetype),"no wheel archetype")
             local l=L.own():K2_GetActorLocation()
             at={X=l.X+500,Y=l.Y+500,Z=l.Z+150}
             local xf={Rotation={X=0,Y=0,Z=0,W=1},Translation=at,Scale3D={X=1,Y=1,Z=1}}

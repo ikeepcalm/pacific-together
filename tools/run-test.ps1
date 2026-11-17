@@ -230,13 +230,15 @@ function Start-Side($s, $life) {
         $env:PT_JOIN = if ($s.Role -eq "client" -and $AutoJoin -contains $Scenario) {
             if ($Tunnel -and $Mutate -ne "tunnelbypass") { "10.77.0.1:$Port" } else { "127.0.0.1:$Port" }
         } else { "" }
+        # a guest process listens too (auto-listen in its own solo game and main menu): its own port, not the host's, or the join times out
+        $listen = if ($s.Role -eq "host") { $Port } else { $Port + 500 + [array]::IndexOf(@("client", "client3", "client4"), $s.Name) }
         $exe = Join-Path $s.Bin "PenDriverPro-Win64-Shipping.exe"
         # -nullrhi: no rendering, ~1 GB RAM and no GPU per instance, so many lanes can test at once; screenshots need a normal run
-        $gameArgs = if ($Headless) { "-NotInstalled", "-nullrhi", "-nosound", "-log", "-port=$Port" } else {
+        $gameArgs = if ($Headless) { "-NotInstalled", "-nullrhi", "-nosound", "-log", "-port=$listen" } else {
             Add-Type -AssemblyName System.Windows.Forms
             $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea  # side by side, half the screen each (see play-local.ps1)
             $rx = [int]($wa.Width / 2) - 16
-            "-NotInstalled", "-windowed", "-ResX=$rx", "-ResY=$([int]($rx * 9 / 16))", "-WinX=$(if ($s.Role -eq 'host') { 0 } else { [int]($wa.Width / 2) })", "-WinY=0", "-log", "-port=$Port"
+            "-NotInstalled", "-windowed", "-ResX=$rx", "-ResY=$([int]($rx * 9 / 16))", "-WinX=$(if ($s.Role -eq 'host') { 0 } else { [int]($wa.Width / 2) })", "-WinY=0", "-log", "-port=$listen"
         }
         $s.Proc = Start-Process $exe -ArgumentList $gameArgs -WorkingDirectory $s.Bin -PassThru
         $s.Started = Get-Date

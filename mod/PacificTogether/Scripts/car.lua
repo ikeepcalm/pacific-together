@@ -1511,7 +1511,7 @@ local function retryHealth(name, arch, value)
             if slotName(slot) == name then item = itemOf(slot) end
         end) end
         if item and archPath(item) ~= arch then healthTargets[name] = nil; return end
-        if not (M.holdSlot and M.holdSlot(name)) and item and cm then
+        if not M.slotHeld(name) and item and cm then
             local m = manifestation(cm, name)
             local c = m and propComps(m)
             local h = c and readPart(c)
@@ -1542,6 +1542,10 @@ do
     end
 end
 
+-- guest: slots whose state the host's message must not overwrite yet: a swap (holdSlot, guestswap.lua) or a repair (healHold, guestact.lua)
+M.healHold = {}
+function M.slotHeld(name) return (M.holdSlot and M.holdSlot(name)) or (M.healHold[name] ~= nil and M.healHold[name] > os.clock()) end
+
 -- apply the host's state to our own car inventory (the manifestations on the replicated car follow it)
 local function applyState(data)
     local cm, cont = carManager(), equipped()
@@ -1568,7 +1572,7 @@ local function applyState(data)
         local slot = e:get()
         local name = slotName(slot)
         local want, it = parts[name], itemOf(slot)
-        if M.holdSlot and M.holdSlot(name) then return end -- the guest just swapped this part itself (guestswap.lua)
+        if M.slotHeld(name) then return end -- the guest just swapped or repaired this part itself (guestswap.lua, guestact.lua)
         if not want then
             healthTargets[name] = nil
             if it then slot:RemoveAllItems({}); changed = changed + 1; log("PT|car part removed %s", name); if ov.settled() then ov.post("%d car part{s} changed by the host", "info", "carpart") end end
