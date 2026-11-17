@@ -438,16 +438,16 @@ function M.dumpUse(d) -- guest: also the scenario's entry point
 end
 net.on("g.st.dump", function(pc, key)
     log("PT|st dump intent received %s", tostring(key))
-    if not host() or NODUMP then return end
+    if not host() or NODUMP or type(key) ~= "string" or #key > 60 then return end
     local d = dumpAt(key)
     if not (d and d.AllowHighlightInteraction) then log("PT|st dump refused at %s (heap %s)", key, tostring(d and d.AllowHighlightInteraction)); return end
+    -- the guest must stand at the heap (no body = no use)
     local ch = valid(pc) and pc.Pawn
-    if valid(ch) then
-        local p, q = ch:K2_GetActorLocation(), d:K2_GetActorLocation()
-        if (p.X - q.X) ^ 2 + (p.Y - q.Y) ^ 2 + (p.Z - q.Z) ^ 2 > 600 ^ 2 then return end
-    end
+    if not valid(ch) then return end
+    local p, q = ch:K2_GetActorLocation(), d:K2_GetActorLocation()
+    if (p.X - q.X) ^ 2 + (p.Y - q.Y) ^ 2 + (p.Z - q.Z) ^ 2 > 600 ^ 2 then return end
     d[DUMP_USE](d, d.Highlight, nil)
-    log("PT|st dump used at %s (uses %d)", key, d.Uses)
+    log("PT|st dump used at %s (uses %s)", key, tostring(d.Uses))
     ov.post(ov.nameOf(pc) .. " opened a junk heap", "info", "st.dump")
 end)
 net.on("g.st.dumpst", function(_, data)
@@ -484,7 +484,7 @@ LoopInGameThreadWithDelay(1000, function()
     elseif host() and #net.guests() > 0 then
         local L = {}
         for _, d in ipairs(FindAllOf(DUMP) or {}) do
-            if real(d) then L[#L + 1] = dumpKey(d) .. "|" .. (d.AllowHighlightInteraction and "1" or "0") .. "|" .. d.Uses end
+            if real(d) then L[#L + 1] = dumpKey(d) .. "|" .. (d.AllowHighlightInteraction and "1" or "0") .. "|" .. (tonumber(d.Uses) or 0) end
         end
         if #L > 0 then net.toGuests("g.st.dumpst", table.concat(L, "\n")) end
     end

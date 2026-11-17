@@ -1514,14 +1514,15 @@ end
 -- Inventory_Trunk nil (the part sits in its slot, nothing installs it again: no cells until a rejoin, playtest 2026-11-15), and a swap
 -- rebuilds the container under a fill in flight (half the items lost): both rebuild it with the game's call and refill from the host's last state.
 do
-    local at = -math.huge
+    local at, tries = -math.huge, 0 -- at most 5 rebuilds per map (a trunk that stays nil for a reason is not rebuilt every 3 s forever)
+    RegisterLoadMapPreHook(function() tries = 0 end)
     function M.trunkFix(cm, parts)
         local tier = parts["Internal.InventoryStorageTierThree"] and 3 or parts["Internal.InventoryStorageTierTwo"] and 2
-        if not tier or os.clock() - at < 3 or os.getenv("PT_MUTATE") == "notrunkfix" then return end
+        if not tier or tries >= 5 or os.clock() - at < 3 or os.getenv("PT_MUTATE") == "notrunkfix" then return end
         local im = FindFirstOf("BP_InventoryManager_C")
         local t = im and im.Inventory_Trunk
         if t and t:IsValid() then return end
-        at = os.clock()
+        at, tries = os.clock(), tries + 1
         local ok, err = pcall(function() cm:UpgradeCarStorageTrunk(tier) end)
         log("PT|car trunk missing: storage tier %d %s", tier, ok and "applied" or tostring(err))
         require("loot").reapply("I:Inventory_Trunk")

@@ -460,7 +460,8 @@ local function moved(a, b) return math.abs(a.X - b.X) + math.abs(a.Y - b.Y) + ma
 local sent, beat = {}, 0
 -- host: the hazard list is refetched every 5 s (and on a map load), the 4 Hz position pass only checks the kept objects
 local hazards, hazardsAt = {}, -99
-RegisterLoadMapPreHook(function() hazardsAt = -99 end)
+local still, seen = {}, {} -- per hazard name, kept across refetches: since when it has stood still, where it was last checked
+RegisterLoadMapPreHook(function() hazardsAt, still, seen = -99, {}, {} end)
 -- host perf (world.lua:455 = 11 ms a call in the 2026-11-15 expedition): names and the world-item filter are read once per refetch,
 -- and a hazard that has not moved for 10 s is only checked on the 2 s full pass (beat % 8 == 0)
 local function eachHazard(fn, full)
@@ -472,8 +473,14 @@ local function eachHazard(fn, full)
     end
     local now = os.clock()
     for _, h in ipairs(hazards) do
-        if h.o:IsValid() and (full or not h.still or now - h.still < 10 or M.mutate == "nohazardidle") then
-            if fn(h.o, h.n) then h.still = nil elseif not h.still then h.still = now end
+        local n = h.n
+        if h.o:IsValid() and (full or not still[n] or now - still[n] < 10 or M.mutate == "nohazardidle") then
+            local l, c = fn(h.o, n) -- its location and its floating core's (a grabber's core moves inside a still actor)
+            local p = seen[n]
+            if l then
+                if p and not moved(p, l) and not (c and (not p.c or moved(p.c, c))) then still[n] = still[n] or now else still[n] = nil end
+                seen[n] = { X = l.X, Y = l.Y, Z = l.Z, c = c and { X = c.X, Y = c.Y, Z = c.Z } }
+            end
         end
     end
 end
@@ -492,8 +499,8 @@ LoopInGameThreadWithDelay(250, function()
                 sent[n] = { X = l.X, Y = l.Y, Z = l.Z, c = c and { X = c.X, Y = c.Y, Z = c.Z } }
                 L[#L + 1] = string.format("%s\t%.1f\t%.1f\t%.1f", n, l.X, l.Y, l.Z)
                     .. (c and string.format("\t%.1f\t%.1f\t%.1f", c.X, c.Y, c.Z) or "")
-                return p ~= nil -- moved (a first send after the 2 s reset is not a move)
             end
+            return l, c
         end, beat % 8 == 0)
         if #L > 0 then net.toGuests("g.world.pos", table.concat(L, "\n")) end
     end)

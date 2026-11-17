@@ -139,13 +139,22 @@ net.on("g.act.gate", function(pc, data)
     ov.post(ov.nameOf(pc) .. " summoned the gateway", "good")
 end)
 
+local anchorAt = {} -- guest controller address -> os.clock() of its last deposit
 net.on("g.act.anchor", function(pc, data)
     if not hostCar() then return end
+    -- the item goes into the bank (permanent energy): only anchor items, one deposit per guest per 2 s
+    if type(data) ~= "string" or #data > 300 or not data:find("^/Game/Gameplay/Inventory/Items/Resources/Anchor/[%w_/]+%.IA_Resource_Anchor[%w_]*$") then
+        log("PT|act anchor refused %s", tostring(data):sub(1, 120)); return
+    end
+    local who = pc and pc:GetAddress() or 0
+    if os.clock() - (anchorAt[who] or -10) < 2 then log("PT|act anchor refused (too soon)"); return end
+    anchorAt[who] = os.clock()
     local gob
     for _, o in ipairs(FindAllOf("BP_Carpart_Internal_Gobbler_C") or {}) do if valid(o) then gob = o break end end
     local arch = StaticFindObject(data)
     if not (gob and valid(arch)) then log("PT|act anchor: no gobbler or archetype %s", data); return end
-    local inst = arch:CreateInstance(UEHelpers.GetWorldContextObject(), 0)
+    local okInst, inst = pcall(function() return arch:CreateInstance(UEHelpers.GetWorldContextObject(), 0) end)
+    if not (okInst and inst) then log("PT|act anchor: no instance of %s", data); return end
     -- the game's own deposit: the anchor item goes into the ARC's anchor inventory (OnSlotItemAdded gobbles it: charge once), where the
     -- post-run deposit banks it as garage energy. The charge call alone left no item to bank (0 energy after a run, 2026-11-15).
     local banked = false
@@ -289,7 +298,21 @@ local function healHook(self)
     if guest() then confirm("heal", self:get().TargetedActor) end
 end
 local function batHook(self)
-    if guest() then confirm("bat", self:get().TargetedActor) end
+    if not guest() then return end
+    local t = self:get()
+    local actor = t.TargetedActor
+    -- the jumper on the charge port: on the guest the charge never reaches a battery component (no chargeNote, guestact port
+    -- check failed 2026-11-17), so the jumper's own charge amount goes to the host's g.act.bat (ChargeAllBatteries there)
+    -- by the actor's class: the guest's slot lookup (car.equipped) missed the port now and then
+    if os.getenv("PT_MUTATE") ~= "noportask" and valid(actor) and actor:GetClass():GetFName():ToString():find("ChargePort", 1, true) then
+        local o = {}
+        local ok = pcall(function() t.BP_BatteryChargerComponent:GetChargeAmount(o) end)
+        local amount = tonumber(o.Amount) or 0
+        log("PT|act send bat Internal.ChargePort %.3f (port, read=%s)", amount, tostring(ok))
+        if amount > 0.005 then net.toHost("g.act.bat", "Internal.ChargePort\t" .. amount) end
+        return
+    end
+    confirm("bat", actor)
 end
 
 local function fuelHook(self, src, dst, _, moved)
