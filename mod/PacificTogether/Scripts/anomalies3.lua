@@ -10,7 +10,7 @@ local safety = require("safety")
 local ov = require("overlay")
 local log = common.log
 
-local M = { enabled = os.getenv("PT_MUTATE") ~= "noanom3", fix = os.getenv("PT_MUTATE") ~= "noanomtesla", debug = os.getenv("PT_ANOM_DEBUG") ~= nil, pushed = 0, applied = 0 } -- the test mutation switches the module off
+local M = { enabled = os.getenv("PT_MUTATE") ~= "noanom3", fix = os.getenv("PT_MUTATE") ~= "noanomtesla" and os.getenv("PT_MUTATE") ~= "noanomwake2", debug = os.getenv("PT_ANOM_DEBUG") ~= nil, pushed = 0, applied = 0 } -- the test mutation switches the module off
 local function try(what, fn, ...)
     local ok, err = pcall(fn, ...)
     if not ok then log("PT|error anomalies3 %s %s", what, tostring(err)) end
@@ -330,6 +330,57 @@ net.on("g.anom3.push", function(_, data)
         me.CharacterMovement:AddImpulse({ X = d.X / len * v, Y = d.Y / len * v, Z = d.Z / len * v + 200 }, true)
         M.applied = M.applied + 1
         log("PT|anom3 bunny push applied")
+    end)
+end)
+
+-- ---------------------------------------------------------------- bounce pad launches a guest (docs/spikes/anomwake2.md)
+
+-- The pad's begin-overlap fires on the host for the guest's pawn there, but only the host's own character gets "Impulse Player" (the branch tests
+-- the owner against BP_MainCharacterManager's CharacterActor; anything else must be physics-simulating). So a guest was never launched. The host
+-- hooks the begin-overlap, and for a guest pawn tells the guest to do the launch itself: zero its vertical velocity, add the pad's up impulse.
+local PAD = "/Game/Gameplay/Hazards/BouncePad/BP_Hazard_BouncePad.BP_Hazard_BouncePad_C:BndEvt__Box_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature"
+local padHooked, padCool = false, {}
+M.bounced = 0
+LoopInGameThreadWithDelay(2000, function()
+    if padHooked then return end
+    padHooked = pcall(RegisterHook, PAD, function(self, _, other)
+        if not (M.enabled and M.fix and safety.active() and not safety.guest()) then return end
+        try("bounce", function()
+            local pad, who = self:get(), other:get()
+            for _, pc in ipairs(net.guests()) do
+                if pc:IsValid() and pc.Pawn and pc.Pawn:IsValid() and pc.Pawn:GetAddress() == who:GetAddress() then
+                    local key, now = pad:GetFName():ToString(), os.clock()
+                    if (padCool[key] or 0) > now then return end
+                    padCool[key] = now + 1.5 -- the pad's own re-arm delay (ReArmTimerOnPlayerLaunch), not read
+                    local u = pad:GetActorUpVector()
+                    net.toGuest(pc, "g.anom3.bounce", string.format("%.3f\t%.3f\t%.3f\t%.0f", u.X, u.Y, u.Z, pad.LaunchPlayerImpulseAmount))
+                    -- the host's copy of the guest's movement takes the same impulse, else its replay of the guest's moves corrects the guest back down
+                    local hcm = who.CharacterMovement
+                    local v = hcm.Velocity
+                    hcm.Velocity = { X = v.X, Y = v.Y, Z = 0 }
+                    hcm:AddImpulse({ X = u.X * pad.LaunchPlayerImpulseAmount, Y = u.Y * pad.LaunchPlayerImpulseAmount, Z = u.Z * pad.LaunchPlayerImpulseAmount }, true)
+                    M.bounced = M.bounced + 1
+                    log("PT|anom3 bounce pad %s launches the guest", key)
+                end
+            end
+        end)
+    end)
+    if padHooked then log("PT|anom3 bounce pad hook registered") end
+end)
+
+net.on("g.anom3.bounce", function(_, data)
+    if not (M.enabled and safety.guest()) then return end
+    try("apply bounce", function()
+        local x, y, z, a = data:match("^(%-?[%d%.]+)\t(%-?[%d%.]+)\t(%-?[%d%.]+)\t([%d%.]+)$")
+        local pc = UEHelpers.GetPlayerController()
+        local me = x and pc and pc:IsValid() and pc.Pawn or nil
+        if not (me and me:IsValid()) then return end
+        local cm, v = me.CharacterMovement, me.CharacterMovement.Velocity
+        a = tonumber(a)
+        cm.Velocity = { X = v.X, Y = v.Y, Z = 0 }
+        cm:AddImpulse({ X = tonumber(x) * a, Y = tonumber(y) * a, Z = tonumber(z) * a }, true)
+        M.applied = M.applied + 1
+        log("PT|anom3 bounce pad launched the guest (%s, mode %s)", data:gsub("\t", " "), tostring(cm.MovementMode))
     end)
 end)
 
