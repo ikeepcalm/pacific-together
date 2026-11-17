@@ -1430,3 +1430,68 @@ b/ue4ss/run-04/05.log (the full UE4SS.log of direct starts is not archived; only
     "Last Lua" car.lua:1218/1324 are 1 ms riding loops, not suspects.
 13. Side bug (verified): car.lua:347 probe() calls fn() without args, the BP_HealthComponent probes (car.lua:368-373) index nil self:
     12,870 errors in one host log; part-health dirty flag never set from them. Also guest feed `%d item{s} put into dumpster` unformatted.
+
+## 2026-11-17 unattended (owner away ~10 h; from 8efa25e / 0.9.4.1, lanes on Sonnet, lead on the main pair)
+
+Lead notes with every result folder: local/resume/pt21-wave2.md; lane progress: local/progress.log; lane spikes in docs/spikes
+(stations, carexit, trunkenergy, tutorial, anomwake, anomwake2, nudgepad, craftcrash, guestwait, removedmesh, perf2 in its merge).
+No hand testing happened: nothing rendered, felt or heard is proven. Commit messages carry the pass counts and mutations.
+
+### Fixed (scenario + failing mutation unless noted)
+- Guest trunk with no cells after a transition, and the Tier 2 spill: rebuilt + refilled from the host's last state (trunktravel 20/20,
+  notrunkfix 18/20).
+- 0 energy after a run: the game banks anchors itself on TravelToGarage(2); the guest's deposit never put an anchor item into the host's
+  anchor inventory. Now it does; the host validates the intent (anchor paths, 2 s per guest) (exitdeposit 24/24, noanchorbank 22/24).
+- Loot dupe (W1): the host echoed a guest's container state back to it; a take right after opening was undone on the guest and never
+  sent, so both kept the item (playpath p2 failed 5/6 runs since 2026-11-01; echoapply mutation, racy).
+- World stations: Lucky Junk Heap (friendly dumpster) is a guest intent run by the host; Health shelter boon; acid glob replicated on
+  begin play; quiet-feed log formatted (worldstations 26/26, 4 mutations).
+- Guest charge-port jumper sends its charge amount (port found by class). guestact port check still flaky (3/7 passes): hand check.
+- Guest leaves the car ~1 s after a junction instead of after the whole zone baseline (30-88 s headless) (zoneexit, carintentwait).
+- Tutorial: route planner / mechanic-mode steps done by the guest reach the host (storytask, nostorytask).
+- Anomalies near a guest far from the host: bunny range hook, bounce pad, nudge pad (anomwake 22/22, anomwake2 25/25); Spark Tower,
+  PlayerRange hazards, part stealer, spike strip/bush already worked (now regression checks).
+- Perf: guest foliage scan cache (4 ms per job measured), loot 100 ms loop early exit, host hazard positions idle cadence, host foliage
+  poll, HighlightManager singleton, guest wheel/door loops parked skip, item-motion gate. perfzone: guest logged Lua
+  48-49 s -> ~37-39 s per 4 min, host 32-33 -> 25-29 s (headless, loaded PC, noisy; measured with a netMode cache that was
+  later removed, a49c16b, so a little less now). Real FPS not measured.
+- 1.0 gates: T08 (package builds main.dll with PT_PUBLIC, rejects test natives), T09 (nametag nofade 22/24), F1 lag/loss (TASKS row),
+  L9 soak (below).
+- Stale or racy checks fixed: carsync (host takes the wheel first; cosmetics the fixture lacks), visual door + removed mesh twin,
+  zoneexit (real exit intent, passenger door), carfeel (as carsync), anomalies3 bunny peak race, exitdeposit slow guest, playpath bot
+  standing spot. radioshared's D:/PTLanes path was already gone.
+
+### Soak (L9), 11:52-13:53
+39 runs (runloop/playpath/lootsync/sessiontravel rotation) on C:\PTLanes\soak: 34 pass, 2 crashes, 3 playpath bot flakes (fixed in
+the scenario). Both crashes: AV reading 0x100000001 in UE4SS prepare_to_handle -> FFieldClassVariant::GetFName while a Lua loop walked
+FindAllOf results 10 s after a zone load (host loot backlog scan, soak 20261117-115440; guest foliage presence loop, 20261117-122320).
+Guess: objects of a streaming sublevel still async-loading. Hardening d29730e (loot scan + foliage skip AsyncLoading/Unreachable) is
+unproven; a clean soak on the candidate is still owed. Note: the soak pair's Mods junction points at the main checkout, so the soak ran
+the live tree (3f3d015 -> d29730e), not a pinned commit (tools/soak.ps1 -Data does not pin; the pair's junctions decide).
+
+### Full suite (run-suite.ps1, 3 shards on 3 pairs, 13:36-15:15, live main d29730e+)
+72/81 passed (local/test-results/suite-20261117-*-{1,2,3}of3.txt). Failures and targeted reruns:
+- anomalies2 guest_pulled_by_grabber (2/2): caused by perf2's 50 ms netMode cache; cache removed (a49c16b), 27/27 again.
+- guestact: the flaky port-jumper check; rerun 36/36.
+- Pre-existing, also failing on 8efa25e (bisect pair, junctions repointed): guestswap guest_slot_empty_and_stays_so, keyedges (scenario
+  error common.lua:54 GetAddress on nil), playerhealth (host reads guest % from the name tag; quiet tag since 2026-10-30; 23/26 since
+  2026-11-01), guestparts guest_door_stays_repaired.
+- Known flaky: damagefeedback reused_payload (21/22 also 2026-11-07; 22/22 once at 8efa25e), safety (guest's own solo game keeps
+  listening on the same test port, the join then times out; 19/30 also on 2026-11-12), itemphysics (garage fixture has no loose wheel).
+
+### Not reproduced / open
+- Guest settings-menu crash: Graphics page + 25 tab switches on a rendered guest in the garage, no crash. Crafting crash: craftcrash
+  scenario (crafting UI path before/after a guest death) 21/21. Both need the owner's hands; keep the crash folders.
+- guestparts guest_door_stays_repaired fails on 8efa25e too (pre-existing since a 0.9.x change); guestparts is flaky under load
+  (a different extra check each run).
+- Garage-return crash: runloop's zone->garage returns pass (also lagged); hit props covered by foliage/carbreak; trailer stairs = hand check.
+- g.car.ctl / g.car.drive still wait for the zone baseline; NudgePad's aim toward an anomaly not mirrored (guest gets a plain up impulse).
+
+Final smoke on the candidate (0.9.5 version bump on a49c16b): session 40/40, travel 23/23, body 20/20, sessionrejoin 36/36,
+zonejoin 14/14 (safety: the race above).
+
+### Owner hand checks (next session)
+Trunk after Tier 2 + a gateway/setpiece exit; guest feeds an anchor -> energy after the run; guest jumper on the charge port; guest uses a
+Lucky Junk Heap, Health shelter, sees acid puddles; guest leaves the car right after a junction; guest opens the route planner during the
+tutorial; split up >5000 uu and walk the guest into a Spark Tower / bunny / bounce pad / nudge pad; parked car: guest wheels/doors still
+right after the host drives off; FPS A/B with PT|perf fps lines.

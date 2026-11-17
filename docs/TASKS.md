@@ -30,13 +30,13 @@ Client notifications, damage feedback, passenger controls and item physics: [PT4
 
 | Work | Starting points | Completion evidence |
 |---|---|---|
-| Guest anchor duplication | `loot.lua`, `guestact.lua`; 0.0.7 known issues | Guest pickup removes the host anchor; energy can be deposited only once; mutation fails |
-| Guest tutorial progress | `story.lua`, `progression.lua`; Oppy/tutorial whiteboard | Reproduce a guest-only tutorial step and prove the intended host progress |
-| Passenger re-entry pose | `car.lua`, `zoneexit` | Rendered passenger-door re-entry after travel; guest stays in the passenger seat |
+| Guest anchor duplication | 2026-11-17: no repro (`anchordup` 23/23); a guest-fed anchor is banked once (`exitdeposit`, mutation `noanchorbank`) | Close after a hand run confirms |
+| Guest tutorial progress | 2026-11-17: route planner / mechanic mode steps done by the guest reach the host (`storytask`, [spike](spikes/tutorial.md)); CraftedItem, scanning, PlayerInCar unchecked | Rendered guest opens the planner; remaining step kinds |
+| Passenger re-entry pose | 2026-11-17: headless `zoneexit` keeps the guest on the passenger seat after re-entry (37/37) | Rendered pose check |
 | T06: full-run playtest | Packaged `PacificTogether.exe`, `tools/play-local.ps1` | Garage, junctions, gateway, death/failure, leave/rejoin; both logs and observed defects |
 | T10 / R10: DLC handshake and compatibility | `session.lua`, game files from an authorized copy | Report ownership; establish which base/DLC combinations actually load, without assuming support |
-| F1: current lag/loss regression | Tunnel emulation, `run-test.ps1` | Core gameplay and travel at 150 ms / 2% loss, with results; early tunnel passes alone are insufficient |
-| L9: two-hour soak | Run-loop scenarios and fixtures | Repeated runs without crash or observed desync; retain logs |
+| F1: current lag/loss regression | 2026-11-17 at 150 ms / 2%: session 46/46, runloop 55/55, lootsync 40/40, playpath 45/45, carsync 51/53 (fixture cosmetics, fixed since); NOTES "2026-11-17 unattended" | Repeat on the release candidate |
+| L9: two-hour soak | 2026-11-17: 39 runs, 2 crashes (same AV class, hardened in d29730e, unproven), 3 bot flakes (fixed); NOTES "2026-11-17 unattended" | A clean 2 h soak on the candidate |
 | Q9: firewalled crash proof | `tools/q9-firewall.ps1`, `crashfw`, [spike](spikes/M2-safety.md) | Owner's elevated test-copy run verifies the upload block |
 | T01: reproducible atlas build | `tools/kdis`, `tools/pak`, `local/atlas/tools` | A fresh clone builds its atlas from its own game copy; no game data committed |
 
