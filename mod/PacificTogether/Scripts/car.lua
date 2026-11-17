@@ -776,7 +776,10 @@ end)
 net.on("g.car.exit", function(pc, what)
     if common.netMode() ~= "listen" then return end
     local char, car = guestChar(pc), theCar(true)
-    if not char or not car or not same(char:GetAttachParentActor(), car) then return end
+    if not char or not car or not same(char:GetAttachParentActor(), car) then
+        log("PT|car exit ignored: char=%s car=%s attached=%s", tostring(char ~= nil), tostring(car ~= nil), tostring(char ~= nil and car ~= nil and same(char:GetAttachParentActor(), car)))
+        return
+    end
     -- the game does not let the driver out of a fast car either; the guest stood in the way of the rolling car and died (2026-11-15).
     -- "force" (the unstick) always leaves.
     local okv, v = pcall(function() return car:GetVelocity() end)
