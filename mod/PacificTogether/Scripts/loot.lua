@@ -1048,6 +1048,10 @@ local function handle(l, guest, pc)
     elseif op == "S" and ents[id] then
         local layoutIntent=not guest and ents[id].kind=='P' and f[3]:find(';@',1,true)
         if layoutIntent and (not pc or not net.peerSupports(pc,'wreck-state')or not validLayout(f[3]:match(';(.*)$')))then return end
+        -- the host echoes our own state back; if we changed the container since (a take right after opening), applying the
+        -- echo would put the item back here and our newer state would never be sent: host kept it too (playpath p2, dupe)
+        local e0 = ents[id]
+        if guest and (e0.kind == 'L' or e0.kind == 'I') and f[3] == e0.last and os.getenv("PT_MUTATE") ~= "echoapply" then return end
         log("PT|loot got S %s (%s)", id, f[3]:sub(1, 80))
         local before = ents[id].n
         applyState(ents[id], f[3])
