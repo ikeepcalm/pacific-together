@@ -1192,6 +1192,7 @@ end)
 -- where the tick's time goes, one line a minute (FPS hunt 2026-11-01: ~1 s a minute on both sides in a zone)
 local spent, spentAt = {}, os.clock()
 local function timed(name, fn, ...)
+    common.crumb("loot tick " .. name) -- the crash marker names the phase (soak 20261117-154638: guest AV inside the tick)
     local t = os.clock()
     local a, b = fn(...)
     spent[name] = (spent[name] or 0) + os.clock() - t
