@@ -69,14 +69,20 @@ return function(T)
         add({ check = "host_listen_garage", timeout = 30, cond = function() return T.netMode() == "listen" and T.listening() end })
         add({ check = "host_guest_in_garage", timeout = 240, cond = function() return S.guestChar() ~= nil end })
         add({ wait = 5 })
+        -- the host takes the wheel first: the driver's door gives a guest the wheel only while nobody drives (guest driving, 0.9.2;
+        -- carfeel failed host_guest_seated since then, same as carsync before 5203dff)
+        add({ run = function()
+            S.char = T.myPawn(); L.forcePossess(L.car(), S.char)
+            pcall(function() local m = T.first("BP_CarManager_C"); m["Set PlayerCarState"](m, 1) end) -- the game's entry sets it, Possess does not
+        end })
+        add({ check = "host_in_car", timeout = 20, cond = function() return L.possessing(L.car()) end })
+        add({ run = function() send("t.hostin") end })
         add({ check = "host_guest_seated", timeout = 240, cond = function()
             local g, car = S.guestChar(), L.car()
             if not g or not car or not attached(g, car) then return false end
-            return L.d(L.toLocal(car, g:K2_GetActorLocation()), L.passengerLocal(car, T.myPawn())) < 5
+            return L.d(L.toLocal(car, g:K2_GetActorLocation()), L.passengerLocal(car, S.char or T.myPawn())) < 5
         end })
         add({ wait = 3 })
-        add({ run = function() S.char = T.myPawn(); L.forcePossess(L.car(), S.char) end })
-        add({ check = "host_in_car", timeout = 20, cond = function() return L.possessing(L.car()) end })
 
         -- engine off, then on
         add({ run = function()
@@ -181,6 +187,7 @@ return function(T)
     add({ check = "client_in_garage", timeout = 400, cond = function() return T.netMode() == "client" and T.map() == "RB_Garage" and T.cls(T.myPawn()) == T.CHAR end })
     add({ wait = 8 })
     add({ check = "guest_one_car", timeout = 60, cond = function() local cs = L.cars(); return #cs == 1 and #L.localCopies() == 0 end })
+    add({ check = "host_sat_down", timeout = 300, cond = function() return got("t.hostin") ~= nil end })
     add({ run = function()
         local car, c = L.car(), T.myPawn()
         local l = car:K2_GetActorLocation()
