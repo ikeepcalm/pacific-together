@@ -145,8 +145,19 @@ net.on("g.act.anchor", function(pc, data)
     for _, o in ipairs(FindAllOf("BP_Carpart_Internal_Gobbler_C") or {}) do if valid(o) then gob = o break end end
     local arch = StaticFindObject(data)
     if not (gob and valid(arch)) then log("PT|act anchor: no gobbler or archetype %s", data); return end
-    gob:AddingAnchorCompleteLogic(arch:CreateInstance(UEHelpers.GetWorldContextObject(), 0))
-    log("PT|act anchor %s", data)
+    local inst = arch:CreateInstance(UEHelpers.GetWorldContextObject(), 0)
+    -- the game's own deposit: the anchor item goes into the ARC's anchor inventory (OnSlotItemAdded gobbles it: charge once), where the
+    -- post-run deposit banks it as garage energy. The charge call alone left no item to bank (0 energy after a run, 2026-11-15).
+    local banked = false
+    if os.getenv("PT_MUTATE") ~= "noanchorbank" then
+        banked = pcall(function()
+            local o = {}
+            FindFirstOf("BP_InventoryManager_C"):GetAnchorInventories(o)
+            if not o.GobblerInventory:AddItem(inst, true) then error("full") end
+        end)
+    end
+    if not banked then gob:AddingAnchorCompleteLogic(inst) end
+    log("PT|act anchor %s banked=%s", data, tostring(banked))
     ov.post(ov.nameOf(pc) .. " deposited an anchor", "good")
 end)
 

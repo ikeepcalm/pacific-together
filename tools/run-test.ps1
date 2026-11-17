@@ -81,6 +81,10 @@ $Defaults.seatepoch = @(2, 300)
 $AutoJoin += "seatepoch"
 $Defaults.threeplayer = @(3, 900)
 $AutoJoin += "threeplayer"
+$Defaults.trunktravel = @(2, 900)
+$AutoJoin += "trunktravel"
+$Defaults.exitdeposit = @(2, 1200)
+$AutoJoin += "exitdeposit"
 # per-run Engine.ini additions, restored after the run; the mutations in skip run without them
 $IniEdits = @{ zonejoin = @{ client = "[/Script/OnlineSubsystemUtils.IpNetDriver]`r`nResolutionConnectionTimeout=120`r`n"; skip = @("noconfig", "cdo") } }
 # M6: the shipping mod's Steam lobby/join runs in these scenarios only (test runs keep it off so they never touch the owner's Steam presence);

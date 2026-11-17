@@ -1510,6 +1510,24 @@ local function retryHealth(name, arch, value)
     common.defer(250, retry)
 end
 
+-- guest trunk: the grid is the Tier 2/3 upgrade logic's container (OnInstall -> SetNewInventoryTrunk). A fresh map leaves the guest's
+-- Inventory_Trunk nil (the part sits in its slot, nothing installs it again: no cells until a rejoin, playtest 2026-11-15), and a swap
+-- rebuilds the container under a fill in flight (half the items lost): both rebuild it with the game's call and refill from the host's last state.
+do
+    local at = -math.huge
+    function M.trunkFix(cm, parts)
+        local tier = parts["Internal.InventoryStorageTierThree"] and 3 or parts["Internal.InventoryStorageTierTwo"] and 2
+        if not tier or os.clock() - at < 3 or os.getenv("PT_MUTATE") == "notrunkfix" then return end
+        local im = FindFirstOf("BP_InventoryManager_C")
+        local t = im and im.Inventory_Trunk
+        if t and t:IsValid() then return end
+        at = os.clock()
+        local ok, err = pcall(function() cm:UpgradeCarStorageTrunk(tier) end)
+        log("PT|car trunk missing: storage tier %d %s", tier, ok and "applied" or tostring(err))
+        require("loot").reapply("I:Inventory_Trunk")
+    end
+end
+
 -- apply the host's state to our own car inventory (the manifestations on the replicated car follow it)
 local function applyState(data)
     local cm, cont = carManager(), equipped()
@@ -1554,6 +1572,7 @@ local function applyState(data)
             if tier then
                 local ok, err = pcall(function() cm:UpgradeCarStorageTrunk(tier) end)
                 log("PT|car trunk storage tier %d %s", tier, ok and "applied" or tostring(err))
+                if os.getenv("PT_MUTATE") ~= "notrunkfix" then require("loot").reapply("I:Inventory_Trunk") end
             end
             if ov.settled() then ov.post("%d car part{s} changed by the host", "info", "carpart") end
         end
@@ -1571,6 +1590,7 @@ local function applyState(data)
             elseif want.h then retryHealth(name, want.arch, want.h) end
         else healthTargets[name] = nil end
     end)
+    M.trunkFix(cm, parts)
     if changed > 0 then
         pcall(function() cm:UpdateAggregateFuel() end)
         pcall(function() cm:UpdateAggregateBattery() end)
