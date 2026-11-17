@@ -283,7 +283,7 @@ function M.post(fmt, kind, key, n)
     if not LOUD then
         local keep = false
         for _, k in ipairs(KEEP) do if fmt:find(k, 1, true) then keep = true break end end
-        if not keep then log("PT|feed (quiet) %s", fmt); return end
+        if not keep then log("PT|feed (quiet) %s", os.getenv("PT_MUTATE") == "nofeedfmt" and fmt or label({ fmt = fmt, n = n or 1 })); return end
     end
     push(fmt, kind, key, n)
 end

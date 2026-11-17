@@ -410,4 +410,84 @@ LoopInGameThreadWithDelay(500, function()
     end
 end)
 
+-- World junk heap (BP_WorldStation_FriendlyDumpster, the "friendly dumpster"): a level-placed prize station on each side, in no sync list.
+-- The host's heap is the truth: the guest's use (E on its highlight) is an intent, the host runs the heap's own interact event and its
+-- ItemDispenser puts the prizes out as world items (loot.lua shows them to the guest). The guest's copy has the interact event muted
+-- (PTNative_Mute) so it never rolls prizes of its own; the host's allow/uses come down once a second. Matched by position (150 uu).
+--   g.st.dump  x,y,z            guest -> host: use the heap there
+--   g.st.dumpst x,y,z|allow|uses...  host -> guests
+-- shortcut: no lid/charge animation on the guest (the prizes appear); the 0.5 s hold is skipped. Mutation nodumpster: off.
+local DUMP, NODUMP = "BP_WorldStation_FriendlyDumpster_C", os.getenv("PT_MUTATE") == "nodumpster"
+local DUMP_USE = "BndEvt__Highlight_K2Node_ComponentBoundEvent_0_OnHighlightInteract__DelegateSignature"
+local function dumpKey(d) local l = d:K2_GetActorLocation(); return string.format("%.0f,%.0f,%.0f", l.X, l.Y, l.Z) end
+local function dumpAt(key)
+    local x, y, z = key:match("^(%-?%d+),(%-?%d+),(%-?%d+)$")
+    if not x then return end
+    x, y, z = tonumber(x), tonumber(y), tonumber(z)
+    for _, d in ipairs(FindAllOf(DUMP) or {}) do
+        if real(d) then
+            local l = d:K2_GetActorLocation()
+            if (l.X - x) ^ 2 + (l.Y - y) ^ 2 + (l.Z - z) ^ 2 < 150 ^ 2 then return d end
+        end
+    end
+end
+function M.dumpUse(d) -- guest: also the scenario's entry point
+    if NODUMP or not guest() or not valid(d) then return end
+    log("PT|st dump intent %s", dumpKey(d))
+    net.toHost("g.st.dump", dumpKey(d))
+end
+net.on("g.st.dump", function(pc, key)
+    log("PT|st dump intent received %s", tostring(key))
+    if not host() or NODUMP then return end
+    local d = dumpAt(key)
+    if not (d and d.AllowHighlightInteraction) then log("PT|st dump refused at %s (heap %s)", key, tostring(d and d.AllowHighlightInteraction)); return end
+    local ch = valid(pc) and pc.Pawn
+    if valid(ch) then
+        local p, q = ch:K2_GetActorLocation(), d:K2_GetActorLocation()
+        if (p.X - q.X) ^ 2 + (p.Y - q.Y) ^ 2 + (p.Z - q.Z) ^ 2 > 600 ^ 2 then return end
+    end
+    d[DUMP_USE](d, d.Highlight, nil)
+    log("PT|st dump used at %s (uses %d)", key, d.Uses)
+    ov.post(ov.nameOf(pc) .. " opened a junk heap", "info", "st.dump")
+end)
+net.on("g.st.dumpst", function(_, data)
+    if not guest() or NODUMP then return end
+    for line in data:gmatch("[^\n]+") do
+        local key, allow, uses = line:match("^([^|]+)|([01])|(%d+)$")
+        local d = key and dumpAt(key)
+        if d then d.AllowHighlightInteraction = allow == "1"; d.Uses = tonumber(uses) end
+    end
+end)
+local dumpSentAt = 0 -- E debounce
+local dumpMuted = {}
+RegisterLoadMapPreHook(function() dumpMuted = {} end)
+common.onKey("E", function()
+    if NODUMP or not guest() then return end
+    local hm = common.first("BP_HighlightManager_C")
+    local cur = hm and hm.CurrentHighlight
+    if not valid(cur) then return end
+    local d = cur:GetOwner()
+    if valid(d) and d:GetClass():GetFName():ToString() == DUMP and d.AllowHighlightInteraction and os.clock() - dumpSentAt > 1 then
+        dumpSentAt = os.clock()
+        M.dumpUse(d)
+    end
+end)
+LoopInGameThreadWithDelay(1000, function()
+    if NODUMP or not safety.active() then return end
+    if guest() and PTNative_Mute then
+        for _, d in ipairs(FindAllOf(DUMP) or {}) do
+            if real(d) and not dumpMuted[d:GetAddress()] then
+                PTNative_Mute(d:GetAddress(), DUMP_USE)
+                dumpMuted[d:GetAddress()] = true
+            end
+        end
+    elseif host() and #net.guests() > 0 then
+        local L = {}
+        for _, d in ipairs(FindAllOf(DUMP) or {}) do
+            if real(d) then L[#L + 1] = dumpKey(d) .. "|" .. (d.AllowHighlightInteraction and "1" or "0") .. "|" .. d.Uses end
+        end
+        if #L > 0 then net.toGuests("g.st.dumpst", table.concat(L, "\n")) end
+    end
+end)
+
 return M

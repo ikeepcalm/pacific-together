@@ -41,6 +41,8 @@ local REPLICATED = { "BP_Base_Hazard_C", "BP_ZoneStorm_Base_C", "BP_LevelTransit
 local BOONS = {
     BP_Boon_Healer_C = { power = "HealingPowerRemaining", stop = "EndHeal", depleted = "OnRunOutOfJuice" },
     BP_Boon_Charging_C = { power = "ChargePowerRemaining", stop = "EndCharge", depleted = "PowerDrainedCompletely" },
+    -- the frame shelter that repairs the car (BP_Boon_Shelter_Base: a box overlap, no OutOfJuice flag); the Battery shelters are not covered
+    BP_Boon_Frame_Shelter_Health_C = { power = "HealingPowerRemaining", stop = "EndShelterAbility", sphere = "ActivateShelterOverlap", nojuice = true },
 }
 if M.mutate == "noboons" then BOONS = {} end
 for class in pairs(BOONS) do REPLICATED[#REPLICATED + 1] = class end
@@ -116,7 +118,7 @@ local function snapshot()
     for class, b in pairs(BOONS) do
         each(class, function(o)
             local l = o:K2_GetActorLocation()
-            add("boon", table.concat({ class, f(l.X), f(l.Y), f(l.Z), f(o[b.power]), tostring(o.OutOfJuice) }, "|"))
+            add("boon", table.concat({ class, f(l.X), f(l.Y), f(l.Z), f(o[b.power]), b.nojuice and "false" or tostring(o.OutOfJuice) }, "|"))
         end)
     end
     return table.concat(L, "\n")
@@ -194,7 +196,20 @@ function M.toggleWeather()
     return "Co-op weather: " .. (M.coopWeather and "on (darker, storms, long nights)" or "off (the game's own weather, midday)")
 end
 
+-- An acid thrower's glob lands within a second or two: replicate it as it begins play, not at the next 1 s sweep (the guest saw the
+-- puddles late or not at all, friend playtest 2026-11-15). Mutation noglobhook: the sweep only.
+local GLOB = "/Game/Gameplay/Hazards/AcidGlob/BP_Hazard_AcidGlob.BP_Hazard_AcidGlob_C"
+local globHooked = false
+local function hookGlob()
+    if globHooked or M.mutate == "noglobhook" then return end
+    if not StaticFindObject(GLOB):IsValid() then pcall(LoadAsset, GLOB) end
+    globHooked = pcall(RegisterHook, GLOB .. ":ReceiveBeginPlay", function(self)
+        if safety.active() and not safety.guest() then pcall(common.replicateActor, self:get()) end
+    end)
+end
+
 local function hostTick()
+    try("globhook", hookGlob)
     replicate()
     if M.coopWeather then try("coopweather", spookyTick) end
     local data = snapshot()
@@ -219,9 +234,10 @@ end
 local function split(s) local t = {} for x in (s .. "|"):gmatch("(.-)|") do t[#t + 1] = x end return t end
 
 local function passiveBoon(o, b)
-    if o.Sphere1:GetGenerateOverlapEvents() then
-        o.Sphere1:SetGenerateOverlapEvents(false)
-        o[b.stop](o, false) -- also stops a timer started before the first host snapshot
+    local area = o[b.sphere or "Sphere1"]
+    if area:GetGenerateOverlapEvents() then
+        area:SetGenerateOverlapEvents(false)
+        if b.sphere then pcall(o[b.stop], o) else o[b.stop](o, false) end -- also stops a timer started before the first host snapshot
     end
     o:SetActorTickEnabled(false)
 end
@@ -248,8 +264,9 @@ local function applyBoons(lines)
                 passiveBoon(best, b)
                 best[b.power] = power
                 local depleted = v[6] == "true"
-                if depleted and not best.OutOfJuice then best[b.depleted](best) end
-                best.OutOfJuice = depleted
+                if b.nojuice then depleted = false
+                elseif depleted and not best.OutOfJuice then best[b.depleted](best) end
+                if not b.nojuice then best.OutOfJuice = depleted end
             end
         end
     end
