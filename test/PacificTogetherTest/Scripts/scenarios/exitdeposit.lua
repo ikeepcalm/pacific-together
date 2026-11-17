@@ -92,7 +92,8 @@ return function(T)
     local fed = false
     return {
         T.onMap("RB_MainMenu", 90),
-        { check = "client_in_garage", timeout = 400, cond = function() return T.netMode() == "client" and T.map() == "RB_Garage" and T.cls(T.myPawn()) == T.CHAR end },
+        -- in the garage or already in the zone: the host travels on soon after the join, a slow guest first sees the zone (flaky 2/4 before)
+        { check = "client_in_game", timeout = 400, cond = function() return T.netMode() == "client" and (T.map() == "RB_Garage" or inZone()) and T.cls(T.myPawn()) == T.CHAR end },
         { check = "guest_reports", timeout = 1500, cond = function()
             poll()
             if got["t.feed"] and not fed and inZone() then
