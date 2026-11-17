@@ -173,7 +173,7 @@ return function(T)
     end })
     -- back in through the driver's door, as a player would from where they stand
     add({ wait = 3 })
-    add({ run = function() id = T.act_begin("door_press", {}) end })
+    add({ run = function() id = T.act_begin("door_press", { passenger = true }) end })
     add({ check = "guest_reentered", timeout = 90, cond = function()
         local d, t = T.act_done(id)
         if d and not attached(T.myPawn()) then log("PT|info guest door press: %s", (t or ""):gsub("\n", " / "):sub(1, 300)) end
