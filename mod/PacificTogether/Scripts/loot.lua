@@ -989,6 +989,7 @@ LoopInGameThreadWithDelay(100,function()
     if mode~='listen'and mode~='client'then return end
     if mode=='client'and (not fullAt or net.lifecycle()~='active')then return end
     if mode=='listen'and not next(readyFor) then return end
+    if not next(dirty) and menuBox==nil then return end -- guest perf (loot.lua:988 in 2026-11-15 logs): nothing can match below
     for id,e in pairs(ents)do
         if (e.kind=='I'or e.kind=='L')and not e.busy and not e.pending and e.last then
             local c=e.get()
