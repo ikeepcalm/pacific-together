@@ -45,6 +45,10 @@ local function protected(kind)
         or kind == "g.garage.btn" or kind == "g.garage.charge" or kind == "g.car.ctl" or kind == "g.car.drive"
         or kind == "g.vis.keypad" or kind == "g.car.enter" or kind == "g.car.exit" or kind == "g.car.door" or kind == "g.doc.hp"
 end
+-- seat intents only need the car itself: they do not wait for the loot/world baseline (a guest leaving the car after a junction waited ~10-40 s)
+local function carSeat(kind)
+    return (kind == "g.car.enter" or kind == "g.car.exit" or kind == "g.car.door") and os.getenv("PT_MUTATE") ~= "carintentwait"
+end
 local function permitted(pc, kind, data)
     if common.netMode() ~= "listen" or not protected(kind) then return true end
     local info = require("session").guestInfo(pc)
@@ -144,7 +148,7 @@ function M.toHost(kind, data)
     if protected(kind) and M.hostSupports("intents") then
         -- the host drops intents until our baseline (~40 s after a zone join): a scrap, pickup or trunk take in that window was
         -- lost (lootcar/lootsync2 2026-11-07). They wait here and go out right after g.net.baseline, in order.
-        if not baselineComplete and not (kind == "g.loot.b" and data == "H") then
+        if not baselineComplete and not (kind == "g.loot.b" and data == "H") and not (carSeat(kind) and baselineParts.car) then
             if #held < 2000 then held[#held + 1] = { kind, data } end
             return true
         end
@@ -295,7 +299,7 @@ M.on("g.net.intent", function(pc, data)
         or not protected(kind) or not handlers[kind] or not pc.Pawn:IsValid()
         or ticket ~= peer.ticket or not common.resolve(peer.pawnLease)
         or common.identity(pc.Pawn) ~= peer.pawnLease.key
-        or (not flowFor(pc).baseline and not (kind == "g.loot.b" and payload == "H"))
+        or (not flowFor(pc).baseline and not (kind == "g.loot.b" and payload == "H") and not (carSeat(kind) and flowFor(pc).ready))
         or not require("session").guestInfo(pc) then return end
     peer.serial = n -- Consume before calling: an exception must not replay a partly applied action.
     handlers[kind](pc, payload)
