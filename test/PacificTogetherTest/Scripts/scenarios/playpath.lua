@@ -250,7 +250,7 @@ return function(T)
     actSteps(add, 1, "move_to", function() return { actor = path(copy.a), radius = 60, timeout = 12 } end, 40, nil)
     local n0
     add({ run = function() n0 = carried() end })
-    actSteps(add, 2, "interact", function() return { actor = path(copy.a), approach = false, close_menu = false } end, 40, nil)
+    actSteps(add, 2, "interact", function() return { actor = path(copy.a), approach = true, close_menu = false } end, 40, nil)
     add({ check = "guest_menu_open_after_interact", timeout = 10, cond = menuOpen })
     -- the loot menu's own moves: a stack out of the container into the hand (the grab), the hand into the backpack (the place)
     add({ run = function()

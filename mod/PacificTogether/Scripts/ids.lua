@@ -5,7 +5,10 @@ local UEHelpers = require("UEHelpers")
 
 local M = {}
 
-function M.alive(o) return o and o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) end
+-- also not still being async-loaded (a streamed sublevel's actor whose class is not linked yet) or unreachable: the host crashed in
+-- the loot scan reading a struct off such a resource actor 10 s after a zone load (soak 20261117-115440, AV in push_structproperty)
+local DEAD = EInternalObjectFlags.PendingKill | EInternalObjectFlags.AsyncLoading | EInternalObjectFlags.Unreachable
+function M.alive(o) return o and o:IsValid() and not o:HasAnyInternalFlags(DEAD) end
 
 -- "ItemArchetype /Game/x/IA_A.IA_A" -> "/Game/x/IA_A"
 local function path(a) return (a:GetFullName():match("^%S+ (.+)$"):gsub("%.[^%./]+$", "")) end
