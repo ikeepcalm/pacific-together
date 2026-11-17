@@ -22,6 +22,10 @@ $Suite.mail = "garage"
 $Suite.guestctl = "garage"
 $Suite.travel = ""
 $Suite.body = ""
+# 2026-11-17 (pt21): today's lanes
+$Suite.worldstations = "zone"; $Suite.trunktravel = "garage"; $Suite.exitdeposit = "garage"; $Suite.storytask = "garage"
+$Suite.anomwake = "zone"; $Suite.anomwake2 = "zone"; $Suite.craftcrash = "zone"; $Suite.guestexitmove = "coop-zone"
+$Suite.guestjunction = "coop-zone"; $Suite.foliage = ""; $Suite.carbreak = ""; $Suite.zoneexit = "coop-zone"
 $failed = @(); $ran = 0
 $i = -1
 foreach ($s in $Suite.Keys) {
