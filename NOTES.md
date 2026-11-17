@@ -1512,3 +1512,17 @@ join), meanwhile the host's car state message overwrote the guest's own change (
 - itemphysics: CHECK. Spawns the spare wheel archetype when the fixture holds no loose wheel.
 - safety: HARNESS. run-test.ps1 gave host and guest the same -port; the guest's auto-listen main menu took the host's port. Guest
   processes now listen on Port+500 (+1, +2 for client3/4). safety 30/30 x3, session 40/40, sessionrejoin 36/36.
+
+### Second round 15:30-17:32 (owner's "complete run" ask), candidate b5f4dc8 then main
+- Suite again, b5f4dc8 pinned (worktree C:\PTLanesinal-src, pair junctions repointed): shard 1 37/41, shard 2 ran 22 (18 skipped: fixture junction
+  missing for the first seconds) and the 18 were rerun on main: 18/20. All remaining failures were then rerun on merged main 39c7c9c+:
+  guestswap 33/33, safety 30/30, guestparts 73/73, itemphysics 20/20, playerhealth 27/27 (lane oldchecks fixes: guest heal/swap holds,
+  harness client port +500, three wrong checks). Still flaky: guestact (charge-port jumper; hand check), damagefeedback (since 2026-11-07),
+  mapmark (fails 4/4 after the nudgepad merge 25726da, passes before it; with a guard that hooks the nudge pad only once its class is
+  loaded 1 pass 1 fail: open), playpath under load (bot / menu-open detection, ~1 in 3 soak runs).
+- Lag/loss 150 ms / 2% on the final code (39c7c9c): session 46/46, runloop 55/55, playpath 45/45, lootsync 40/40, carsync 53/53.
+- Soak 2 (15:31-17:32, 34 runs): 9 failed. Crashes: guest loot tick x2 (AV 0x40 / 0x200000040 in auto_construct_object, runs 5 and 9, 7 s
+  after a zone arrival / during host travel; tick phases now leave a breadcrumb, b2c7766) and guest foliage presence loop x1 (run 14,
+  same class as soak 1; the guest now ignores an unchanged presence message, 487df45). Runs 15-34 (live main with both changes) had no
+  crash. Others: playpath x4 (bot), lootsync 39/40 lootables once, runloop weather mismatch once (both under 4-pair load).
+- Not achieved: a clean soak; the guest loot-tick crash cause; mutations for the guestswap hold and the crash hardening.

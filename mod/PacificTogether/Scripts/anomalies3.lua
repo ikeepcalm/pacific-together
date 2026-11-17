@@ -373,7 +373,9 @@ LoopInGameThreadWithDelay(2000, function()
         padHooked = pcall(RegisterHook, PAD, function(self, _, other) launch(self, other) end)
         if padHooked then log("PT|anom3 bounce pad hook registered") end
     end
-    if not nudgeHooked then
+    -- only once the pad's class is loaded: a RegisterHook attempt every 2 s on maps without nudge pads broke mapmark (bisect 25726da)
+    local fn = not nudgeHooked and StaticFindObject(NUDGE)
+    if fn and fn:IsValid() then
         nudgeHooked = pcall(RegisterHook, NUDGE, function(self, cmp) launch(self, cmp, 1000) end)
         if nudgeHooked then log("PT|anom3 nudge pad hook registered") end
     end
