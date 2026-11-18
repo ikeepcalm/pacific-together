@@ -106,7 +106,7 @@ local function pre(rec, p, intercepted)
     M.forwarded = M.forwarded + 1
     if guest then
         net.toHost("g.anom.msg", msg)
-        log("PT|anom damage for host %s", msg)
+        log("PT|anom damage for host %s owner=%s", msg, rec:GetOwner():GetFullName():sub(-60))
         return
     end
     net.toGuest(rec:GetOwner().Controller, "g.anom.msg", msg)
