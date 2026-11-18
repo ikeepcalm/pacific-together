@@ -15,6 +15,7 @@ return function(T)
     local TOL = 500 -- 5 m
     local ticks = 0
     local real, realAt, left -- the other's own report of where it stands
+    local nearDone -- the guest has checked the host's marker while both stand close (it must come before the host moves the guest)
     local partnerWp, ownWp -- where the other / we placed our ARC marker
     local function me() return T.ROLE == "host" and L.own() or T.myPawn() end
     local function addr()
@@ -43,6 +44,7 @@ return function(T)
                     local x, y, z = data:match("^(%-?%d+) (%-?%d+) (%-?%d+)$")
                     partnerWp = { X = tonumber(x), Y = tonumber(y), Z = tonumber(z) }
                 end
+                if kind == "t.near" then nearDone = true end
                 if kind == "t.leave" then left = true; T.console("disconnect") end
             end
         end)
@@ -152,6 +154,9 @@ return function(T)
         add(fly)
         add({ wait = 3 })
         add(markCheck("host_marks_guest_near", false))
+        -- the two scripts start their waits at different moments (join detection, load time): without this the guest was moved 50 m
+        -- before its own near check ran and then fell through the unloaded terrain and respawned next to the host (mapmark 2026-11-17)
+        add({ check = "host_guest_near_checked", timeout = 90, cond = function() return nearDone end })
         add(mark())
         add({ run = function() away(L.guestChar()) end }) -- the guest moves 50 m
         add(markCheck("host_marks_guest_far", true, 4500))
@@ -175,6 +180,7 @@ return function(T)
         { wait = 12 },
         fly,
         markCheck("client_marks_host_near", false),
+        { run = function() send("t.near", "1") end },
         mark(),
         markCheck("client_marks_host_after_guest_moved", true), -- the host moves us 50 m away from it
         mark(),
