@@ -364,8 +364,8 @@ net.on("g.st.hint", function(pc, data)
     local o = {}
     sm:GetHintCost(o)
     local cost = o.Anchors or 0
-    local ca = StaticFindObject("/Game/Gameplay/StatusEffects/Quirks/CA_AnchorJuice_Stable.CA_AnchorJuice_Stable")
-    if not valid(ca) then ca = ids.asset("/Game/Gameplay/StatusEffects/Quirks/CA_AnchorJuice_Stable.CA_AnchorJuice_Stable") end
+    local ca
+    im.CurrencyTable:ForEach(function(k) if valid(k:get()) and k:get():GetFullName():find("CA_AnchorJuice_Stable", 1, true) then ca = k:get() end end)
     if valid(ca) and cost > 0 then im:CurrencyAdjust(ca, -cost) end
     sm:IncrementHintsBought()
     log("PT|st hint paid on the host: cost %s, hints bought %s", tostring(cost), tostring(sm.ConsecutiveHintsBought))

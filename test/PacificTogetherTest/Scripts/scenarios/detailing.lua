@@ -15,7 +15,7 @@ return function(T)
     local TAG = "Car.Equip.Cosmetics.HoodOrnament"
     local ORN = "IA_Cosmetic_Ornament_Basic_01"
     local ORNPATH = "/Game/Gameplay/Inventory/Items/Car/Cosmetic/Ornament/Basic_01/IA_Cosmetic_Ornament_Basic_01.IA_Cosmetic_Ornament_Basic_01"
-    local CAPATH = "/Game/Gameplay/StatusEffects/Quirks/CA_AnchorJuice_Stable.CA_AnchorJuice_Stable"
+    local CAPATH = "/Game/Systems/Spawning/Anchors/CA_AnchorJuice_Stable.CA_AnchorJuice_Stable"
     local function carSlot()
         local box = {}
         im():GetCarEquippedContainer(box)
@@ -27,12 +27,10 @@ return function(T)
         if s:GetNumItems() == 0 then return "empty" end
         return s:GetItem(0).Archetype:GetFName():ToString()
     end
-    local function ornamentActors()
-        local n = 0
-        for _, a in ipairs(FindAllOf("BP_CarPart_Cosmetic_Base_C") or {}) do
-            if alive(a) and not a:GetFullName():find("/Engine/Transient", 1, true) then n = n + 1 end
-        end
-        return n
+    local function ornamentActors() -- 1 when the car's HoodOrnament slot has a part actor (the game's manifestation), else 0
+        local r, r2 = {}, {}
+        T.first("BP_CarManager_C"):GetItemManifestationEquippedInSlot({ TagName = FName(TAG) }, r, r2)
+        return alive(r.Manifestation) and 1 or 0
     end
     local function packOrnaments()
         local n = 0
@@ -86,7 +84,7 @@ return function(T)
         add({ check = "host_car_has_the_ornament", timeout = 90, cond = function() return carArch() == ORN end })
         add({ check = "host_ornament_stays", timeout = 40, cond = L.holds(10, function() return carArch() == ORN end) })
         add({ check = "guest_slot_and_pack_report", timeout = 90, cond = function() return g("t.d.slot") == ORN and g("t.d.pack") == "0" end })
-        add({ check = "guest_car_shows_ornament_actor", timeout = 60, cond = function() local n = tonumber(g("t.d.actors")) or 0; return n > st.base and n == ornamentActors() end })
+        add({ check = "guest_car_shows_ornament_actor", timeout = 60, cond = function() return g("t.d.actors") == "1" and ornamentActors() == 1 end })
 
         -- hints
         add({ run = function()

@@ -90,7 +90,7 @@ end
 local function detailHook(self, other)
     if common.netMode() ~= "client" or not safety.active() or os.getenv("PT_MUTATE") == "nodetailing" then return end
     for _, o in ipairs({ self:get(), other:get() }) do
-        if valid(o) then
+        if type(o) == "userdata" and valid(o) then
             local name = o.SlotName:ToString():match("^Car%.Equip%.(.+)$")
             local s = name and slotItem(name)
             if s and s.slot:GetAddress() == o:GetAddress() then sendSlot(name) end
