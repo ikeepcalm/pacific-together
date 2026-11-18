@@ -15,7 +15,7 @@ local net = require("net")
 local safety = require("safety")
 local log = common.log
 
-local M = { enabled = os.getenv("PT_MUTATE") ~= "noanommove" }
+local M = { enabled = os.getenv("PT_MUTATE") ~= "noanommove", homeKey = os.getenv("PT_MUTATE") ~= "anomrootkey" }
 local SAW, GRAB = "BP_Hazard_SawBlade_C", "BP_Hazard_PhysicsGrabber_C"
 local NEAR = 15000 -- uu from any player
 local function live(o) return o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) and not o:GetFullName():find("Default__", 1, true) end
@@ -32,7 +32,7 @@ end
 -- ---------------------------------------------------------------- host
 
 local hostList, hostAt, sent, beat = {}, -99, {}, 0
-RegisterLoadMapPreHook(function() hostList, hostAt, sent = {}, -99, {} end)
+RegisterLoadMapPreHook(function() hostList, hostAt, sent, homes = {}, -99, {}, {} end)
 
 local function players()
     local r = {}
@@ -53,10 +53,13 @@ local function sawRow(o)
     local l, m, r = o:K2_GetActorLocation(), o.Mount.RelativeLocation, o.StaticMesh.RelativeRotation
     return { l.X, l.Y, m.X, m.Y, m.Z, r.Pitch, r.Yaw, r.Roll, o.StaticMesh:IsVisible() and 1 or 0 }
 end
+local homes = {} -- host: grabber address -> root xy when first seen (the root travels while it hunts, the guest copy's does not)
 local function grabRow(o)
+    local key = o:GetAddress()
     local l, c, cr = o:K2_GetActorLocation(), o.CoreFloatingMesh:K2_GetComponentLocation(), o.CoreFloatingMesh:K2_GetComponentRotation()
     local g, gr = o.SM_PG_Magnet:K2_GetComponentLocation(), o.SM_PG_Magnet:K2_GetComponentRotation()
-    return { l.X, l.Y, c.X, c.Y, c.Z, cr.Pitch, cr.Yaw, cr.Roll, g.X, g.Y, g.Z, gr.Pitch, gr.Yaw, gr.Roll, o.armAnim }
+    if not homes[key] then homes[key] = { l.X, l.Y } end
+    return { homes[key][1], homes[key][2], l.X, l.Y, l.Z, c.X, c.Y, c.Z, cr.Pitch, cr.Yaw, cr.Roll, g.X, g.Y, g.Z, gr.Pitch, gr.Yaw, gr.Roll, o.armAnim }
 end
 
 LoopInGameThreadWithDelay(100, function()
@@ -115,11 +118,37 @@ LoopInGameThreadWithDelay(500, function()
     end)
 end)
 
+
+-- The Abductor's Logic Driver machine does not run in a listen session either (same config 0, probe 2026-11-18): the cone sets state 1
+-- (BP_Hazard_PhysicsGrabber CurrentPatStealerState) and nothing else happens, the grabber just drifts over the car. The machine's calls are the game's
+-- own, so the host makes them: state 1 StartMoveToGrabCar + TICK_MoveToGrabCar (flies to the car, sets 2), 2 StartStartAttack (hook on, sets 3),
+-- 3 StartAttacking + AttackingStateTick (drags the car until EndPull's timer sets 0). Item hunts (state 5) are not driven (probe: MoveToOBJ_TICK did
+-- not home in). shortcut: car hunts only; also drives a grabber whose machine works (it would tick twice), none was seen to run.
+local DRIVE = { [1] = { "StartMoveToGrabCar", "TICK_MoveToGrabCar" }, [2] = { "StartStartAttack" }, [3] = { "StartAttacking", "AttackingStateTick" } }
+local drv = {} -- address -> last driven state
+LoopInGameThreadWithDelay(33, function()
+    if not (M.enabled and M.drive ~= false and safety.active() and not safety.guest()) or #net.guests() == 0 then return end
+    try("drivegrab", function()
+        for _, h in ipairs(hostList) do
+            local o = h.o
+            if h.k == "G" and o:IsValid() then
+                local key, st = o:GetAddress(), o.CurrentPatStealerState
+                local d = DRIVE[st]
+                if d then
+                    if drv[key] ~= st then drv[key] = st; o[d[1]](o); M.grabs = (M.grabs or 0) + 1; log("PT|anommove grabber state %d", st) end
+                    if d[2] and o.CurrentPatStealerState == st then o[d[2]](o) end
+                else drv[key] = nil end
+            end
+        end
+    end)
+end)
+
 -- ---------------------------------------------------------------- guest
 
 local copies, copiesAt = { S = {}, G = {} }, -99 -- the guest's own copies by kind
+local copyHome = {} -- guest: grabber copy address -> its root xy when first seen (before anommove moves it)
 local target = {} -- copy address -> { o, k, v = row, t = when it arrived, shown = { ... } }
-RegisterLoadMapPostHook(function() copies, copiesAt, target = { S = {}, G = {} }, -99, {} end)
+RegisterLoadMapPostHook(function() copies, copiesAt, target, copyHome = { S = {}, G = {} }, -99, {}, {} end)
 
 local function copyAt(k, x, y)
     local now = os.clock()
@@ -130,6 +159,11 @@ local function copyAt(k, x, y)
     for _, o in ipairs(copies[k == "S" and "S" or "G"]) do
         if o:IsValid() then
             local l = o:K2_GetActorLocation()
+            local key = o:GetAddress()
+            if k == "G" and M.homeKey then
+                if not copyHome[key] then copyHome[key] = { l.X, l.Y } end
+                l = { X = copyHome[key][1], Y = copyHome[key][2] }
+            end
             local d = (l.X - x) ^ 2 + (l.Y - y) ^ 2
             if d < bd then best, bd = o, d end
         end
@@ -191,8 +225,11 @@ LoopInGameThreadWithDelay(16, function()
                     local d = (cur.X - to.X) ^ 2 + (cur.Y - to.Y) ^ 2 + (cur.Z - to.Z) ^ 2
                     c:K2_SetWorldLocationAndRotation(d > 3000 ^ 2 and to or glide(cur, to, k), { Pitch = v[i + 3], Yaw = v[i + 4], Roll = v[i + 5] }, false, {}, true)
                 end
-                put(core, 3); put(mag, 9)
-                if t.arm ~= v[15] then t.arm = v[15]; o:AnimateArm(v[15]) end
+                local r, to = o:K2_GetActorLocation(), vec(v, 3) -- the root travels with the hunting grabber (the guest copy's does not replicate)
+                local d = (r.X - to.X) ^ 2 + (r.Y - to.Y) ^ 2 + (r.Z - to.Z) ^ 2
+                if d > 1 then o:K2_SetActorLocation(d > 3000 ^ 2 and to or glide(r, to, k), false, {}, true) end
+                put(core, 6); put(mag, 12)
+                if t.arm ~= v[18] then t.arm = v[18]; o:AnimateArm(v[18]) end
                 o:UpdateCableMesh()
             end
             M.shown = (M.shown or 0) + 1
