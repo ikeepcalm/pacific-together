@@ -133,7 +133,8 @@ local LAYOUT = os.getenv("PT_MUTATE") ~= "nolayout" -- slot by slot (ids.layout)
 local function stateOf(e)
     local c = e.get()
     if not alive(c) then return nil end
-    return (flagsOf(e) or "-") .. ";" .. (LAYOUT and ids.layout(c) or ids.encode(ids.count(c)))
+    local body = LAYOUT and ids.layout(c, true) or (not LAYOUT and ids.encode(ids.count(c)))
+    return body and ((flagsOf(e) or "-") .. ";" .. body) or nil
 end
 -- a move inside a container (same items, other slots) changes no count: the container's own slot events mark it for the next scan
 -- (PDCoopNet's events.lua hooks the same two). Our own apply fires them too; its state then equals e.last and nothing is sent.
