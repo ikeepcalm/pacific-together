@@ -76,6 +76,7 @@ return function(T)
         local steps = {}
         local function add(s) steps[#steps + 1] = s end
         local gpc, guestHp, hostHp0 = nil, -1, -1
+        local spot -- where the guest waits, far from the host: a death respawns it beside the host's car, so every row moves it back
         local copy = { n = -1 } -- the guest's last answer to t.q
         local function poll()
             while true do
@@ -102,6 +103,7 @@ return function(T)
             assert(tesla, "no map Tesla")
             local l = tesla:K2_GetActorLocation()
             local gl = { X = l.X + 400, Y = l.Y, Z = l.Z + 150 }
+            spot = gl
             toGuest("t.tp", string.format("%.0f\t%.0f\t%.0f", gl.X, gl.Y, gl.Z))
             pcall(function() L.guestChar():K2_TeleportTo(gl, { Pitch = 0, Yaw = 0, Roll = 0 }) end)
             tesla:K2_DestroyActor()
@@ -114,6 +116,11 @@ return function(T)
             if open then add({ run = function() T.log("PT|info row %s (%s) not checked: %s", name, wiki, open) end })
             elseif not only or (("," .. only .. ","):find("," .. name .. ",", 1, true)) then
                 local o, hp0, sp
+                add({ run = function() -- the guest back to its far spot (a death respawns it beside the host's car, hosthurt)
+                    toGuest("t.tp", string.format("%.0f	%.0f	%.0f", spot.X, spot.Y, spot.Z))
+                    pcall(function() L.guestChar():K2_TeleportTo(spot, { Pitch = 0, Yaw = 0, Roll = 0 }) end)
+                end })
+                add({ wait = 2 })
                 add({ run = function()
                     toGuest("t.heal", "1")
                     -- a Pilgrim's Floaters outlive its row and would count as extra copies (destroying every class's leftovers crashed the host)
@@ -189,7 +196,7 @@ return function(T)
                 if not (query and query.c == c) then query = { c = c } end
                 query.x, query.y, query.z = tonumber(x), tonumber(y), tonumber(z)
             end
-            if kind == "t.heal" then pcall(function() local rm = T.first("BP_ResourceManager_C"); rm.PlayerHealth:Fill(me) end) end
+            if kind == "t.heal" then pcall(function() local rm = T.first("BP_ResourceManager_C"); local h = rm.PlayerHealth; h:Adjust(rm, h.Maximum - h.Current) end) end -- Fill did not refill
             if kind == "t.tp" and me and me:IsValid() then
                 local x, y, z = data:match("^(%-?[%d%.]+)\t(%-?[%d%.]+)\t(%-?[%d%.]+)$")
                 me:K2_SetActorLocation({ X = tonumber(x), Y = tonumber(y), Z = tonumber(z) }, false, {}, true)

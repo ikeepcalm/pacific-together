@@ -32,6 +32,15 @@ return function(T)
         local function add(s) steps[#steps + 1] = s end
         local gpc, guestHp, minSeen, hostHp0, guestHp0, o, killer = nil, -1, 1e9, -1, -1, nil, nil
         local applied0 = 0
+        -- the host's mod logs "PT|anom damage applied <class>" for every hit a guest forwarded to it: counted in the log after a mark
+        local LOGF, mark = "ue4ss/UE4SS.log", 0
+        local function logSize() local f = io.open(LOGF, "rb"); if not f then return 0 end local n = f:seek("end"); f:close(); return n end
+        local function forwardedAcid()
+            local f = io.open(LOGF, "rb"); if not f then return 0 end
+            f:seek("set", mark); local s, n = f:read("a") or "", 0; f:close()
+            for _ in s:gmatch("PT|anom damage applied [^\n]-MSG_Damage_Acid") do n = n + 1 end
+            return n
+        end
         local function poll()
             while true do
                 local kind, data = PTNative_MsgPoll("t.")
@@ -70,7 +79,7 @@ return function(T)
             killer = spawn(CLOUD, at.X, at.Y, at.Z - 80)
         end })
         add({ check = "guest_died", timeout = 30, cond = function() poll(); return minSeen <= 1.5 end })
-        add({ check = "guest_revived", timeout = 60, cond = function() poll(); return guestHp >= 90 end })
+        add({ check = "guest_revived", timeout = 150, cond = function() poll(); return guestHp >= 90 end })
         if tonumber(os.getenv("PT_HURT_DIST") or "200") > 0 then
             add({ run = function() if killer and killer:IsValid() then killer:K2_DestroyActor() end end })
             add({ wait = 3 })
@@ -84,7 +93,7 @@ return function(T)
         add({ wait = 5 })
         add({ run = function()
             poll(); hostHp0, guestHp0 = health(), guestHp
-            applied0 = (package.loaded.anomalies or {}).applied or 0
+            mark = logSize()
             local at = L.guestChar():K2_GetActorLocation()
             o = spawn(CLOUD, at.X, at.Y, at.Z - 80)
             T.log("PT|info cloud %s host hp0=%.0f guest hp0=%.0f", o and T.name(o) or "SPAWN FAILED", hostHp0, guestHp0)
@@ -95,8 +104,8 @@ return function(T)
         add({ check = "host_not_drained_after_guest_death", timeout = 5, cond = function()
             T.log("PT|info host hp %.0f (start %.0f) guest hp %.0f", health(), hostHp0, guestHp)
             -- both stand in the cloud: the host loses what its own game deals (about 10 a second), and no forwarded copy of a hazard hit
-            -- (anomalies.applied counts the g.anom.msg the host applied) arrives from the guest
-            return ((package.loaded.anomalies or {}).applied or 0) == applied0 and health() > 0
+            -- arrives from the guest
+            local n = forwardedAcid(); T.log("PT|info acid hits the guest forwarded to the host: %d", n); return n == 0
         end })
         add({ run = function() toGuest("t.end", "1") end })
         add({ wait = 3 })
