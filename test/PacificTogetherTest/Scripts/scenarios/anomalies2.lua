@@ -51,6 +51,26 @@ return function(T)
         add({ check = "host_guest_in", timeout = 240, cond = function() return L.guestChar() ~= nil end })
         add({ wait = 8 })
         add({ run = function() gpc = L.remotePCs()[1] end })
+        -- smhost un-froze the host's hazards: they act on a HOST standing nearby too. The zone's Tesla leaves and the guest moves far (> 6000 uu) from
+        -- the host (anomwake2 pattern), so only the guest can be hit and "host not hurt" means something
+        add({ run = function()
+            local tesla
+            for _, o in ipairs(FindAllOf("BP_Hazard_Tesla_C") or {}) do
+                if T.inWorld(o) and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) then tesla = tesla or o end
+            end
+            assert(tesla, "no map Tesla")
+            local l = tesla:K2_GetActorLocation()
+            local gl = { X = l.X + 400, Y = l.Y, Z = l.Z + 150 }
+            PTNative_MsgToGuest(gpc:GetAddress(), "t.tp", string.format("%.0f\t%.0f\t%.0f", gl.X, gl.Y, gl.Z))
+            pcall(function() L.guestChar():K2_TeleportTo(gl, { Pitch = 0, Yaw = 0, Roll = 0 }) end)
+            tesla:K2_DestroyActor()
+        end })
+        add({ check = "host_far_from_guest", timeout = 30, cond = function()
+            local d = T.dist(L.guestChar(), T.myPawn())
+            T.log("PT|info host-guest distance %.0f", d)
+            return d > 6000
+        end })
+        add({ wait = 4 })
         local leech
         for _, k in ipairs({ "leech", "bombrock" }) do
             local cname = k == "leech" and WATCH[1] or WATCH[2]
@@ -169,6 +189,10 @@ return function(T)
                 local kind, data = PTNative_MsgPoll("t.")
                 if not kind then break end
                 if kind == "t.end" then finished = true end
+                if kind == "t.tp" and me and me:IsValid() then
+                    local x, y, z = data:match("^(%-?[%d%.]+)\t(%-?[%d%.]+)\t(%-?[%d%.]+)$")
+                    me:K2_SetActorLocation({ X = tonumber(x), Y = tonumber(y), Z = tonumber(z) }, false, {}, true)
+                end
             end
         end)
     end)

@@ -69,6 +69,26 @@ return function(T)
             T.log("PT|info guest Tesla: %s", h and string.format("role=%d dist=%.0f", h.role, h.dist) or "none")
             return h ~= nil and h.role == 1
         end })
+        -- smhost un-froze the host's hazards: the zone's Tesla leaves and the guest moves far (> 6000 uu) from the host (anomwake2 pattern),
+        -- so only the guest can be hit and "host not hurt" means something
+        add({ run = function()
+            local tesla
+            for _, o in ipairs(FindAllOf("BP_Hazard_Tesla_C") or {}) do
+                if T.inWorld(o) and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) then tesla = tesla or o end
+            end
+            assert(tesla, "no map Tesla")
+            local l = tesla:K2_GetActorLocation()
+            local gl = { X = l.X + 400, Y = l.Y, Z = l.Z + 150 }
+            PTNative_MsgToGuest(gpc:GetAddress(), "t.tp", string.format("%.0f\t%.0f\t%.0f", gl.X, gl.Y, gl.Z))
+            pcall(function() L.guestChar():K2_TeleportTo(gl, { Pitch = 0, Yaw = 0, Roll = 0 }) end)
+            tesla:K2_DestroyActor()
+        end })
+        add({ check = "host_far_from_guest", timeout = 30, cond = function()
+            local d = T.dist(L.guestChar(), T.myPawn())
+            T.log("PT|info host-guest distance %.0f", d)
+            return d > 6000
+        end })
+        add({ wait = 4 })
         -- pickpocket: a Part Stealer within reach of the guest takes a backpack item (the game only reaches for the host's character)
         local stealer
         add({ check = "guest_has_items", timeout = 30, cond = function() poll(); return guestBag >= 1 end })
@@ -94,13 +114,18 @@ return function(T)
         -- bunny: the guest sees it and its push hurts the guest
         local bunny
         add({ run = function()
-            poll(); guestHp0, hostHp0 = guestHp, health()
+            poll(); guestHp0, hostHp0, maxSpd = guestHp, health(), 0 -- the Pufferfish pushes on its own as soon as the guest is in range (smhost): baselines at the spawn
             bunny = spawn(CLS.bunny, nearGuest(400, 0))
             T.log("PT|info spawned bunny %s guestHp=%.0f hostHp=%.0f", T.name(bunny), guestHp0, hostHp0)
         end })
         sees("bunny")
         add({ run = function()
-            poll(); guestHp0, hostHp0, maxSpd = guestHp, health(), 0
+            -- the Pufferfish runs its own AI now (smhost) and wandered off: bring it back to the guest right before the push
+            local x, y, z = nearGuest(150, 0)
+            bunny:K2_SetActorLocation({ X = x, Y = y, Z = z }, false, {}, true)
+            local ok, r = pcall(function() return bunny.PlayerPusher.Radius end)
+            T.log("PT|info bunny PushRadius=%s dist to guest=%.0f", tostring(ok and r), T.dist(bunny, L.guestChar()))
+            poll(); hostHp0 = health() -- the guest baselines stay at the spawn: the bunny's own push or this one both count
             pcall(function() bunny:PushFx() end) -- the game's push step (damage 0.1 intensity, radial force) as a touch starts it
             T.log("PT|info bunny push sent")
         end })
