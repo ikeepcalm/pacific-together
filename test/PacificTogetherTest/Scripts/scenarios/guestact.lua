@@ -113,7 +113,15 @@ return function(T)
         end
         error("tool not in the backpack: " .. want)
     end
-    local function tool(cls) for _, x in ipairs(FindAllOf(cls) or {}) do if x:IsValid() then return x end end end
+    -- the held tool: the earlier ones (replaced by hold()) linger in FindAllOf until the GC runs, and a call on such a stale one never
+    -- reached the hook the mod sets (guestact port check, flaky since 2026-11-17); the live one is the last that is not pending kill
+    local function tool(cls)
+        local r
+        for _, x in ipairs(FindAllOf(cls) or {}) do
+            if x:IsValid() and not x:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) then r = x end
+        end
+        return r
+    end
     local function sendDone() PTNative_MsgToHost(T.localPC():GetAddress(), "t.done", "1") end
     local steps = { T.onMap("RB_MainMenu", 90) }
     local function add(s) steps[#steps + 1] = s end
