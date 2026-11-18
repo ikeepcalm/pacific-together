@@ -77,6 +77,12 @@ return function(T)
         local hist, first, range = {}, {}, {} -- row -> part -> samples (last 50) / first sample / host's largest deviation
         local gseen = {} -- row -> part -> { n, ok, first, far } from the guest's reports
         local gHp
+        local SMC = StaticFindObject("/Script/SMSystem.SMStateMachineComponent")
+        local function smState(o)
+            local c = o:GetComponentByClass(SMC)
+            local i = c:IsValid() and c.R_Instance
+            return (i and i:IsValid()) and i:GetActiveStateName():ToString() or ""
+        end
         local function poll()
             while true do
                 local kind, data = PTNative_MsgPoll("t.")
@@ -117,7 +123,20 @@ return function(T)
                 T.log("PT|info anomvis spawned %s at %.0f %.0f %.0f valid=%s", r[1], l.X, l.Y, l.Z, tostring(not dead(o)))
             end
             PTNative_MsgToGuest(gpc:GetAddress(), "t.watch", table.concat(w, ";"))
-            LoopInGameThreadWithDelay(100, function() -- the host's samples
+            local tick, probeDrop = 0, 0
+            LoopInGameThreadWithDelay(100, function() -- the host's samples (the guest's reports are read here too, not only in the checks: the queue is bounded)
+                tick = tick + 1
+                poll()
+                if tick % 50 == 1 and actors.blacksmith and not dead(actors.blacksmith) then
+                    pcall(function()
+                        local b = actors.blacksmith
+                        if smState(b) == "Pre-Drop" then
+                            probeDrop = probeDrop + 1
+                            if probeDrop == 3 then b:OnDrop(); T.log("PT|info anomvis blacksmith OnDrop called") end
+                        end
+                        T.log("PT|info anomvis blacksmith probe state=%s cylinder z=%.0f pounderState=%s inRange=%s", smState(b), b.Cylinder.RelativeLocation.Z, tostring(b.RockPounderState), tostring(b.PlayerInRange))
+                    end)
+                end
                 for name, o in pairs(actors) do
                     if not dead(o) then
                         local ok, err = pcall(function()
@@ -138,6 +157,9 @@ return function(T)
         end })
         add({ wait = 40 })
         for _, r in ipairs(ROWS) do
+            if r[1] == "blacksmith" then -- its machine stands in Pre-Drop on the listen host (spikes/anomvis.md): nothing moves, logged only
+                add({ run = function() poll(); T.log("PT|info anomvis blacksmith: host Cylinder rel z=%.0f, state=%s", actors.blacksmith.Cylinder.RelativeLocation.Z, smState(actors.blacksmith)) end })
+            else
             add({ check = "guest_" .. r[1] .. "_follows", timeout = 30, cond = function()
                 poll()
                 local movers, good, top, topn = {}, false, 0, ""
@@ -147,12 +169,13 @@ return function(T)
                         local s = gseen[r[1]][part]
                         local line = string.format("%s host range %.0f guest %s", part, rg, s and string.format("n=%d ok=%d far=%.0f best=%.0f last g=%.0f,%.0f,%.0f h=%.0f,%.0f,%.0f", s.n, s.ok, s.far, s.best, s.last[1], s.last[2], s.last[3], s.hlast[1], s.hlast[2], s.hlast[3]) or "none")
                         movers[#movers + 1] = line
-                        if s and s.n >= 5 and s.ok / s.n >= 0.6 and s.far >= 20 then good = true end
+                        if s and s.n >= 5 and s.far >= 20 and (s.ok / s.n >= 0.6 or (s.n <= 15 and s.ok >= 3)) then good = true end -- a spear lives ~5 s: 3 matching reports
                     end
                 end
                 T.log("PT|info anomvis %s alive=%s movers: %s", r[1], tostring(not dead(actors[r[1]])), #movers > 0 and table.concat(movers, " | ") or string.format("none (largest %s %.0f)", topn, top))
                 return good
             end })
+            end
         end
 
         -- ---------------------------------------------------------------- a spear hurts the guest while the host is far away
