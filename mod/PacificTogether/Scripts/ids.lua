@@ -206,12 +206,17 @@ local function applyNamed(c,body)
         end
     end)
 end
-function M.layout(container)
+-- strict (the state scan, not an apply): nil when the container or one of its slots is still async-loading, unreachable or pending
+-- kill. Guest crash 2x in soak 2 (20261117-154638, -155909): AV 0x40 in auto_construct_object right after GetItems of a slot,
+-- 7 s after a zone arrival / during travel, i.e. while slots were being torn down or streamed in; cause not proven.
+function M.layout(container, strict)
+    if strict and not M.settled(container) then return nil end
     if named(container)then return namedLayout(container)end
     if not tiles(container) then return M.encode(M.count(container)) end
     local r = {}
     for i = 0, container:GetNumSlots() - 1 do
         local s = container:GetSlot(i)
+        if strict and s:IsValid() and not M.settled(s) then return nil end
         if s:IsValid() and s:GetNumItems() > 0 then
             local l = s.Location
             r[#r + 1] = string.format("%d.%d.%d=%s", l.X, l.Y, s.bRotated and 1 or 0, (slotKey(s)))
