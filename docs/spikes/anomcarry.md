@@ -39,7 +39,7 @@ Lane `anomcarry`. Files: `mod/PacificTogether/Scripts/anommove.lua` (changed), s
 
 - Whether any thrown item explodes a Tourist (hit strength, antenna tip aim) is unknown; the guest's throw reaches the host as a flying item.
 
-## Results (pair C:\PTLanesnomcarry, port 7885, headless, results in local/test-results)
+## Results (pair C:/PTLanes/anomcarry, port 7885, headless, results in local/test-results)
 - `anomcarry` 20/20 `20261118-100634-anomcarry-anomcarry` (first pass 19/19 `20261118-095822-anomcarry-anomcarry`). Mutation `anomrootkey` 19/20,
   fails `guest_grabber_follows`: `20261118-100845-anomcarry-anomcarry-anomrootkey`. Mutation `noanommove` 17/20, fails `host_grabber_grabs_car`,
   `guest_car_follows_carry`, `guest_grabber_follows`: `20261118-101349-anomcarry-anomcarry-noanommove`.
