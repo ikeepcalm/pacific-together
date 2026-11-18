@@ -95,7 +95,9 @@ return function(T)
         ExecuteWithDelay(250, function() ExecuteInGameThread(function() pcall(function()
             local m = mineCopy()
             if not (m and pc.Pawn:IsValid()) then return end
-            local tip = m.TipScene:K2_GetComponentLocation()
+            local t0, a = m.TipScene:K2_GetComponentLocation(), m:K2_GetActorLocation()
+            local f = ({ 1, 0.6, 0.3 })[kicks % 3 + 1] -- antenna tip, middle, base: the tip sits at a different height from run to run and the trace is 20 uu wide
+            local tip = { X = a.X + (t0.X - a.X) * f, Y = a.Y + (t0.Y - a.Y) * f, Z = a.Z + (t0.Z - a.Z) * f }
             local c = pc.PlayerCameraManager:GetCameraLocation()
             local dx, dy, dz = tip.X - c.X, tip.Y - c.Y, tip.Z - c.Z
             pc:SetControlRotation({ Pitch = math.deg(math.atan(dz, math.sqrt(dx * dx + dy * dy))), Yaw = math.deg(math.atan(dy, dx)), Roll = 0 })
