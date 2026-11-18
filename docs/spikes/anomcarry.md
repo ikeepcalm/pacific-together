@@ -48,3 +48,6 @@ Lane `anomcarry`. Files: `mod/PacificTogether/Scripts/anommove.lua` (changed), s
 - `anomthrow` 18/18 `20261118-105029-anomcarry-anomthrow` (the host sees the guest's throw as an item flying at 2210 uu/s near the Tourist);
   mutation `nodropvel` 17/18, fails `host_gets_thrown_item_flying`: `20261118-105257-anomcarry-anomthrow-nodropvel`.
   No check that the Tourist explodes (it did not, see Observations).
+- Final runs on this branch: `session` 40/40 `20261118-105619-anomcarry-session`, `anommove` 22/22 `20261118-110246-anomcarry-anommove`,
+  `anomhit` 21/21 `20261118-111844-anomcarry-anomhit` (two earlier runs failed 18/21: the guest's pawn is replaced some time after the join and
+  the scenario's one-time teleport was lost, so it kicked from the start point; the scenario now re-teleports, same in anomthrow).
