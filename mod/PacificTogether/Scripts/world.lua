@@ -522,7 +522,8 @@ net.on("g.world.pos", function(_, data)
             local l = at[o:GetFName():ToString()]
             if not l then return end
             o:K2_SetActorLocation(l, false, {}, true)
-            local c = l.c and core(o)
+            local am = package.loaded.anommove -- anommove.lua places grabber cores (and their physics) itself
+            local c = l.c and not (am and am.enabled) and core(o)
             if c then c:K2_SetWorldLocation(l.c, false, {}, true) end
         end)
     end)
