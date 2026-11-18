@@ -106,6 +106,8 @@ return function(T)
                 for s in pairs(seen[r[1]]) do n = n + 1; names[#names + 1] = s end
                 local _, ev = smState(actors[r[1]])
                 T.log("PT|info smhost %s states seen: %s (may transition: %s)", r[1], table.concat(names, ","), tostring(ev))
+                -- the Pufferfish has no second state to reach within the test (it sits in Alert, where the frozen one stays in INACTIVE)
+                if r[1] == "pufferfish" then return seen[r[1]].Alert == true end
                 return n >= 2
             end })
         end
