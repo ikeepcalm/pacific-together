@@ -44,8 +44,15 @@ return function(T)
             pawn.AC_PlayerHealthReceiverHelper.IncomingDamageMessage=m -- retain the reusable payload through the delay
             ExecuteInGameThreadWithDelay(200,function() ms:DispatchMessage(m,pawn) end)
         end})
-        add({check="reused_payload_delivers_each_hit_once",timeout=20,cond=function()
-            poll(); local loss=guestBefore-tonumber(got["t.hp"]); return loss>12 and loss<23
+        -- the same payload is dispatched twice (now and after 200 ms): the native queue counts every dispatch as its own hit
+        -- (damage.cpp), so the guest loses two hits, never one (the dedupe is for the Lua-hook path) and never three. The old check
+        -- accepted one hit's loss and passed only when polled between the two deliveries (flaky since 2026-11-07).
+        local seen
+        add({check="reused_payload_delivers_each_hit_once",timeout=30,cond=function()
+            poll(); local loss=guestBefore-tonumber(got["t.hp"]); T.log("PT|info reused loss=%.1f",loss)
+            assert(loss<40,"a third delivery: loss "..loss)
+            if loss>25 then seen=seen or os.time() end
+            return seen~=nil and os.time()-seen>=3
         end})
         add({run=function() PTNative_MsgToGuest(L.remotePCs()[1]:GetAddress(),"t.done","1") end})
         add({wait=3})
