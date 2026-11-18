@@ -26,6 +26,9 @@ $Suite.body = ""
 $Suite.worldstations = "zone"; $Suite.trunktravel = "garage"; $Suite.exitdeposit = "garage"; $Suite.storytask = "garage"
 $Suite.anomwake = "zone"; $Suite.anomwake2 = "zone"; $Suite.craftcrash = "zone"; $Suite.guestexitmove = "coop-zone"
 $Suite.guestjunction = "coop-zone"; $Suite.foliage = ""; $Suite.carbreak = ""; $Suite.zoneexit = "coop-zone"
+# 2026-11-18 (pt22): today's lanes
+$Suite.anomtable = "zone"; $Suite.anomhit = "zone"; $Suite.anommove = "zone"; $Suite.anomcarry = "zone"; $Suite.anomthrow = "zone"
+$Suite.smhost = "zone"; $Suite.detailing = "garage"
 $failed = @(); $ran = 0
 $i = -1
 foreach ($s in $Suite.Keys) {
