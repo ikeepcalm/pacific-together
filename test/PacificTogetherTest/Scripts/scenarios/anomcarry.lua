@@ -89,7 +89,7 @@ return function(T)
             okRun = (dc < 400 and dm < 400) and okRun + 1 or 0
             return okRun >= 3
         end })
-        local zmax, n = c0[3], 0
+        local zmax, n = -1e9, 0
         add({ check = "carry_height_info", timeout = 30, cond = function() -- information only: how high the game's carry takes the car in its 10 s pull
             n = n + 1
             local l, st = car():K2_GetActorLocation(), gr.CurrentPatStealerState
