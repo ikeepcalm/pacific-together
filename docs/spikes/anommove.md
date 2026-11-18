@@ -45,3 +45,8 @@ Logbook names: Abductor = `BP_Hazard_PhysicsGrabber` (parent `BP_Hazard_Base_Fly
 - Saw blade spin is applied at 10 Hz (steps, no extrapolation); the chargeup/dust VFX and sounds on the guest copy are not driven.
 - A guest sitting in the car hit by a saw (car damage path) not checked.
 - Grabber lift in the scenario is a component move with physics off on the host, not the grabber's own lift.
+
+## Results (pair C:\PTLanes\anommove, port 7881, headless)
+- `anommove` 22/22: `20261118-093048-anommove-anommove` (first run 21/22, the lift check failed because the host grabber's own stabiliser pulled the bodies back; physics off on the host for the scripted lift).
+- Mutation `noanommove` 18/22, failing `guest_abductor_at_host_height`, `guest_abductor_lifts`, `host_saw_runs_its_cycle`, `guest_saw_follows_host`: `20261118-093853-anommove-anommove-noanommove` (the saw damage checks still pass: the hit is the host's own game).
+- `session` 40/40 `20261118-094241-anommove-session`; `anomalies2` 27/27 `20261118-094401-anommove-anomalies2`.
