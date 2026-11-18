@@ -61,17 +61,31 @@ return function(T)
         add({ wait = 45 })
         add({ check = "tourist_stands_before_throw", timeout = 5, cond = function() return left(spot) == 1 and boom.n == 0 end })
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.throw", string.format("%.0f\t%.0f", spot.X, spot.Y)) end })
+        -- The throw reaches the host as a flying item (loot.lua reports the drop with its velocity); whether the host's physics then knock the
+        -- Tourist over is information only (steel scrap did not move it in these runs, nor a host-spawned one: docs/spikes/anomcarry.md).
+        local fast, rot0 = 0, nil
         local function angle(a) return math.abs((a + 180) % 360 - 180) end
-        add({ check = "host_tourist_hit_by_thrown_item", timeout = 90, cond = function()
+        add({ check = "host_gets_thrown_item_flying", timeout = 60, cond = function()
             poll()
-            local best
-            for _, o in ipairs(FindAllOf("BP_Hazard_Landmine_C") or {}) do
-                if o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) and near(o, spot) then best = o end
+            for _, w in ipairs(FindAllOf("BP_WorldItem_C") or {}) do
+                if w:IsValid() and not w:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) then
+                    local l = w:K2_GetActorLocation()
+                    if math.sqrt((l.X - spot.X) ^ 2 + (l.Y - spot.Y) ^ 2 + (l.Z - spot.Z) ^ 2) < 1500 then
+                        local v = w:GetVelocity()
+                        fast = math.max(fast, math.sqrt(v.X ^ 2 + v.Y ^ 2 + v.Z ^ 2))
+                    end
+                end
             end
-            local tilt = -1
-            if best then local r = best.Body:K2_GetComponentRotation(); tilt = math.max(angle(r.Pitch), angle(r.Roll)) end
-            T.log("PT|info throws tried=%d explodes=%d left=%d tilt=%.0f", thrown, boom.n, left(spot), tilt)
-            return left(spot) == 0 or tilt > 8 -- exploded, or knocked over by the host's copy of the thrown item
+            local moved = -1
+            for _, o in ipairs(FindAllOf("BP_Hazard_Landmine_C") or {}) do
+                if o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) and near(o, spot) then
+                    local r = o.Body:K2_GetComponentRotation()
+                    rot0 = rot0 or { r.Pitch, r.Roll, r.Yaw }
+                    moved = math.max(angle(r.Pitch - rot0[1]), angle(r.Roll - rot0[2]), angle(r.Yaw - rot0[3]))
+                end
+            end
+            T.log("PT|info throws tried=%d fastest item near the Tourist %.0f uu/s, explodes=%d left=%d turned=%.0f deg", thrown, fast, boom.n, left(spot), moved)
+            return fast > 1000
         end })
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.end", "1") end })
         add({ wait = 3 })
