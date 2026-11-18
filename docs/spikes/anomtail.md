@@ -15,8 +15,14 @@ Baseline run `20261118-092122-pair1-anomtable` (54/65): 11 failing checks.
 - Lightning strike: `BP_Hazard_LightningStrike` destroys itself about a second after it begins play. The 1 s replication sweep of
   world.lua never reaches it, the test's first poll came after 3 s. Replicating from a `ReceiveBeginPlay` hook (as world.lua does for
   the acid glob) gives the guest a copy; the guest's copy was seen within the strike's life.
-- Airstrip (`BP_Hazard_LowGravityZone`): passes in the subset runs (copy at offset 0, `20261118-093408`...), failed in the full baseline
-  run where the host actor was gone at the first poll. Not reproduced when run after Minuteman; see the full-run result below.
+- Airstrip (`BP_Hazard_LowGravityZone`): its ubergraph ends with `GenerateWall(); if Spline.GetSplineLength() > 0 { AddSplineMeshProto ... }
+  else K2_DestroyActor()`. A bare spawn has no spline points, so it destroys itself right after spawn (flaky: it survived the first poll
+  in subset runs, was gone in the full baseline run and in `20261118-101235`). The row now spawns the `_RampTruck` variant (a spline of
+  its own); it passed 63/63 in the full runs.
+- Sightseer (`BP_Hazard_Evolved_Landmine_Floater`) once counted 2 copies (`20261118-101235`): a Pilgrim's Floaters outlive their row.
+  The scenario clears Floaters before the sightseer row. Clearing every class's leftovers crashed the host (`20261118-102009`), so it is that row only.
+- `IsSimulatingPhysics("None")` on a leech's sphere crashed the host (access violation) for a leech spawned a moment before (anomalies2's
+  bare `BP_Hazard_Leech_C`); the body flag `BodyInstance.bSimulatePhysics` is read instead.
 - Minuteman (`BP_Hazard_Movement_Prong`): host actor stays (~23 s) with tick off (dormant), replication flags fine (repl, remote role 1,
   always relevant). The guest copy appears at the right place (Role 1, offset 0) and is destroyed ~3 s later by its own logic
   (`PendingKill` seen 3.1 to 3.4 s after first sight, in every run). The test's `inWorld` skips destroyed actors, hence copies=0.
@@ -41,6 +47,12 @@ Baseline run `20261118-092122-pair1-anomtable` (54/65): 11 failing checks.
 ## Unknowns
 - Whether level-placed Minutemen in real maps behave like the hand-spawned one. They are found by name (world.lua g.world.pos), unlike a spawned one.
 - Whether a Leech's bite should also need the guest on foot to be near enough to be "seen" (the game wants a line of sight to the car).
+
+## Results (worktree C:\PTLanes\wt-anomtail, pair C:\PTLanesnomtail)
+- anomtable full: baseline 54/65 (`20261118-092122-pair1-anomtable`); after the fixes 63/63 (`20261118-103421-anomtail-anomtable`), minuteman and
+  interloper logged "not checked".
+- Mutation `noanomtail` (rows boltbunny, burpbunny, boombunny, brokenbunny, dustbunny, lightning): 22/29, 7 checks fail (`20261118-104114-anomtail-anomtable-noanomtail`).
+- anomalies2 27/27 (`20261118-104730-anomtail-anomalies2`; one run had `guest_pulled_by_grabber` fail, a pull-speed check, not repeated); session 40/40 (`20261118-102557-anomtail-session`).
 
 ## Rows left open in anomtable
 minuteman, interloper (logged as "not checked", with the reason).
