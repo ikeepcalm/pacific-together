@@ -37,7 +37,8 @@ return function(T)
     local function sample(o)
         local r, root = {}, o:K2_GetRootComponent()
         local l = o:K2_GetActorLocation()
-        r["<root>"] = { l.X, l.Y, l.Z, 0, 0, 0 }
+        local ar = o:K2_GetActorRotation()
+        r["<root>"] = { l.X, l.Y, l.Z, ar.Pitch, ar.Yaw, ar.Roll }
         for _, w in ipairs(o:K2_GetComponentsByClass(SCENE)) do
             local c = w:get()
             if c:IsValid() and c:GetAddress() ~= root:GetAddress() then
@@ -167,7 +168,7 @@ return function(T)
                     if rg > top then top, topn = rg, part end
                     if rg > 20 then
                         local s = gseen[r[1]][part]
-                        local line = string.format("%s host range %.0f guest %s", part, rg, s and string.format("n=%d ok=%d far=%.0f best=%.0f last g=%.0f,%.0f,%.0f h=%.0f,%.0f,%.0f", s.n, s.ok, s.far, s.best, s.last[1], s.last[2], s.last[3], s.hlast[1], s.hlast[2], s.hlast[3]) or "none")
+                        local line = string.format("%s host range %.0f guest %s", part, rg, s and string.format("n=%d ok=%d far=%.0f best=%.0f last g=%.0f,%.0f,%.0f/%.0f,%.0f,%.0f h=%.0f,%.0f,%.0f/%.0f,%.0f,%.0f", s.n, s.ok, s.far, s.best, s.last[1], s.last[2], s.last[3], s.last[4], s.last[5], s.last[6], s.hlast[1], s.hlast[2], s.hlast[3], s.hlast[4], s.hlast[5], s.hlast[6]) or "none")
                         movers[#movers + 1] = line
                         if s and s.n >= 5 and s.far >= 20 and (s.ok / s.n >= 0.6 or (s.n <= 15 and s.ok >= 3)) then good = true end -- a spear lives ~5 s: 3 matching reports
                     end
