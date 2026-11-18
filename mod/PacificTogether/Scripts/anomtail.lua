@@ -42,18 +42,24 @@ LoopInGameThreadWithDelay(200, function()
         if #pawns == 0 then return end
         local now = os.clock()
         each(function(l)
+            local dbg = os.getenv("PT_ANOM_DEBUG") and function(w) log("PT|anomtail step %s", w) end or function() end
+            dbg("class")
             local cls = l:GetClass():GetFName():ToString()
             if cls:find("Healer", 1, true) or cls:find("Charging", 1, true) or l.IsGrabbed or l.Deactivated then return end
+            dbg("flags")
             local key = l:GetFName():ToString()
             if now - (bitAt[key] or -99) < COOL or l.LeechState == 3 then return end -- 3 = leaping: the game's own hit path (anomalies2)
             local ball = l.SM_Prototype_BlockySphere
             if not (ball and ball:IsValid()) then return end -- a leech still being set up has no sphere (calling it crashed the host, anomalies2 run 20261118-102302)
+            dbg("ball")
             local at = ball:K2_GetComponentLocation()
+            dbg("pawns")
             local best, bd
             for _, p in ipairs(pawns) do
                 local d = d3(at, p:K2_GetActorLocation())
                 if d < LEAP and (not bd or d < bd) then best, bd = p, d end
             end
+            dbg("measured")
             if not best then leaping[key] = nil return end
             if bd < BITE then
                 bitAt[key], leaping[key] = now, nil
@@ -62,12 +68,16 @@ LoopInGameThreadWithDelay(200, function()
                 log("PT|anomtail %s bit the guest", key)
             elseif not leaping[key] or now - leaping[key] > 3 then
                 leaping[key] = now
-                if ball:IsSimulatingPhysics("None") then
+                dbg("simulating?")
+                -- IsSimulatingPhysics("None") crashed the host on a fresh leech: the body flag is read instead
+                local okb, sim = pcall(function() return ball.BodyInstance.bSimulatePhysics end)
+                if okb and sim then
+                    dbg("impulse")
                     local to = best:K2_GetActorLocation()
                     local dx, dy = to.X - at.X, to.Y - at.Y
                     local n = math.max(math.sqrt(dx * dx + dy * dy), 1)
                     local v = math.min(bd * 2, 1500)
-                    ball:AddImpulse({ X = dx / n * v, Y = dy / n * v, Z = 350 }, "None", true)
+                    ball:AddImpulse({ X = dx / n * v, Y = dy / n * v, Z = 350 }, FName("None"), true)
                 end
             end
         end)
