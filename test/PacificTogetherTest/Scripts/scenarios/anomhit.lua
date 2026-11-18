@@ -52,7 +52,7 @@ return function(T)
             end
             assert(mine, "no map Tourist at the spot")
             spot = mine:K2_GetActorLocation()
-            local gl = { X = spot.X + 130, Y = spot.Y, Z = spot.Z + 150 }
+            local gl = { X = spot.X + 90, Y = spot.Y, Z = spot.Z + 150 }
             PTNative_MsgToGuest(gpc:GetAddress(), "t.tp", string.format("%.0f\t%.0f\t%.0f", gl.X, gl.Y, gl.Z))
             pcall(function() L.guestChar():K2_TeleportTo(gl, { Pitch = 0, Yaw = 0, Roll = 0 }) end)
             T.log("PT|info Tourist %s at %.0f %.0f %.0f, guest beside it, host %.0f uu away", T.name(mine), spot.X, spot.Y, spot.Z, T.dist(mine, T.myPawn()))
@@ -75,7 +75,7 @@ return function(T)
         return steps
     end
 
-    local finished, kicking, spot, kicks = false, false, nil, 0
+    local finished, kicking, spot, kicks, tpAt = false, false, nil, 0, nil
     local hookedKick = false
     local ownKick = 0
     LoopInGameThreadWithDelay(1000, function()
@@ -88,19 +88,26 @@ return function(T)
         end
     end
     local function aimAndKick()
-        local m = mineCopy()
         local pc = T.localPC()
-        if not (m and pc and pc.Pawn:IsValid()) then return end
-        local tip = m.TipScene:K2_GetComponentLocation()
-        local c = pc.PlayerCameraManager:GetCameraLocation()
-        local dx, dy, dz = tip.X - c.X, tip.Y - c.Y, tip.Z - c.Z
-        pc:SetControlRotation({ Pitch = math.deg(math.atan(dz, math.sqrt(dx * dx + dy * dy))), Yaw = math.deg(math.atan(dy, dx)), Roll = 0 })
-        ExecuteWithDelay(300, function() ExecuteInGameThread(function() -- a moment later the camera has the new rotation
-            pcall(function() T.first("BP_MainCharacterManager_C"):PlayerKick({}, {}, {}) end)
-            kicks = kicks + 1
-        end) end)
+        if not (mineCopy() and pc and pc.Pawn:IsValid()) then return end
+        -- the kick traces only ~200 uu from the camera: stand at the spot again before every kick (the pawn drifts or is replaced), then aim
+        if tpAt then pc.Pawn:K2_SetActorLocation(tpAt, false, {}, true) end
+        ExecuteWithDelay(250, function() ExecuteInGameThread(function() pcall(function()
+            local m = mineCopy()
+            if not (m and pc.Pawn:IsValid()) then return end
+            local tip = m.TipScene:K2_GetComponentLocation()
+            local c = pc.PlayerCameraManager:GetCameraLocation()
+            local dx, dy, dz = tip.X - c.X, tip.Y - c.Y, tip.Z - c.Z
+            pc:SetControlRotation({ Pitch = math.deg(math.atan(dz, math.sqrt(dx * dx + dy * dy))), Yaw = math.deg(math.atan(dy, dx)), Roll = 0 })
+            ExecuteWithDelay(300, function() ExecuteInGameThread(function() -- a moment later the camera has the new rotation
+                local ok, err = pcall(function() T.first("BP_MainCharacterManager_C"):PlayerKick({}, {}, {}) end)
+                local p = pc.Pawn:K2_GetActorLocation()
+                T.log("PT|info kick pcall=%s %s pawn=%.0f,%.0f,%.0f tip=%.0f,%.0f,%.0f cam=%.0f,%.0f,%.0f reach=%.0f ownKick=%d", tostring(ok), ok and "" or tostring(err), p.X, p.Y, p.Z, tip.X, tip.Y, tip.Z, c.X, c.Y, c.Z, math.sqrt(dx * dx + dy * dy + dz * dz), ownKick)
+                kicks = kicks + 1
+            end) end)
+        end) end) end)
     end
-    local every, tpAt = 0, nil
+    local every = 0
     LoopInGameThreadWithDelay(1000, function() pcall(function()
         if T.netMode() ~= "client" then return end
         local me = T.myPawn()

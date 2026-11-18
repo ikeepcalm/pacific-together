@@ -114,7 +114,7 @@ return function(T)
         -- bunny: the guest sees it and its push hurts the guest
         local bunny
         add({ run = function()
-            poll(); guestHp0, hostHp0 = guestHp, health()
+            poll(); guestHp0, hostHp0, maxSpd = guestHp, health(), 0 -- the Pufferfish pushes on its own as soon as the guest is in range (smhost): baselines at the spawn
             bunny = spawn(CLS.bunny, nearGuest(400, 0))
             T.log("PT|info spawned bunny %s guestHp=%.0f hostHp=%.0f", T.name(bunny), guestHp0, hostHp0)
         end })
@@ -125,7 +125,7 @@ return function(T)
             bunny:K2_SetActorLocation({ X = x, Y = y, Z = z }, false, {}, true)
             local ok, r = pcall(function() return bunny.PlayerPusher.Radius end)
             T.log("PT|info bunny PushRadius=%s dist to guest=%.0f", tostring(ok and r), T.dist(bunny, L.guestChar()))
-            poll(); guestHp0, hostHp0, maxSpd = guestHp, health(), 0
+            poll(); hostHp0 = health() -- the guest baselines stay at the spawn: the bunny's own push or this one both count
             pcall(function() bunny:PushFx() end) -- the game's push step (damage 0.1 intensity, radial force) as a touch starts it
             T.log("PT|info bunny push sent")
         end })
