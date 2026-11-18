@@ -7,6 +7,8 @@
 --   A row with a 5th field true is short-lived (the lightning strike): the guest remembers its first sighting, compared with the spawn spot.
 --   A row with a 6th field (a reason) is not checked: a known gap written up in docs/spikes/anomtail.md.
 --   A row's 7th field is called with the deferred actor and its spot before it finishes spawning (properties the game's own spawner sets).
+--   8th field: the first copy must be seen within that many seconds of the spawn (replication as the actor begins play, anomrest). 9th: the
+--   first copy's prong (Cylinder) must rise above that relative z (the Minuteman's copy was invisible, under ground).
 -- Run: tools/run-test.ps1 -Scenario anomtable -Fixture zone -Headless [-Mutate noworldsync|noanom|noanomtail]
 return function(T)
     local L = require("scenarios.sessionlib")(T)
@@ -37,7 +39,7 @@ return function(T)
         { "fallenfirmament", "Fallen Firmament", p(G .. "FallingPillar", "BP_Hazard_FallingPillar"), "copy" },
         { "blacksmith", "Blacksmith", p(G .. "RockPounder", "BP_Hazard_RockPounder"), "copy" },
         { "wrigglingwreck", "Wriggling Wreck", p(G .. "MovementHazard", "BP_Hazard_MovementHazard"), "copy" },
-        { "minuteman", "Minuteman", p(G .. "MovementHazard", "BP_Hazard_Movement_Prong"), "copy" },
+        { "minuteman", "Minuteman", p(G .. "MovementHazard", "BP_Hazard_Movement_Prong"), "copy", true, nil, nil, 0.7, -100 },
         { "bubblegumbuddy", "Bubblegum Buddy", p(G .. "Spore", "BP_Hazard_Spore"), "copy" },
         { "moldyballoon", "Moldy Balloon", p(G .. "Bouncing/Acid", "BP_Hazard_Bouncing_Acid"), "copy" },
         { "glitteringboulder", "Glittering Boulder", p(G .. "MalfunctionMine", "BP_Hazard_MalfunctionMine_SuperCharger"), "copy" },
@@ -88,8 +90,8 @@ return function(T)
                 if not kind then return end
                 if kind == "t.hp" then guestHp = tonumber(data) or guestHp end
                 if kind == "t.c" then
-                    local q, n, x, y, z, role, age = data:match("^(%S+)	(%d+)	(%-?[%d%.]+)	(%-?[%d%.]+)	(%-?[%d%.]+)	(%S+)	(%-?[%d%.]+)$")
-                    if q then copy = { q = q, n = tonumber(n), x = tonumber(x), y = tonumber(y), z = tonumber(z), role = role, age = tonumber(age) } end
+                    local q, n, x, y, z, role, age, maxz = data:match("^(%S+)	(%d+)	(%-?[%d%.]+)	(%-?[%d%.]+)	(%-?[%d%.]+)	(%S+)	(%-?[%d%.]+)	(%-?[%d%.]+)$")
+                    if q then copy = { q = q, n = tonumber(n), x = tonumber(x), y = tonumber(y), z = tonumber(z), role = role, age = tonumber(age), maxz = tonumber(maxz) } end
                 end
             end
         end
@@ -115,7 +117,7 @@ return function(T)
         add({ check = "host_far_from_guest", timeout = 30, cond = function() return T.dist(L.guestChar(), T.myPawn()) > 6000 end })
         add({ wait = 6 })
         for _, r in ipairs(ROWS) do
-            local name, wiki, path, kind, sticky, open, maxAge = r[1], r[2], r[3], r[4], r[5], r[6], r[8]
+            local name, wiki, path, kind, sticky, open, maxAge, minZ = r[1], r[2], r[3], r[4], r[5], r[6], r[8], r[9]
             if open then add({ run = function() T.log("PT|info row %s (%s) not checked: %s", name, wiki, open) end })
             elseif not only or (("," .. only .. ","):find("," .. name .. ",", 1, true)) then
                 local o, hp0, sp
@@ -156,8 +158,8 @@ return function(T)
                     poll()
                     if copy.q ~= short(path) then return false end
                     local d = math.sqrt((copy.x - h.X) ^ 2 + (copy.y - h.Y) ^ 2 + (copy.z - h.Z) ^ 2)
-                    T.log("PT|info %s guest copies=%d role=%s offset=%.0f age=%.2f", name, copy.n, copy.role, copy.n > 0 and d or -1, copy.age or 0)
-                    return copy.n == 1 and copy.role == "1" and d < 400 and (not maxAge or (copy.age or 99) <= maxAge)
+                    T.log("PT|info %s guest copies=%d role=%s offset=%.0f age=%.2f maxz=%.0f", name, copy.n, copy.role, copy.n > 0 and d or -1, copy.age or 0, copy.maxz or -999)
+                    return copy.n == 1 and copy.role == "1" and d < 400 and (not maxAge or (copy.age or 99) <= maxAge) and (not minZ or (copy.maxz or -999) >= minZ)
                 end })
                 if kind == "hurt" then
                     add({ check = name .. "_hurt", timeout = 45, cond = function()
@@ -225,6 +227,8 @@ return function(T)
                     local d = (l.X - query.x) ^ 2 + (l.Y - query.y) ^ 2 + (l.Z - query.z) ^ 2
                     if d < 2000 * 2000 then
                         n = n + 1
+                        local okz, cz = pcall(function() return o.Cylinder.RelativeLocation.Z end) -- the Minuteman's prong: up out of the ground?
+                        if okz and cz > (query.maxz or -999) then query.maxz = cz end
                         if d < bd then bd, best, role = d, l, tostring(o.Role) end
                     end
                 end
@@ -234,7 +238,7 @@ return function(T)
                 if n > 0 and not query.keep then query.keep = { n = n, best = best, role = role, age = os.clock() - (query.t0 or os.clock()) } end
                 if query.keep then n, best, role = query.keep.n, query.keep.best, query.keep.role end
             end
-            PTNative_MsgToHost(pc, "t.c", string.format("%s	%d	%.0f	%.0f	%.0f	%s	%.2f", query.c, n, best.X, best.Y, best.Z, role, query.keep and query.keep.age or 0))
+            PTNative_MsgToHost(pc, "t.c", string.format("%s	%d	%.0f	%.0f	%.0f	%s	%.2f	%.0f", query.c, n, best.X, best.Y, best.Z, role, query.keep and query.keep.age or 0, query.maxz or -999))
         end
     end) end)
     return {
