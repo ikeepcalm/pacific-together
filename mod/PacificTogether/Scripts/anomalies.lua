@@ -77,6 +77,10 @@ end
 local loadedAt, GUARD = 0, os.getenv("PT_MUTATE") == "noseatguard" and 0 or 20 -- mutation noseatguard: zoneexit
 RegisterLoadMapPostHook(function() loadedAt = os.clock() end)
 
+-- guest: hazard damage on the host's body in our world is never forwarded: the host's own game deals it, and our copy of the hit
+-- (the cloud's spill onto the host's body when both stand in it) made the host take acid and electricity twice (hosthurt)
+local HAZARD = os.getenv("PT_MUTATE") ~= "hostdrain" and { "Damage_Acid", "Damage_Radiation", "Damage_Electrical", "Damage_FallDamage" } or {}
+
 local function pre(rec, p, intercepted)
     if not (M.enabled and safety.active()) then return end
     local guest = safety.guest()
@@ -91,7 +95,11 @@ local function pre(rec, p, intercepted)
     if dmg == 0 then return end
     -- a bump of the host's body in the guest's world (seating jolts, its copy of the car): the host's game already deals its own
     -- physical hits, and a forwarded 60 came out of nowhere for the host (playtest 2026-10-31)
-    if guest and p:GetClass():GetFName():ToString():find("Physical_Impact", 1, true) then return end
+    if guest then
+        local n = p:GetClass():GetFName():ToString()
+        if n:find("Physical_Impact", 1, true) then return end
+        for _, h in ipairs(HAZARD) do if n:find(h, 1, true) then return end end
+    end
     local sample, cap = lastHp, math.abs(dmg) * 1.5 + 1
     if sample and not intercepted then
         common.defer(40, function() try("put back", function()
