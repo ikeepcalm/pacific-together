@@ -77,11 +77,15 @@ end
 local loadedAt, GUARD = 0, os.getenv("PT_MUTATE") == "noseatguard" and 0 or 20 -- mutation noseatguard: zoneexit
 RegisterLoadMapPostHook(function() loadedAt = os.clock() end)
 
+-- guest: a hit we just applied to our own pawn spills over onto the host's body in our world (a cloud with both players in it); that
+-- echo is not a real hit on the host and was forwarded back, so the host took the guest's damage as well (hosthurt)
+local appliedAt, ECHO = -1, os.getenv("PT_MUTATE") == "hostdrain" and 0 or 0.25 -- mutation hostdrain: scenario hosthurt
+
 local function pre(rec, p, intercepted)
     if not (M.enabled and safety.active()) then return end
     local guest = safety.guest()
     if not (valid(rec) and valid(p)) then return end
-    if guest then if not isHostBody(rec) or os.clock() - loadedAt < GUARD then return end elseif not isGuestPawn(rec) then return end
+    if guest then if not isHostBody(rec) or os.clock() - loadedAt < GUARD or os.clock() - appliedAt < ECHO then return end elseif not isGuestPawn(rec) then return end
     local dmg = p.Damage
     local key, now = p:GetAddress(), os.clock()
     if not intercepted then
@@ -106,7 +110,7 @@ local function pre(rec, p, intercepted)
     M.forwarded = M.forwarded + 1
     if guest then
         net.toHost("g.anom.msg", msg)
-        log("PT|anom damage for host %s owner=%s", msg, rec:GetOwner():GetFullName():sub(-60))
+        log("PT|anom damage for host %s", msg)
         return
     end
     net.toGuest(rec:GetOwner().Controller, "g.anom.msg", msg)
@@ -191,6 +195,7 @@ net.on("g.anom.msg", function(_, data)
         if not (valid(c) and valid(target) and valid(ms)) then return end
         local m = StaticConstructObject(c, ms)
         m.Damage, m.Spillover, m.IsDamageOverTime, m.FeedbackStrength, m.DistributeMode = tonumber(dmg), sp == "1", dot == "1", tonumber(fb), tonumber(dm)
+        if guest then appliedAt = os.clock() end
         ms:DispatchMessage(m, target)
         M.applied = M.applied + 1
         log("PT|anom damage applied %s", data)

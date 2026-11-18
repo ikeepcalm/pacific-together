@@ -1,10 +1,11 @@
 -- hosthurt: a guest that died and was revived must not drain the host (lane hosthurt, docs/spikes/hosthurt.md).
---   The guest is killed (health to its minimum), the host respawns it, then it is taken far from the host again and a Cough Box
+--   The guest is left at 6 hit points in a cloud that kills it, the host respawns it, then it is taken far from the host again and a Cough Box
 --   cloud (BP_Hazard_Cloud_Acid) is spawned at its feet.
 --   guest_died / guest_revived   health.lua's death and revive ran on the guest
 --   guest_hurt_after_revive      the guest's own health fell in the cloud
 --   host_not_drained_after_guest_death  the host's health held through the cloud (mutation hostdrain brings back the old drain)
--- PT_HURT_NEAR=1 leaves the revived guest where the host put it (next to the host's car) for the double-hit case.
+-- The revived guest stays where the host put it (next to the host's car, in the cloud with the host near): the real bug, the guest's
+-- own hit echoed onto the host's body. PT_HURT_FAR=1 takes it far away again first (that case never failed).
 -- Run: tools/run-test.ps1 -Scenario hosthurt -Fixture zone -Headless [-Mutate hostdrain]
 return function(T)
     local L = require("scenarios.sessionlib")(T)
@@ -28,7 +29,7 @@ return function(T)
     if T.ROLE == "host" then
         local steps = {}
         local function add(s) steps[#steps + 1] = s end
-        local gpc, guestHp, minSeen, hostHp0, guestHp0, o = nil, -1, 1e9, -1, -1, nil
+        local gpc, guestHp, minSeen, hostHp0, guestHp0, o, killer = nil, -1, 1e9, -1, -1, nil, nil
         local function poll()
             while true do
                 local kind, data = PTNative_MsgPoll("t.")
@@ -61,12 +62,21 @@ return function(T)
         end })
         add({ check = "host_far_from_guest", timeout = 30, cond = function() return T.dist(L.guestChar(), T.myPawn()) > 6000 end })
         add({ wait = 12 }) -- health.lua ignores a minimum within 8 s of the level load
-        add({ run = function() toGuest("t.kill", "1") end })
+        add({ run = function()
+            toGuest("t.low", "1")
+            local at = L.guestChar():K2_GetActorLocation()
+            killer = spawn(CLOUD, at.X, at.Y, at.Z - 80)
+        end })
         add({ check = "guest_died", timeout = 30, cond = function() poll(); return minSeen <= 1.5 end })
         add({ check = "guest_revived", timeout = 60, cond = function() poll(); return guestHp >= 90 end })
-        if not os.getenv("PT_HURT_NEAR") then
+        if tonumber(os.getenv("PT_HURT_DIST") or "1500") > 0 then
+            add({ run = function() if killer and killer:IsValid() then killer:K2_DestroyActor() end end })
             add({ wait = 3 })
-            add({ run = farTp })
+            add({ run = function()
+                local l = T.myPawn():K2_GetActorLocation()
+                spot = { X = l.X + tonumber(os.getenv("PT_HURT_DIST") or "1500"), Y = l.Y, Z = l.Z + 200 }
+                farTp()
+            end })
             add({ wait = 4 })
         end
         add({ wait = 5 })
@@ -100,7 +110,7 @@ return function(T)
             local rm = T.first("BP_ResourceManager_C")
             local h = rm and rm.PlayerHealth
             if kind == "t.heal" then pcall(function() h:Adjust(rm, h.Maximum - h.Current) end) end
-            if kind == "t.kill" then pcall(function() h:Adjust(rm, 1 - h.Current) end) end -- to its minimum: health.lua's death
+            if kind == "t.low" then pcall(function() h:Adjust(rm, 6 - h.Current) end) end -- a few hit points: the first cloud kills it
             if kind == "t.tp" and me and me:IsValid() then
                 local x, y, z = data:match("^(%-?[%d%.]+)\t(%-?[%d%.]+)\t(%-?[%d%.]+)$")
                 me:K2_SetActorLocation({ X = tonumber(x), Y = tonumber(y), Z = tonumber(z) }, false, {}, true)
