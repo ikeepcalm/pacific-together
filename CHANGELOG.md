@@ -3,6 +3,32 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
+## [0.9.6-dev] - 2026-11-18 (developer build, not hand-tested, no release)
+
+Network protocol **9**, as in 0.9.5; both players need the same build.
+
+### Fixed
+
+- **Anomalies frozen in co-op:** in a hosted game many anomalies never got past their first step, for the host too. Affected:
+  Can Opener, Blacksmith, Titan's Bone, Bubblegum Buddy, Ticking Tumbler, Bollards, Pufferfish, Abductor. They now behave as in
+  single player.
+- **Abductor:** it hunts the car and drags it, and the guest sees the grabber, its cable and the car move with it instead of a
+  grabber sitting on the ground.
+- **Can Opener:** the saw runs its track and cuts for both players; the guest sees the blade move.
+- **Tourists:** a guest's kick explodes a Tourist (the host's game applies the kick). A thrown item reaches the host in flight.
+- **Bunnies:** the guest's bunnies stay where the host's are, and a bunny leaps at and bites a guest near it.
+- **Moving parts for the guest:** Titan's Bone spears, Bollards, Bubblegum Buddy, the Ticking Tumbler and the Minuteman show their
+  movement on the guest; Lightning Squall strikes and meteors appear for the guest when they hit, not a second later.
+- **Double damage:** a host standing in an acid or electric cloud together with the guest no longer gets the guest's copy of
+  the hits on top of its own.
+- **Detailing:** a cosmetic the guest fits at the Detailing station goes on the shared car.
+- **Tinker:** a hint the guest buys is paid once from the host's anchor energy and shows for both.
+- A guest crash seen in long test runs while containers stream in is guarded (not proven).
+
+### Known issues
+
+- See NOTES.md "2026-11-18 unattended" for what is still open (Abductor item hunts, Interloper, Sick Mickey/Wriggling Wreck timing).
+
 ## [0.9.5] - 2026-11-17 (preview, not yet hand-tested)
 
 Network protocol **9**, as in 0.9.4; everyone needs 0.9.5 (the mod version must match).

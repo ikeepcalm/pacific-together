@@ -1,7 +1,7 @@
 local UEHelpers = require("UEHelpers")
 
 local M = {
-    MOD_VERSION = "0.9.5",
+    MOD_VERSION = "0.9.6-dev",
     PROTOCOL_VERSION = 9, -- 9: g.car.placed (guest exit spot), route/routeend (guest route map), radio pos; 8: 3-4 players (net.share: "<PlayerId>|" on per-player state, targeted heal, g.car.full); 7: map icons (g.map.icons), currencies (g.st.cur), map north; 6: loot drop adoption ("K"), keypad and anchor-take messages; 5: msg.cpp chunks are confirmed ("PT1A|"); a 4 peer never confirms and a 5 sender would stall
 }
 
