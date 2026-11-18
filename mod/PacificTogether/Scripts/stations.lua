@@ -206,7 +206,7 @@ end
 -- g.st.q lines "cond<TAB>beh<TAB>diagnosed<TAB>ingredient" (class paths); the guest builds the same ones with the game's own
 -- BFL_StatusEffectQuirkUtils.BuildAndApplyQuirk (re-rolled until the cure ingredient matches, SetQuirkRank picks it at random) and drops the rest.
 -- A cure the guest does in its own UI (CureCarQuirk, paid from its backpack and the synced garage) is sent as g.st.cure cond|beh; the host does the
--- rest of the cure (bounty XP, graveyard, remove, stats) WITHOUT paying again. Hints (anchor juice) are not synced.
+-- rest of the cure (bounty XP, graveyard, remove, stats) WITHOUT paying again. Hints: see below.
 -- shortcut: identity is condition+behavior (two identical quirks on a car are treated as one); hints and the logbook are not mirrored.
 local function qmgr() local m = FindFirstOf("BP_StatusEffectManager_C"); return valid(m) and m or nil end
 local function qKey(q) return q.QuirkCondition:GetClass():GetFullName():match("^%S+ (.+)$") .. "|" .. q.QuirkBehavior:GetClass():GetFullName():match("^%S+ (.+)$") end
@@ -294,6 +294,99 @@ local function guestQuirks()
     end
 end
 
+-- Tinker hints: the diagnose screen's reveal (RevealHint) sets the known categories on the quirk's condition and behavior elements, pays
+-- CurrencyAdjust(CA_AnchorJuice_Stable, -GetHintCost()) and calls IncrementHintsBought. On the guest the payment hit its own copy of the
+-- currency table (the host's value came back 10 s later: free) and the reveal stayed local. IncrementHintsBought's hook (the last step) sends
+-- the guest's known flags up (g.st.hint); the host adds them, pays the cost ONCE from its own currency and counts the hint; the host's flags and
+-- hint count come down with g.st.hints (the guest ORs them in and takes the count, so both sides quote the same cost).
+--   g.st.hint  key<TAB>flags<LF>...   flags: "c:P1,T0;b:P2" (c/b condition/behavior, P part, T type, category number)
+--   g.st.hints count<LF>key<TAB>flags...
+local NOHINT = os.getenv("PT_MUTATE") == "nohints"
+local function flagsOf(q)
+    local r = {}
+    for _, e in ipairs({ { "c", q.QuirkCondition }, { "b", q.QuirkBehavior } }) do
+        local t = {}
+        for _, m in ipairs({ { "P", "PartKnownCategories" }, { "T", "TypeKnownCategories" } }) do
+            e[2][m[2]]:ForEach(function(k, v) if v:get() then t[#t + 1] = m[1] .. tostring(k:get()) end end)
+        end
+        table.sort(t)
+        r[#r + 1] = e[1] .. ":" .. table.concat(t, ",")
+    end
+    return table.concat(r, ";")
+end
+local function applyFlags(q, flags)
+    for who, list in flags:gmatch("(%a):([^;]*)") do
+        local e = who == "c" and q.QuirkCondition or q.QuirkBehavior
+        for kind, cat in list:gmatch("(%a)(%d+)") do
+            local c = tonumber(cat)
+            local known = false
+            local o = {}
+            if kind == "P" then e:IsPartKnown(c, o) else e:IsTypeKnown(c, o) end
+            known = o.Known
+            if not known then
+                if kind == "P" then e:SetPartKnown(true, c) else e:SetTypeKnown(true, c) end
+            end
+        end
+    end
+end
+local function hintLines(sm)
+    local L = {}
+    for _, q in ipairs(quirks(sm)) do L[#L + 1] = qKey(q) .. "\t" .. flagsOf(q) end
+    table.sort(L)
+    return L
+end
+local function mergeHints(data) -- key<TAB>flags lines into this side's quirks (known flags only ever turn on)
+    local sm = qmgr()
+    if not sm then return end
+    local by = {}
+    for line in data:gmatch("[^\n]+") do
+        local k, f = line:match("^([^\t]+)\t(.*)$")
+        if k then by[k] = f end
+    end
+    for _, q in ipairs(quirks(sm)) do
+        local f = by[qKey(q)]
+        if f then applyFlags(q, f) end
+    end
+end
+
+local function hintHook()
+    if not guest() or NOHINT then return end
+    local sm = qmgr()
+    if not sm then return end
+    log("PT|st hint intent")
+    net.toHost("g.st.hint", table.concat(hintLines(sm), "\n"))
+end
+net.on("g.st.hint", function(pc, data)
+    if not host() or NOHINT then return end
+    local sm, im = qmgr(), FindFirstOf("BP_InventoryManager_C")
+    if not (sm and valid(im)) then return end
+    mergeHints(data)
+    local o = {}
+    sm:GetHintCost(o)
+    local cost = o.Anchors or 0
+    local ca = StaticFindObject("/Game/Gameplay/StatusEffects/Quirks/CA_AnchorJuice_Stable.CA_AnchorJuice_Stable")
+    if not valid(ca) then ca = ids.asset("/Game/Gameplay/StatusEffects/Quirks/CA_AnchorJuice_Stable.CA_AnchorJuice_Stable") end
+    if valid(ca) and cost > 0 then im:CurrencyAdjust(ca, -cost) end
+    sm:IncrementHintsBought()
+    log("PT|st hint paid on the host: cost %s, hints bought %s", tostring(cost), tostring(sm.ConsecutiveHintsBought))
+    ov.post(ov.nameOf(pc) .. " bought a tinker hint", "info", "st.hint")
+end)
+local lastH, lastHAt = nil, 0
+local function hostHints()
+    local sm = qmgr()
+    if not sm or NOHINT then return end
+    local data = tostring(sm.ConsecutiveHintsBought) .. "\n" .. table.concat(hintLines(sm), "\n")
+    if data ~= lastH or os.clock() - lastHAt > 6 then lastH, lastHAt = data, os.clock(); net.toGuests("g.st.hints", data) end
+end
+net.on("g.st.hints", function(_, data)
+    if not guest() or NOHINT then return end
+    local sm = qmgr()
+    local n, rest = data:match("^(%d+)\n?(.*)$")
+    if not (sm and n) then return end
+    sm.ConsecutiveHintsBought = tonumber(n)
+    mergeHints(rest)
+end)
+
 local function cureHook(self, quirk, removed)
     if not guest() or not removed:get() then return end
     local k = byAddr[quirk:get():GetAddress()]
@@ -335,6 +428,7 @@ local HOOKS = {
     { "/Script/PenDriverInventory.InventoryRecipe:ExecuteRecipe", execPre },
     { "/Game/Systems/Managers/BP_StatusEffectManager.BP_StatusEffectManager_C:CureCarQuirk", nil, cureHook },
     { "/Game/Gameplay/CarGarage/BP_GarageInstallation_Spawner.BP_GarageInstallation_Spawner_C:InstallSpecificUpgrade", nil, upHook },
+    { "/Game/Systems/Managers/BP_StatusEffectManager.BP_StatusEffectManager_C:IncrementHintsBought", nil, hintHook },
 }
 local done = {}
 local mutedBench
@@ -403,6 +497,7 @@ LoopInGameThreadWithDelay(500, function()
     elseif host() then
         local okc, errc = pcall(hostCurrencies)
         if not okc then log("PT|error stations currencies %s", tostring(errc)) end
+        pcall(hostHints)
         local okq, errq = pcall(hostQuirks)
         if not okq then log("PT|error stations host quirks %s", tostring(errq)) end
         local ok, err = pcall(hostShredder)

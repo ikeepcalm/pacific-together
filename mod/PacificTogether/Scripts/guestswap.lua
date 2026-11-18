@@ -67,11 +67,8 @@ end)
 
 -- guest: the game's own swap ----------------------------------------------------------------------------------------------
 
-local function swapHook(self, _, interact, success)
-    if common.netMode() ~= "client" or not safety.active() or not success:get() then return end
-    local sl, nm = {}, {}
-    interact:get():GetSlot(sl, nm)
-    local name = nm.TagName:ToString():gsub("^Car%.Equip%.", "")
+-- the intent for one car slot: the guest keeps its change until the host's state shows it
+local function sendSlot(name)
     local s = slotItem(name)
     if not s then return end
     local spec = s.item and ids.spec(s.item) or "-"
@@ -81,6 +78,26 @@ local function swapHook(self, _, interact, success)
     net.toHost("g.swap.set", name .. "\t" .. spec)
 end
 
+local function swapHook(self, _, interact, success)
+    if common.netMode() ~= "client" or not safety.active() or not success:get() then return end
+    local sl, nm = {}, {}
+    interact:get():GetSlot(sl, nm)
+    sendSlot(nm.TagName:ToString():gsub("^Car%.Equip%.", ""))
+end
+
+-- Detailing station (cosmetics): UMG_Cosmetics_Main.EquipSlot swaps the station's slot with the car's cosmetic slot (ItemSlot:SwapSlotContents).
+-- (native: a lone callback runs BEFORE the swap, so it is the post callback.) Whichever side of that swap is a car equipment slot is sent like a part swap; the host's state message shows the cosmetic back.
+local function detailHook(self, other)
+    if common.netMode() ~= "client" or not safety.active() or os.getenv("PT_MUTATE") == "nodetailing" then return end
+    for _, o in ipairs({ self:get(), other:get() }) do
+        if valid(o) then
+            local name = o.SlotName:ToString():match("^Car%.Equip%.(.+)$")
+            local s = name and slotItem(name)
+            if s and s.slot:GetAddress() == o:GetAddress() then sendSlot(name) end
+        end
+    end
+end
+
 local done = false
 LoopInGameThreadWithDelay(1000, function()
     if done or common.netMode() ~= "client" then return end
@@ -88,7 +105,14 @@ LoopInGameThreadWithDelay(1000, function()
         local ok2, err = pcall(swapHook, ...)
         if not ok2 then log("PT|error guestswap hook %s", tostring(err)) end
     end)
-    if ok then done = true; log("PT|guestswap hooked") end
+    if ok then
+        done = true; log("PT|guestswap hooked")
+        local okd = pcall(RegisterHook, "/Script/PenDriverInventory.ItemSlot:SwapSlotContents", function() end, function(...)
+            local ok3, err = pcall(detailHook, ...)
+            if not ok3 then log("PT|error detailing hook %s", tostring(err)) end
+        end)
+        log("PT|detailing hooked %s", tostring(okd))
+    end
 end)
 
 return M
