@@ -228,7 +228,7 @@ return function(T)
                     if d < 2000 * 2000 then
                         n = n + 1
                         local okz, cz = pcall(function() return o.Cylinder.RelativeLocation.Z end) -- the Minuteman's prong: up out of the ground?
-                        if okz and cz > (query.maxz or -999) then query.maxz = cz end
+                        if okz and type(cz) == "number" and cz > (query.maxz or -999) then query.maxz = cz end
                         if d < bd then bd, best, role = d, l, tostring(o.Role) end
                     end
                 end
