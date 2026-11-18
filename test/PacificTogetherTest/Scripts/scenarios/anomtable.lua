@@ -42,7 +42,7 @@ return function(T)
         { "glitteringboulder", "Glittering Boulder", p(G .. "MalfunctionMine", "BP_Hazard_MalfunctionMine_SuperCharger"), "copy" },
         { "shaggyscrambler", "Shaggy Scrambler", p(G .. "MalfunctionMine", "BP_Hazard_MalfunctionImpact_RandomToggle"), "copy" },
         { "leftright", "Left-Right", p(G .. "MalfunctionVolume", "BP_Hazard_MalfunctionVolume_ReverseSteering"), "copy" },
-        { "airstrip", "Airstrip", p(G .. "LowGravityZone", "BP_Hazard_LowGravityZone"), "copy" },
+        { "airstrip", "Airstrip", p(G .. "LowGravityZone", "BP_Hazard_LowGravityZone_RampTruck"), "copy" },
         { "lightning", "Lightning Squall strike", p(G .. "HazardProperties/LightningStrike", "BP_Hazard_LightningStrike"), "copy", true },
         -- Whispers in the Woods (PDFeature_Fig plugin)
         { "ferryman", "Ferryman", p(F .. "DistantCultist", "BP_Hazard_DistantCultist"), "copy" },
@@ -116,6 +116,10 @@ return function(T)
                 local o, hp0, sp
                 add({ run = function()
                     toGuest("t.heal", "1")
+                    -- leftovers of earlier rows (a Pilgrim's Floaters) would count as extra copies of this class
+                    for _, x in ipairs(FindAllOf(short(path)) or {}) do
+                        if T.inWorld(x) then pcall(function() x:K2_DestroyActor() end) end
+                    end
                     local at = L.guestChar():K2_GetActorLocation()
                     if kind == "hurt" then o = spawn(path, at.X, at.Y, at.Z - 80) else o = spawn(path, at.X + 900, at.Y, at.Z - 80) end
                     T.log("PT|info row %s (%s) %s kind=%s", name, wiki, o and T.name(o) or "SPAWN FAILED", kind)
