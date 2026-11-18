@@ -116,9 +116,11 @@ return function(T)
                 local o, hp0, sp
                 add({ run = function()
                     toGuest("t.heal", "1")
-                    -- leftovers of earlier rows (a Pilgrim's Floaters) would count as extra copies of this class
-                    for _, x in ipairs(FindAllOf(short(path)) or {}) do
-                        if T.inWorld(x) then pcall(function() x:K2_DestroyActor() end) end
+                    -- a Pilgrim's Floaters outlive its row and would count as extra copies (destroying every class's leftovers crashed the host)
+                    if name == "sightseer" then
+                        for _, x in ipairs(FindAllOf(short(path)) or {}) do
+                            if T.inWorld(x) then pcall(function() x:K2_DestroyActor() end) end
+                        end
                     end
                     local at = L.guestChar():K2_GetActorLocation()
                     if kind == "hurt" then o = spawn(path, at.X, at.Y, at.Z - 80) else o = spawn(path, at.X + 900, at.Y, at.Z - 80) end
