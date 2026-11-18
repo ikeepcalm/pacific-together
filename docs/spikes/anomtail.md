@@ -48,7 +48,7 @@ Baseline run `20261118-092122-pair1-anomtable` (54/65): 11 failing checks.
 - Whether level-placed Minutemen in real maps behave like the hand-spawned one. They are found by name (world.lua g.world.pos), unlike a spawned one.
 - Whether a Leech's bite should also need the guest on foot to be near enough to be "seen" (the game wants a line of sight to the car).
 
-## Results (worktree C:PTLaneswt-anomtail, pair C:PTLanesnomtail)
+## Results (worktree C:\PTLanes\wt-anomtail, pair C:\PTLanes\anomtail)
 - anomtable full: baseline 54/65 (`20261118-092122-pair1-anomtable`); after the fixes 63/63 (`20261118-103421-anomtail-anomtable`), minuteman and
   interloper logged "not checked".
 - Mutation `noanomtail` (rows boltbunny, burpbunny, boombunny, brokenbunny, dustbunny, lightning): 22/29, 7 checks fail (`20261118-104114-anomtail-anomtable-noanomtail`).
