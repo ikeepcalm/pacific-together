@@ -100,7 +100,7 @@ return function(T)
             kicks = kicks + 1
         end) end)
     end
-    local every = 0
+    local every, tpAt = 0, nil
     LoopInGameThreadWithDelay(1000, function() pcall(function()
         if T.netMode() ~= "client" then return end
         local me = T.myPawn()
@@ -110,12 +110,16 @@ return function(T)
             if kind == "t.end" then finished = true end
             if kind == "t.tp" and me and me:IsValid() then
                 local x, y, z = data:match("^(%-?[%d%.]+)\t(%-?[%d%.]+)\t(%-?[%d%.]+)$")
-                me:K2_SetActorLocation({ X = tonumber(x), Y = tonumber(y), Z = tonumber(z) }, false, {}, true)
+                tpAt = { X = tonumber(x), Y = tonumber(y), Z = tonumber(z) }
             end
             if kind == "t.kick" then
                 local x, y = data:match("^(%-?[%d%.]+)\t(%-?[%d%.]+)$")
                 spot, kicking = { X = tonumber(x), Y = tonumber(y) }, true
             end
+        end
+        if tpAt and me and me:IsValid() then -- the guest's pawn is replaced a while after the join (anomcarry probe): stand at the spot again if it was
+            local l = me:K2_GetActorLocation()
+            if math.abs(l.X - tpAt.X) > 300 or math.abs(l.Y - tpAt.Y) > 300 then me:K2_SetActorLocation(tpAt, false, {}, true) end
         end
         if spot then
             local n = 0
