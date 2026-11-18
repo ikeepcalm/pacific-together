@@ -47,6 +47,7 @@ LoopInGameThreadWithDelay(200, function()
             local key = l:GetFName():ToString()
             if now - (bitAt[key] or -99) < COOL or l.LeechState == 3 then return end -- 3 = leaping: the game's own hit path (anomalies2)
             local ball = l.SM_Prototype_BlockySphere
+            if not (ball and ball:IsValid()) then return end -- a leech still being set up has no sphere (calling it crashed the host, anomalies2 run 20261118-102302)
             local at = ball:K2_GetComponentLocation()
             local best, bd
             for _, p in ipairs(pawns) do
@@ -81,6 +82,7 @@ LoopInGameThreadWithDelay(50, function()
             if l.Role ~= 1 then return end
             l:SetActorTickEnabled(false)
             local ball = l.SM_Prototype_BlockySphere
+            if not (ball and ball:IsValid()) then return end
             ball:K2_SetWorldLocation(l:K2_GetActorLocation(), false, {}, true)
             M.followed = M.followed + 1
         end)
