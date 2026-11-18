@@ -6,6 +6,7 @@
 --               unchanged). Mutation noanom (no damage forwarding to the guest) fails these.
 --   A row with a 5th field true is short-lived (the lightning strike): the guest remembers its first sighting, compared with the spawn spot.
 --   A row with a 6th field (a reason) is not checked: a known gap written up in docs/spikes/anomtail.md.
+--   A row's 7th field is called with the deferred actor and its spot before it finishes spawning (properties the game's own spawner sets).
 -- Run: tools/run-test.ps1 -Scenario anomtable -Fixture zone -Headless [-Mutate noworldsync|noanom|noanomtail]
 return function(T)
     local L = require("scenarios.sessionlib")(T)
@@ -36,7 +37,7 @@ return function(T)
         { "fallenfirmament", "Fallen Firmament", p(G .. "FallingPillar", "BP_Hazard_FallingPillar"), "copy" },
         { "blacksmith", "Blacksmith", p(G .. "RockPounder", "BP_Hazard_RockPounder"), "copy" },
         { "wrigglingwreck", "Wriggling Wreck", p(G .. "MovementHazard", "BP_Hazard_MovementHazard"), "copy" },
-        { "minuteman", "Minuteman", p(G .. "MovementHazard", "BP_Hazard_Movement_Prong"), "copy", false, "its replicated copy destroys itself ~3 s after it appears on the guest (own retract cycle), docs/spikes/anomtail.md" },
+        { "minuteman", "Minuteman", p(G .. "MovementHazard", "BP_Hazard_Movement_Prong"), "copy" },
         { "bubblegumbuddy", "Bubblegum Buddy", p(G .. "Spore", "BP_Hazard_Spore"), "copy" },
         { "moldyballoon", "Moldy Balloon", p(G .. "Bouncing/Acid", "BP_Hazard_Bouncing_Acid"), "copy" },
         { "glitteringboulder", "Glittering Boulder", p(G .. "MalfunctionMine", "BP_Hazard_MalfunctionMine_SuperCharger"), "copy" },
@@ -44,6 +45,8 @@ return function(T)
         { "leftright", "Left-Right", p(G .. "MalfunctionVolume", "BP_Hazard_MalfunctionVolume_ReverseSteering"), "copy" },
         { "airstrip", "Airstrip", p(G .. "LowGravityZone", "BP_Hazard_LowGravityZone_RampTruck"), "copy" },
         { "lightning", "Lightning Squall strike", p(G .. "HazardProperties/LightningStrike", "BP_Hazard_LightningStrike"), "copy", true },
+        -- Meteorite Squall: the squall spawns these at the ground spot (HitGroundLoc) and the actor itself plays the fall
+        { "meteor", "Meteorite Squall meteor", p(G .. "FallingPillar", "BP_Hazard_FallingPillarChunk"), "copy", true, nil, function(d, at) d.HitGroundLoc = { X = at.X, Y = at.Y, Z = at.Z } end, 0.7 },
         -- Whispers in the Woods (PDFeature_Fig plugin)
         { "ferryman", "Ferryman", p(F .. "DistantCultist", "BP_Hazard_DistantCultist"), "copy" },
         { "gloomypocket", "Gloomy Pocket", p(F .. "Evolved/ShroudCloud", "BP_Hazard_Evolved_Cloud_Shroud"), "copy" },
@@ -63,12 +66,14 @@ return function(T)
         return (h and h:IsValid()) and h.Current or -1
     end
     local function xf(x, y, z) return { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = { X = x, Y = y, Z = z }, Scale3D = { X = 1, Y = 1, Z = 1 } } end
-    local function spawn(path, x, y, z)
+    local function spawn(path, x, y, z, pre)
         local cls = StaticFindObject(path)
         if not cls:IsValid() then pcall(LoadAsset, path); cls = StaticFindObject(path) end
         if not cls:IsValid() then return nil end
         local gs = UEHelpers.GetGameplayStatics()
-        return gs:FinishSpawningActor(gs:BeginDeferredActorSpawnFromClass(T.world(), cls, xf(x, y, z), 2, nil), xf(x, y, z))
+        local d = gs:BeginDeferredActorSpawnFromClass(T.world(), cls, xf(x, y, z), 2, nil)
+        if pre then pre(d, { X = x, Y = y, Z = z }) end
+        return gs:FinishSpawningActor(d, xf(x, y, z))
     end
     local function short(path) return path:match("%.([^%.]+)$") end
 
@@ -83,8 +88,8 @@ return function(T)
                 if not kind then return end
                 if kind == "t.hp" then guestHp = tonumber(data) or guestHp end
                 if kind == "t.c" then
-                    local q, n, x, y, z, role = data:match("^(%S+)\t(%d+)\t(%-?[%d%.]+)\t(%-?[%d%.]+)\t(%-?[%d%.]+)\t(%S+)$")
-                    if q then copy = { q = q, n = tonumber(n), x = tonumber(x), y = tonumber(y), z = tonumber(z), role = role } end
+                    local q, n, x, y, z, role, age = data:match("^(%S+)	(%d+)	(%-?[%d%.]+)	(%-?[%d%.]+)	(%-?[%d%.]+)	(%S+)	(%-?[%d%.]+)$")
+                    if q then copy = { q = q, n = tonumber(n), x = tonumber(x), y = tonumber(y), z = tonumber(z), role = role, age = tonumber(age) } end
                 end
             end
         end
@@ -110,7 +115,7 @@ return function(T)
         add({ check = "host_far_from_guest", timeout = 30, cond = function() return T.dist(L.guestChar(), T.myPawn()) > 6000 end })
         add({ wait = 6 })
         for _, r in ipairs(ROWS) do
-            local name, wiki, path, kind, sticky, open = r[1], r[2], r[3], r[4], r[5], r[6]
+            local name, wiki, path, kind, sticky, open, maxAge = r[1], r[2], r[3], r[4], r[5], r[6], r[8]
             if open then add({ run = function() T.log("PT|info row %s (%s) not checked: %s", name, wiki, open) end })
             elseif not only or (("," .. only .. ","):find("," .. name .. ",", 1, true)) then
                 local o, hp0, sp
@@ -123,7 +128,7 @@ return function(T)
                         end
                     end
                     local at = L.guestChar():K2_GetActorLocation()
-                    if kind == "hurt" then o = spawn(path, at.X, at.Y, at.Z - 80) else o = spawn(path, at.X + 900, at.Y, at.Z - 80) end
+                    if kind == "hurt" then o = spawn(path, at.X, at.Y, at.Z - 80, r[7]) else o = spawn(path, at.X + 900, at.Y, at.Z - 80, r[7]) end
                     T.log("PT|info row %s (%s) %s kind=%s", name, wiki, o and T.name(o) or "SPAWN FAILED", kind)
                     copy = { n = -1 }
                 end })
@@ -151,8 +156,8 @@ return function(T)
                     poll()
                     if copy.q ~= short(path) then return false end
                     local d = math.sqrt((copy.x - h.X) ^ 2 + (copy.y - h.Y) ^ 2 + (copy.z - h.Z) ^ 2)
-                    T.log("PT|info %s guest copies=%d role=%s offset=%.0f", name, copy.n, copy.role, copy.n > 0 and d or -1)
-                    return copy.n == 1 and copy.role == "1" and d < 400
+                    T.log("PT|info %s guest copies=%d role=%s offset=%.0f age=%.2f", name, copy.n, copy.role, copy.n > 0 and d or -1, copy.age or 0)
+                    return copy.n == 1 and copy.role == "1" and d < 400 and (not maxAge or (copy.age or 99) <= maxAge)
                 end })
                 if kind == "hurt" then
                     add({ check = name .. "_hurt", timeout = 45, cond = function()
@@ -161,8 +166,11 @@ return function(T)
                         return guestHp >= 0 and guestHp < hp0 - 1
                     end })
                 end
-                add({ run = function() if o and o:IsValid() then o:K2_DestroyActor() end end })
-                add({ wait = 3 })
+                -- a meteor ends its own life (its radiation influence sticks when it is destroyed early and keeps hurting the host)
+                add({ run = function() if o and o:IsValid() and not r[7] then o:K2_DestroyActor() end end })
+                add({ wait = r[7] and 9 or 3 })
+                -- the meteor's radiation reaches the host too, wherever the guest stands (docs/spikes/anomrest.md): refill it for the final check
+                if r[7] then add({ run = function() pcall(function() T.first("BP_ResourceManager_C").PlayerHealth:Fill(T.myPawn()) end); hostHp0 = health() end }) end
             end
         end
         add({ check = "host_not_hurt_for_guest", timeout = 8, cond = function() T.log("PT|info host hp %.0f (start %.0f)", health(), hostHp0); return health() >= hostHp0 - 20 end })
@@ -182,7 +190,7 @@ return function(T)
             if kind == "t.end" then finished = true end
             if kind == "t.s" then
                 local c, x, y, z = data:match("^(%S+)	(%-?[%d%.]+)	(%-?[%d%.]+)	(%-?[%d%.]+)$")
-                query = { c = c, x = tonumber(x), y = tonumber(y), z = tonumber(z), sticky = true }
+                query = { c = c, x = tonumber(x), y = tonumber(y), z = tonumber(z), sticky = true, t0 = os.clock() }
             end
             if kind == "t.q" then
                 local c, x, y, z = data:match("^(%S+)\t(%-?[%d%.]+)\t(%-?[%d%.]+)\t(%-?[%d%.]+)$")
@@ -223,10 +231,10 @@ return function(T)
             end
             best = best or { X = 0, Y = 0, Z = 0 }
             if query.sticky then -- the first sighting stays the answer
-                if n > 0 and not query.keep then query.keep = { n = n, best = best, role = role } end
+                if n > 0 and not query.keep then query.keep = { n = n, best = best, role = role, age = os.clock() - (query.t0 or os.clock()) } end
                 if query.keep then n, best, role = query.keep.n, query.keep.best, query.keep.role end
             end
-            PTNative_MsgToHost(pc, "t.c", string.format("%s\t%d\t%.0f\t%.0f\t%.0f\t%s", query.c, n, best.X, best.Y, best.Z, role))
+            PTNative_MsgToHost(pc, "t.c", string.format("%s	%d	%.0f	%.0f	%.0f	%s	%.2f", query.c, n, best.X, best.Y, best.Z, role, query.keep and query.keep.age or 0))
         end
     end) end)
     return {
