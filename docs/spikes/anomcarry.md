@@ -15,6 +15,10 @@ Lane `anomcarry`. Files: `mod/PacificTogether/Scripts/anommove.lua` (changed), s
   (`PhysicsGrabber2` host Y -13001 vs guest copy Y -8101). The guest copy's root does not replicate. anommove matched copies by the root XY
   the host sent, so any grabber that had moved was never matched: no core, magnet or arm updates on the guest. That is the owner's report
   ("stays on the ground"); the earlier scenario only lifted a grabber whose root stayed at its spawn point.
+- Thrown steel scrap (6.4 kg, 2200 and 3500 uu/s, spawned 500 uu from the antenna tip with `SetPhysicsLinearVelocity`) did not move or explode the
+  map Tourist of the zone fixture, also when spawned on the host itself (probe): the Tourist stands tilted ~21 degrees from the start and
+  stayed. Parity with the host, not a sync gap, but a real throw (`BP_BaseHandManifestation:ThrowItem`: `Spawn Item Player Drop`, then `AddImpulse(camera forward * Force, vel change)`)
+  was not reproduced with its tuning values.
 - Item hunt (state 5) driven by hand: `MoveToOBJ_TICK` at 20 Hz did not home in (the core drifted away from the item); not solved.
 - Thrown item: `loot.lua` reports a guest drop (an unknown `BP_WorldItem_C` within 500 uu of the guest pawn) with position and linear/angular
   velocity (`drop-velocity`), the host spawns its copy and sets the physics velocity; the guest's copy is then adopted by the host's. The flight
@@ -33,5 +37,14 @@ Lane `anomcarry`. Files: `mod/PacificTogether/Scripts/anommove.lua` (changed), s
 - The driver would tick twice for a grabber whose machine does run; none was seen to.
 - The guest sees the car and the core about 250-450 uu behind the host's while dragged at ~1500 uu/s (10 Hz rows, 0.1 s glide, network).
 
-## Results
-See the end of this file.
+- Whether any thrown item explodes a Tourist (hit strength, antenna tip aim) is unknown; the guest's throw reaches the host as a flying item.
+
+## Results (pair C:\PTLanesnomcarry, port 7885, headless, results in local/test-results)
+- `anomcarry` 20/20 `20261118-100634-anomcarry-anomcarry` (first pass 19/19 `20261118-095822-anomcarry-anomcarry`). Mutation `anomrootkey` 19/20,
+  fails `guest_grabber_follows`: `20261118-100845-anomcarry-anomcarry-anomrootkey`. Mutation `noanommove` 17/20, fails `host_grabber_grabs_car`,
+  `guest_car_follows_carry`, `guest_grabber_follows`: `20261118-101349-anomcarry-anomcarry-noanommove`.
+  Carry as the game does it: the car is dragged across the ground toward the grabber (Z fell 116 uu in the run, it was not lifted), the guest's car stays
+  within 250 uu of the host's; the guest's core and magnet follow within 400 uu (lag 200 to 500 uu at ~1500 uu/s).
+- `anomthrow` 18/18 `20261118-105029-anomcarry-anomthrow` (the host sees the guest's throw as an item flying at 2210 uu/s near the Tourist);
+  mutation `nodropvel` 17/18, fails `host_gets_thrown_item_flying`: `20261118-105257-anomcarry-anomthrow-nodropvel`.
+  No check that the Tourist explodes (it did not, see Observations).
