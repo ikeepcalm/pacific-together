@@ -77,15 +77,15 @@ end
 local loadedAt, GUARD = 0, os.getenv("PT_MUTATE") == "noseatguard" and 0 or 20 -- mutation noseatguard: zoneexit
 RegisterLoadMapPostHook(function() loadedAt = os.clock() end)
 
--- guest: a hit we just applied to our own pawn spills over onto the host's body in our world (a cloud with both players in it); that
--- echo is not a real hit on the host and was forwarded back, so the host took the guest's damage as well (hosthurt)
-local appliedAt, ECHO = -1, os.getenv("PT_MUTATE") == "hostdrain" and 0 or 0.25 -- mutation hostdrain: scenario hosthurt
+-- guest: hazard damage on the host's body in our world is never forwarded: the host's own game deals it, and our copy of the hit
+-- (the cloud's spill onto the host's body when both stand in it) made the host take acid and electricity twice (hosthurt)
+local HAZARD = os.getenv("PT_MUTATE") ~= "hostdrain" and { "Damage_Acid", "Damage_Radiation", "Damage_Electrical", "Damage_FallDamage" } or {}
 
 local function pre(rec, p, intercepted)
     if not (M.enabled and safety.active()) then return end
     local guest = safety.guest()
     if not (valid(rec) and valid(p)) then return end
-    if guest then if not isHostBody(rec) or os.clock() - loadedAt < GUARD or os.clock() - appliedAt < ECHO then return end elseif not isGuestPawn(rec) then return end
+    if guest then if not isHostBody(rec) or os.clock() - loadedAt < GUARD then return end elseif not isGuestPawn(rec) then return end
     local dmg = p.Damage
     local key, now = p:GetAddress(), os.clock()
     if not intercepted then
@@ -95,7 +95,11 @@ local function pre(rec, p, intercepted)
     if dmg == 0 then return end
     -- a bump of the host's body in the guest's world (seating jolts, its copy of the car): the host's game already deals its own
     -- physical hits, and a forwarded 60 came out of nowhere for the host (playtest 2026-10-31)
-    if guest and p:GetClass():GetFName():ToString():find("Physical_Impact", 1, true) then return end
+    if guest then
+        local n = p:GetClass():GetFName():ToString()
+        if n:find("Physical_Impact", 1, true) then return end
+        for _, h in ipairs(HAZARD) do if n:find(h, 1, true) then return end end
+    end
     local sample, cap = lastHp, math.abs(dmg) * 1.5 + 1
     if sample and not intercepted then
         common.defer(40, function() try("put back", function()
@@ -195,7 +199,6 @@ net.on("g.anom.msg", function(_, data)
         if not (valid(c) and valid(target) and valid(ms)) then return end
         local m = StaticConstructObject(c, ms)
         m.Damage, m.Spillover, m.IsDamageOverTime, m.FeedbackStrength, m.DistributeMode = tonumber(dmg), sp == "1", dot == "1", tonumber(fb), tonumber(dm)
-        if guest then appliedAt = os.clock() end
         ms:DispatchMessage(m, target)
         M.applied = M.applied + 1
         log("PT|anom damage applied %s", data)

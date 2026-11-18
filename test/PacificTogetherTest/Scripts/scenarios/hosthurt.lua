@@ -1,11 +1,12 @@
 -- hosthurt: a guest that died and was revived must not drain the host (lane hosthurt, docs/spikes/hosthurt.md).
---   The guest is left at 6 hit points in a cloud that kills it, the host respawns it, then it is taken far from the host again and a Cough Box
---   cloud (BP_Hazard_Cloud_Acid) is spawned at its feet.
+--   The guest is left at 6 hit points in a cloud that kills it, the host respawns it beside the car, and a Cough Box cloud
+--   (BP_Hazard_Cloud_Acid) is spawned at its feet, with the host standing in it too.
 --   guest_died / guest_revived   health.lua's death and revive ran on the guest
 --   guest_hurt_after_revive      the guest's own health fell in the cloud
---   host_not_drained_after_guest_death  the host's health held through the cloud (mutation hostdrain brings back the old drain)
+--   host_not_drained_after_guest_death  guest and host stand in one cloud: the host applied no hazard hit forwarded by the guest
+--               (mutation hostdrain forwards them again)
 -- The revived guest stays where the host put it (next to the host's car, in the cloud with the host near): the real bug, the guest's
--- own hit echoed onto the host's body. PT_HURT_FAR=1 takes it far away again first (that case never failed).
+-- own copy of the hit on the host's body forwarded to the host. PT_HURT_DIST=n puts it n uu from the host (default 200, 0 = stay).
 -- Run: tools/run-test.ps1 -Scenario hosthurt -Fixture zone -Headless [-Mutate hostdrain]
 return function(T)
     local L = require("scenarios.sessionlib")(T)
@@ -30,6 +31,7 @@ return function(T)
         local steps = {}
         local function add(s) steps[#steps + 1] = s end
         local gpc, guestHp, minSeen, hostHp0, guestHp0, o, killer = nil, -1, 1e9, -1, -1, nil, nil
+        local applied0 = 0
         local function poll()
             while true do
                 local kind, data = PTNative_MsgPoll("t.")
@@ -69,12 +71,12 @@ return function(T)
         end })
         add({ check = "guest_died", timeout = 30, cond = function() poll(); return minSeen <= 1.5 end })
         add({ check = "guest_revived", timeout = 60, cond = function() poll(); return guestHp >= 90 end })
-        if tonumber(os.getenv("PT_HURT_DIST") or "1500") > 0 then
+        if tonumber(os.getenv("PT_HURT_DIST") or "200") > 0 then
             add({ run = function() if killer and killer:IsValid() then killer:K2_DestroyActor() end end })
             add({ wait = 3 })
             add({ run = function()
                 local l = T.myPawn():K2_GetActorLocation()
-                spot = { X = l.X + tonumber(os.getenv("PT_HURT_DIST") or "1500"), Y = l.Y, Z = l.Z + 200 }
+                spot = { X = l.X + tonumber(os.getenv("PT_HURT_DIST") or "200"), Y = l.Y, Z = l.Z + 200 }
                 farTp()
             end })
             add({ wait = 4 })
@@ -82,16 +84,19 @@ return function(T)
         add({ wait = 5 })
         add({ run = function()
             poll(); hostHp0, guestHp0 = health(), guestHp
+            applied0 = (package.loaded.anomalies or {}).applied or 0
             local at = L.guestChar():K2_GetActorLocation()
             o = spawn(CLOUD, at.X, at.Y, at.Z - 80)
             T.log("PT|info cloud %s host hp0=%.0f guest hp0=%.0f", o and T.name(o) or "SPAWN FAILED", hostHp0, guestHp0)
         end })
         add({ check = "guest_hurt_after_revive", timeout = 45, cond = function() poll(); return guestHp >= 0 and guestHp < guestHp0 - 1 end })
-        add({ wait = 10 })
+        add({ wait = 4 })
         add({ run = function() if o and o:IsValid() then o:K2_DestroyActor() end end })
         add({ check = "host_not_drained_after_guest_death", timeout = 5, cond = function()
             T.log("PT|info host hp %.0f (start %.0f) guest hp %.0f", health(), hostHp0, guestHp)
-            return health() >= hostHp0 - 5
+            -- both stand in the cloud: the host loses what its own game deals (about 10 a second), and no forwarded copy of a hazard hit
+            -- (anomalies.applied counts the g.anom.msg the host applied) arrives from the guest
+            return ((package.loaded.anomalies or {}).applied or 0) == applied0 and health() > 0
         end })
         add({ run = function() toGuest("t.end", "1") end })
         add({ wait = 3 })
