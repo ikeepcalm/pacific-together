@@ -1526,3 +1526,91 @@ join), meanwhile the host's car state message overwrote the guest's own change (
   same class as soak 1; the guest now ignores an unchanged presence message, 487df45). Runs 15-34 (live main with both changes) had no
   crash. Others: playpath x4 (bot), lootsync 39/40 lootables once, runloop weather mismatch once (both under 4-pair load).
 - Not achieved: a clean soak; the guest loot-tick crash cause; mutations for the guestswap hold and the crash hardening.
+
+## 2026-11-18 unattended (owner away; from e06653c / 0.9.5, lanes on Sonnet, lead on pair1/pair2)
+Goal: every anomaly the same for guest and host (W6), close the 0.9.5 open items, ship 0.9.6-dev. Table: docs/spikes/W6-anomalies.md.
+Names: the wiki's 63 anomalies were matched to classes through the game's own logbook titles (Fandom 402, Steam guide 429). Earlier spikes
+saying Abductor/Can Opener/Pickpocket are "not in this build" were wrong (PhysicsGrabber, SawBlade, PartStealer). W6 "Bunnies" are the
+Leeches; the mod's older "bunny" code is the Pufferfish (LootCreature).
+
+### Merged lanes (scenario + failing mutation; result folders in local/test-results, details in each spike)
+- anomhit: guest kick on a Tourist -> host applies the kick (g.anomhit). anomhit 21/21, noanomhit fails host_tourist_exploded. Real kick
+  path = PlayerKick/ObjectKicked; tools do nothing to a Tourist (host either).
+- anommove + anomcarry: Can Opener mount/blade and Abductor core/magnet/arm mirrored; guest copies keyed by home position (the grabber's
+  root travels); host drives the Abductor's car hunt. anommove 22/22 (noanommove -4), anomcarry 20/20 (anomrootkey, noanommove fail).
+  The Abductor drags the car on the ground (not lifted) in tests. anomthrow 18/18: a guest throw reaches the host in flight (nodropvel fails);
+  no thrown item exploded a Tourist for host or guest.
+- smhost (root cause, biggest find): in a listen session every hazard's Logic Driver component is "configured for networking", its instance
+  ticks but never takes a transition. Can Opener, Blacksmith, Titan's Bone, Bubblegum Buddy, Ticking Tumbler, Bollards, Pufferfish (and the
+  Abductor) were frozen FOR THE HOST TOO in every co-op session. Host-only fix: component bReplicates=false + fresh instance. smhost 24/24,
+  nosmhost fails 7. Guess: the garage doors (PT1-garage) have the same cause.
+- anomvis: moving components of those hazards mirrored to the guest (generic, 10 Hz on change, ~2.7 KB/s). Titan's Bone and Bollard follow
+  checks flaky (spawned bollard random yaw does not stick on the guest; spear copy short-lived); Tumbler/Bubblegum/Pufferfish roots replicate
+  by themselves (weak checks). Blacksmith stays in Pre-Drop on the host (open).
+- anomtail: Bunnies follow the host (copy tick off) and bite a near guest (host-driven, 15, 10 s cooldown); lightning strike replicated at
+  begin play. anomrest: Minuteman visible on the guest (cylinder up), meteors (FallingPillarChunk) replicated at begin play.
+- anomtable (lead): one copy/hurt check per long-tail class, 65/65 on the lane pairs. Mutations: noworldsync fails every copy row
+  (20261118-093418, -095701, -111644-pair2), noanomtail the bunny bites + lightning, noanomrest minuteman + meteor. Glowgrabber/Harvestman
+  replicate natively (no mod mutation can fail them).
+- hosthurt: the guest no longer forwards hazard damage (acid, electric, radiation, fall) on the host's body: both in one cloud, the host
+  got echoes. The anomtable failure that started it was the scenario (a dead guest respawns beside the host's car). hostdrain fails it.
+  Physical_Piercing hazards (saw, spikes) on the host's body in the guest's world are still forwarded (possible double; hand check).
+- detailing (G2): a Detailing car-slot swap goes to the host via g.swap.set; a Tinker hint is paid once from the host's currency.
+  detailing 31/31, nodetailing/nohints fail 4 each.
+- open095: loot-tick crash hardening (ids.layout strict skips a settling container; cause NOT proven), mapmark / guestact / damagefeedback
+  were check races (3 passes each).
+- smscen: anomalies2/3 adapted to un-frozen hazards (see below).
+
+### 0.9.5 open items
+- Guest loot-tick crash: hardened (ids.layout strict, lane open095), root cause NOT proven. No crash in today's 17-run soak or in the
+  suite (runloop 4/4 in the lane). Repro if it returns: runloop under load; the crash marker names the loot tick phase.
+- mapmark: fixed (scenario race: host moved the guest before its near check), 25/25 x3; the nudge pad hook was not involved.
+- guestact port jumper: fixed (the check called a replaced charger), 36/36 x3; the mod was right.
+- damagefeedback: fixed (check accepted one of two hits), 22/22 x3; the mod was right.
+- Clean soak: NOT reached to 30 runs. Stopped at the owner's return after 17 runs (13:27-14:30, pair2, main 2e4e125, 0.9.6-dev, 3-pair
+  load): 0 crashes; 2 failures, runloop z2_same_world weather mismatch once (known) and playpath bot menu check once (known).
+  local/test-results/soak-20261118-132715.txt.
+
+### Full suite (run-suite.ps1, 2 shards, 12:50-14:28, live main from 1bec6b8 to 2e4e125)
+- Shard 1: 41/45, failed playerhealth, anomalies2, worldzone, anomhit. Shard 2: 43/44, failed anomalies3.
+- anomalies2/anomalies3: the scenarios assumed frozen hazards (host stood next to an un-frozen leech / Tumbler; Pufferfish moved off);
+  lane smscen moved the host far away: anomalies2 24/24, anomalies3 26/26 (merged 873013a).
+- anomhit: flaky on merged main (2 of 2 failed; the guest bot's kick misses the Tourist copy: reach ~175 of 200, pawn drift). smscen
+  cycles the aim point; its first rerun still failed when stopped. The mod path passed 21/21 in two lanes. Needs a real-kick hand check.
+- playerhealth: health.lua did not detect the guest's death at 1% (guest regenerated): the slow death detection hosthurt also saw
+  (up to 80 s). Not investigated; rerun was stopped with the owner's return.
+- worldzone: guest_generator_present failed once; rerun was stopped. Unknown whether flaky.
+- Not run: lag/loss 150/2 on the anomaly scenarios (stopped before it). Today's new scenarios not in the suite run: anomvis (flaky,
+  lane results only).
+- Noted crash (mutation only): anomtable -Mutate noworldsync 20261118-093418, the host failed the run, went to the garage and crashed
+  (AV, marker last Lua perf.lua:185). Not seen on normal code.
+
+### Open (next)
+Blacksmith stops in Pre-Drop on the host; Abductor item hunts (state 5) not driven; Bollard random yaw on the guest; Interloper
+(real-run check); Physical_Piercing hazard echo on the host's body; meteor radiation hurting a far host in tests; slow guest death
+detection; anomvis smoothing (10 Hz steps); D23 crash-upload proof needs the owner's UAC prompt (skipped); garage doors probably share
+the smhost cause (garage.lua drives them, untouched).
+
+### Owner hand checks (rendered pass: effects, sound, real input)
+Host a run, guest joins; split up where noted. Each line: what to do, what both screens should show.
+1. **Abductor**: park near one and let it find the car while the guest watches from outside. Grabber flies over, hooks the car,
+   drags it; cable and magnet stay attached on the guest's screen; sound on both. Also: does it ever lift the car off the ground?
+2. **Can Opener**: walk the guest next to a level-placed saw (host far). Blade slides its track and spins with sparks/sound on
+   the guest; touching it hurts the guest only. The host's own saw moves too (it was frozen in co-op before).
+3. **Tourist**: guest kicks a Tourist with the real kick key -> it explodes on both screens. Then throw a heavy item at one
+   from the guest, and compare with the host throwing the same item (tests found no explosion from throws for either).
+4. **Frozen-anomaly fix (host)**: as host, with and without a guest, walk up to a Blacksmith, Titan's Bone, Ticking Tumbler,
+   Bubblegum Buddy, Bollards, Pufferfish: they rise, swing, roll, chase as in single player. Blacksmith stayed in Pre-Drop in a
+   spawned test; check a level-placed one. Sick Mickey / Wriggling Wreck: do they erupt/crawl at all?
+5. **Guest sees them move**: same anomalies from the guest's side: Titan's Bone spears and Bollards rise for the guest; the
+   Tumbler rolls; the Minuteman pops up (it pops rather than rises and vanishes instead of sinking).
+6. **Bunnies**: guest walks up to Bolt/Burp/Boom Bunnies far from the host: they leap and bite (15), copies sit where the host's
+   are; no bite through walls expected to be checked (bite has no line-of-sight test).
+7. **Squalls**: Lightning Squall strikes and Meteorite Squall meteors land at the same moment on both screens; does the meteor
+   radiation hurt a guest standing next to the crater (the host took ~35 in a test with the guest far away)?
+8. **Clouds together**: both players stand in one acid/electric cloud: the host loses health at the same rate as alone, no
+   "hit you" feed lines. Let the guest die once: it respawns beside the host's car.
+9. **Detailing**: as guest, fit a hood ornament at the Detailing station: on the host's car within ~2 s and on the guest's car.
+10. **Tinker**: guest buys a hint with a quirk showing: host anchor energy drops once by the cost; hint visible on both.
+11. **Loot after arrival**: right after a zone arrival or garage return, the guest empties a container: the host sees it emptied.
+12. **Interloper (DLC)**: in a real DLC zone, does the guest see the Interloper where the host does (could not be spawned in tests).

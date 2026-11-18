@@ -3,9 +3,9 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
-## [0.9.6-dev] - 2026-11-18 (developer build, not hand-tested, no release)
+## [0.9.6] - 2026-11-18 (preview, not yet hand-tested)
 
-Network protocol **9**, as in 0.9.5; both players need the same build.
+Network protocol **9**, as in 0.9.5; everyone needs 0.9.6 (the mod version must match).
 
 ### Fixed
 
@@ -27,7 +27,12 @@ Network protocol **9**, as in 0.9.5; both players need the same build.
 
 ### Known issues
 
-- See NOTES.md "2026-11-18 unattended" for what is still open (Abductor item hunts, Interloper, Sick Mickey/Wriggling Wreck timing).
+- The Blacksmith rises but never slams (for host and guest).
+- The Abductor drags the car along the ground; it does not go after loose items.
+- Spawned Bollards can face a different way on the guest's screen.
+- The Minuteman pops up for the guest instead of rising, and vanishes instead of sinking.
+- A thrown item did not explode a Tourist in tests, for the host either.
+- Long automated runs found no crash today, but the earlier guest loot crash is only guarded, not proven fixed.
 
 ## [0.9.5] - 2026-11-17 (preview, not yet hand-tested)
 
