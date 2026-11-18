@@ -50,6 +50,7 @@ local M = {}
 local ents, byName, nextId = {}, {}, 1 -- id -> entity; actor full name -> id (host)
 local partIds = {} -- wreck part actor full name -> id, both sides (idOf), checked on lookup
 local reported = {} -- guest: dropped items already told to the host
+local DROPVEL = os.getenv("PT_MUTATE") ~= "nodropvel" -- tests only: the guest's drop is reported without its velocity
 local ADOPT = os.getenv("PT_MUTATE") ~= "nodropadopt" -- tests only: the guest's drop is replaced by the host's copy
 local pendingDrops, dropKey = {}, 0 -- guest: key -> its own dropped actor, until the host's "K" makes it an entity
 local claimed = {} -- guest: local actors that are some entity's copy
@@ -791,14 +792,14 @@ local function scanDrops()
                     end
                 end
                 local drop = string.format("N|%s|%.1f|%.1f|%.1f|%.1f", ids.path(a.Instance.Archetype), l.X, l.Y, l.Z, r.Yaw)
-                if net.hostSupports("drop-velocity") then
+                if DROPVEL and net.hostSupports("drop-velocity") then
                     drop = drop .. string.format("|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f", r.Pitch, r.Roll, v.X, v.Y, v.Z, av.X, av.Y, av.Z)
                 end
                 if adopt then
                     dropKey = dropKey + 1
                     pendingDrops[tostring(dropKey)] = common.lease(a)
                     drop = drop .. "|" .. dropKey
-                    if not NOITEMSTATE and net.hostSupports("drop-velocity") and net.hostSupports("item-state") then drop = drop .. "|" .. ids.spec(a.Instance) end
+                    if not NOITEMSTATE and DROPVEL and net.hostSupports("drop-velocity") and net.hostSupports("item-state") then drop = drop .. "|" .. ids.spec(a.Instance) end
                 end
                 say(drop)
                 log("PT|loot guest drop %s told the host", ids.path(a.Instance.Archetype):match("[^/]+$"))
