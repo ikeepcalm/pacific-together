@@ -3,6 +3,30 @@
 What changed in Pacific Together, in plain words. Newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Builds before 1.0 are previews for the developers and friends.
 
+## [0.9.7] - 2026-11-20 (preview, not yet hand-tested)
+
+Network protocol **10**: everyone needs 0.9.7 (a 0.9.6 player cannot join).
+
+### Fixed
+
+- **Missing loot for the guest on a laggy connection:** on a slow or lossy link the guest could miss whole containers (backpacks,
+  crates) the host has, for the rest of the zone. The guest's loot list no longer drops lines while it is still working through them.
+- **Guest death noticed late:** a guest killed right after arriving in a zone could wait up to 80 s for the death screen and
+  respawn. It now comes within a few seconds. A guest who is merely low on health is not treated as dead.
+- **Blacksmith:** it slams for both players (it only stalls inside a safe area, as in single player).
+- **Abductor:** besides the car it also hunts loose items and throws them, as in single player.
+- **Nudge pad:** a guest who walks onto one is launched in an arc toward a nearby anomaly, like the host, not straight up.
+- **Bollards:** a spawned Bollard faces the same way on the guest's screen.
+- **Pickpocket:** it reaches for a guest from as far as it reaches for the host (1500 instead of 1200).
+- A host crash when an anomaly the Blacksmith spawned vanished mid-update is guarded against (not proven by a test).
+- A guest error on zone loads that could leave stale visual copies behind is guarded against.
+
+### Known issues
+
+- The Interloper (DLC) is not tested: it cannot be spawned in the test world.
+- A guest leaving the car while the host drives fast sometimes does not land beside the car (also in 0.9.6).
+- In a test that spawns every anomaly at once, the guest crashed in 1 of 3 runs (seen before 0.9.7 too; cause unknown).
+
 ## [0.9.6] - 2026-11-18 (preview, not yet hand-tested)
 
 Network protocol **9**, as in 0.9.5; everyone needs 0.9.6 (the mod version must match).
