@@ -91,7 +91,8 @@ local function say(line)
     out[#out + 1] = line
 end
 local partial = {} -- id -> { piece index -> text } (guest and host)
-local inbox, head = {}, 1 -- lines from the other side, worked off a few ms per frame (below)
+local inbox, head, tail = {}, 1, 0 -- lines from the other side, worked off a few ms per frame (below); tail counts: # of a table with consumed (nil) fronts is no border, it dropped queued lines under lag
+local function qlen() return os.getenv("PT_MUTATE") == "inboxholes" and #inbox or tail end -- tests only: the old length, which lost lines
 local function flush()
     if #out == 0 then return end
     if common.netMode() == "listen" and not next(readyFor) then out = {}; return end
@@ -748,7 +749,7 @@ local function scanGuest()
     end
     -- ask for the full list until one has come through to its end (F): a host that was not ready yet sent nothing. Not while
     -- lines still come in or wait in the inbox (a second list would flood the channel)
-    if not fullAt and head > #inbox and ((tickN % 6 == 0 and os.clock() - lastRx > 5) or tickN % 20 == 0) then say("H") end
+    if not fullAt and head > qlen() and ((tickN % 6 == 0 and os.clock() - lastRx > 5) or tickN % 20 == 0) then say("H") end
     -- the sweeps below destroy or report what no entity claims: only once the whole list is applied (code review 2026-10-23:
     -- with the list spread over seconds they turned unclaimed own items into drops, duplicates on the host)
     if not fullAt then return end
@@ -1021,6 +1022,7 @@ end
 
 -- messages --------------------------------------------------------------------------------------------------------
 
+local rxA = {}
 local function handle(l, guest, pc)
     local f = {}
     for p in (l .. "|"):gmatch("([^|]*)|") do f[#f + 1] = p end
@@ -1045,9 +1047,13 @@ local function handle(l, guest, pc)
         if allQueue then if who ~= listFor then listNext = who end
         elseif os.clock() - fullSentAt > 10 or who ~= listFor then listFor = who; sendAll() end
     elseif guest and op == "A" then
+        rxA[id] = (rxA[id] or 0) + 1
         onAdd(id, f[3], tonumber(f[4]), tonumber(f[5]), tonumber(f[6]), tonumber(f[7]), f[8])
     elseif guest and op == "F" then
         -- the purge (a sweep over every lootable) runs for the first full list only
+        local nA, miss = 0, {}
+        for aid in pairs(rxA) do nA = nA + 1; if not ents[aid] then miss[#miss + 1] = aid end end
+        log("PT|loot F: got A for %d ids, %d without entity %s", nA, #miss, table.concat(miss, ","):sub(1, 200))
         if not fullAt then fullAt = os.clock(); purge() end
         net.baselineComplete("loot")
     elseif op == "S" and ents[id] then
@@ -1154,13 +1160,13 @@ net.on("g.loot.b", function(pc, data)
     local lease = common.lease(pc)
     for l in data:gmatch("[^\n]+") do
         if l == "H" then readyFor[pc:GetAddress()] = true end
-        inbox[#inbox + 1] = { line = l, lease = lease }
+        tail = tail + 1; inbox[tail] = { line = l, lease = lease }
     end
 end)
 local BUDGET = 0.004
 -- A container being filled (applyState's steps) goes first, a few ms a frame; the lines after it wait their turn.
 LoopInGameThreadWithDelay(16, function()
-    if head > #inbox and #filling == 0 then return end
+    if head > qlen() and #filling == 0 then return end
     local guest, t = common.netMode() == "client", os.clock()
     while os.clock() - t < BUDGET do
         local f = filling[1]
@@ -1175,7 +1181,7 @@ LoopInGameThreadWithDelay(16, function()
                 pcall(announce, f.e, f.before)
                 log("PT|loot filled %s: %d steps over %.1f s", f.e.id, #f.steps, os.clock() - f.t0)
             end
-        elseif head <= #inbox then
+        elseif head <= qlen() then
             local item = inbox[head]
             local l = item.line
             inbox[head], head = nil, head + 1
@@ -1188,7 +1194,7 @@ LoopInGameThreadWithDelay(16, function()
             break
         end
     end
-    if head > #inbox then inbox, head = {}, 1 end
+    if head > qlen() then inbox, head, tail = {}, 1, 0 end
 end)
 
 -- where the tick's time goes, one line a minute (FPS hunt 2026-11-01: ~1 s a minute on both sides in a zone)
@@ -1288,7 +1294,7 @@ RegisterLoadMapPreHook(function() replicas = replica.new(nil) end)
 RegisterLoadMapPostHook(function()
     hostScanned, fullAt, allQueue, readyFor, lastRx, fullSentAt, listFor, listNext = false, nil, nil, {}, -math.huge, -math.huge, nil, nil
     ents, byName, claimed, reported, out, partial, partIds, skip = {}, {}, {}, {}, {}, {}, {}, {}
-    inbox, head, cands, made = {}, 1, {}, { claimed = 0, spawned = 0 }
+    inbox, head, tail, cands, made = {}, 1, 0, {}, { claimed = 0, spawned = 0 }
     passIds, wreckIds = nil, nil
 end)
 

@@ -276,7 +276,7 @@ LoopInGameThreadWithDelay(16, function()
     local t = os.clock()
     while head <= #work and os.clock() - t < 0.004 do
         local w = work[head]
-        work[head], head = nil, head + 1
+        head = head + 1 -- the slot stays: # of a table with a nil front is no border (queued work was dropped under lag)
         pending[w.key] = nil
         local ok, err = pcall(w.fn, w.data)
         if not ok then log("PT|error prog apply %s %s", w.sec, tostring(err)) end
