@@ -83,13 +83,14 @@ LoopInGameThreadWithDelay(100, function()
         end
         local pts, L = players(), {}
         for _, h in ipairs(hostList) do
-            local l = h.o:IsValid() and h.o:K2_GetActorLocation()
+            local l = live(h.o) and h.o:K2_GetActorLocation() -- live(): a BombRock the Blacksmith's slam spawns can explode and go within the 2 s list age
             if l and near(l, pts) then
                 local s = sent[h.key]
                 if not s then s = {}; sent[h.key] = s end
                 local full, f = (beat + h.key % 50) % 50 == 0, {} -- all parts every 5 s (late copies), staggered
                 for _, p in ipairs(h.parts) do
-                    local ok, r = pcall(row, p.c)
+                    local ok, r = false, nil
+                    if p.c:IsValid() and not p.c:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) then ok, r = pcall(row, p.c) end
                     if ok and (full or differs(s[p.name], r)) then
                         s[p.name] = r
                         local v = {}

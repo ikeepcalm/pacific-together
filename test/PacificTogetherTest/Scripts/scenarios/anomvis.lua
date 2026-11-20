@@ -77,7 +77,7 @@ return function(T)
         local actors, roots = {}, {}
         local hist, first, range = {}, {}, {} -- row -> part -> samples (last 50) / first sample / host's largest deviation
         local gseen = {} -- row -> part -> { n, ok, first, far } from the guest's reports
-        local gHp
+        local gHp, gSpears
         local SMC = StaticFindObject("/Script/SMSystem.SMStateMachineComponent")
         local function smState(o)
             local c = o:GetComponentByClass(SMC)
@@ -103,6 +103,7 @@ return function(T)
                         s.far = math.max(s.far, dist(s.first, g)); s.last, s.hlast, s.best = g, h[#h], best
                     end
                 elseif kind == "t.hp" then gHp = tonumber(data)
+                elseif kind == "t.sp" then gSpears = tonumber(data)
                 end
             end
         end
@@ -201,6 +202,68 @@ return function(T)
             return gHp ~= nil and hp0 ~= nil and gHp >= 0 and gHp < hp0 - 5
         end })
         add({ check = "host_not_hurt_by_spear_on_guest", timeout = 4, cond = L.holds(3, function() return health() >= hostHp0 - 0.5 end) })
+
+        -- ---------------------------------------------------------------- the Blacksmith completes its slam cycle (W6, docs/spikes/anomfin.md)
+        -- Inside a safety zone (the whole start area of the zone fixture) a hazard's ground generator never finds a spot, so the machine stays in
+        -- Pre-Drop (as in single player). Outside it the listen host's machine must go Pre-Drop > Drop > Hit, and its spear chain shows on the guest.
+        local SMC2 = StaticFindObject("/Script/SMSystem.SMStateMachineComponent")
+        local bs, spot, seen, spearsHost = nil, nil, {}, 0
+        local function clearSpot()
+            local hm = T.first("BP_HazardManager_C")
+            local pl = T.myPawn():K2_GetActorLocation()
+            local ksl = UEHelpers.GetKismetSystemLibrary()
+            local pawn = T.myPawn()
+            local function inZone(x, y)
+                local t = {}
+                hm:IsPointInSafetyZone({ X = x, Y = y, Z = pl.Z }, 500.0, t, {})
+                return t.InZone ~= false
+            end
+            local function ground(x, y)
+                local hit = {}
+                local ok = ksl:LineTraceSingle(pawn, { X = x, Y = y, Z = pl.Z + 4000 }, { X = x, Y = y, Z = pl.Z - 8000 }, 0, false, {}, 0, hit, true, { R = 1, G = 0, B = 0, A = 1 }, { R = 0, G = 1, B = 0, A = 1 }, 0)
+                return ok and hit.ImpactPoint.Z or nil
+            end
+            for _, d in ipairs({ 10000, 13000, 16000, 20000 }) do
+                for a = 0, 330, 30 do
+                    local x, y = pl.X + d * math.cos(math.rad(a)), pl.Y + d * math.sin(math.rad(a))
+                    local clear = true
+                    for r = 0, 5000, 1250 do
+                        for b = 0, 315, 45 do if inZone(x + r * math.cos(math.rad(b)), y + r * math.sin(math.rad(b))) then clear = false end end
+                    end
+                    local gz = clear and ground(x, y)
+                    if gz then return { x, y, gz } end
+                end
+            end
+        end
+        add({ run = function()
+            spot = clearSpot()
+            T.log("PT|info anomfin clear spot %s", spot and string.format("%.0f %.0f %.0f", spot[1], spot[2], spot[3]) or "none")
+            if not spot then return end
+            T.myPawn():K2_TeleportTo({ X = spot[1], Y = spot[2], Z = spot[3] + 300 }, { Pitch = 0, Yaw = 0, Roll = 0 })
+            PTNative_MsgToGuest(gpc:GetAddress(), "t.tp", string.format("%.0f	%.0f	%.0f", spot[1] + 400, spot[2], spot[3] + 300))
+        end })
+        add({ wait = 4 })
+        add({ run = function()
+            if not spot then return end
+            bs = spawn(ROWS[1][2], spot[1] - 1500, spot[2], spot[3] + 20)
+            LoopInGameThreadWithDelay(200, function()
+                if not bs or dead(bs) then return true end
+                pcall(function()
+                    local c = bs:GetComponentByClass(SMC2)
+                    seen[c.R_Instance:GetActiveStateName():ToString()] = true
+                    local n = 0
+                    for _, o in ipairs(FindAllOf("BP_Hazard_ImpactSpear_C") or {}) do if not dead(o) and not o:GetFullName():find("Default__", 1, true) then n = n + 1 end end
+                    spearsHost = math.max(spearsHost, n)
+                end)
+                return false
+            end)
+        end })
+        add({ check = "host_blacksmith_slams", timeout = 60, cond = function()
+            T.log("PT|info anomfin blacksmith states seen: Pre-Drop=%s Drop=%s Hit=%s spears(host max)=%d guest spears=%s", tostring(seen["Pre-Drop"]), tostring(seen.Drop), tostring(seen.Hit), spearsHost, tostring(gSpears))
+            return seen.Drop and seen.Hit
+        end })
+        add({ check = "guest_sees_slam_spears", timeout = 30, cond = function() poll(); return (gSpears or 0) > 0 end })
+        add({ run = function() if bs and not dead(bs) then bs:K2_DestroyActor() end end })
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.end", "1") end })
         add({ wait = 3 })
         return steps
@@ -213,6 +276,9 @@ return function(T)
             if T.netMode() ~= "client" then return end
             local pc = T.localPC():GetAddress()
             PTNative_MsgToHost(pc, "t.hp", string.format("%.0f", health()))
+            local ns = 0
+            for _, c in ipairs(FindAllOf("BP_Hazard_ImpactSpear_C") or {}) do if T.inWorld(c) and not dead(c) and not c:GetFullName():find("Default__", 1, true) then ns = ns + 1 end end
+            PTNative_MsgToHost(pc, "t.sp", tostring(ns))
             for _, w in ipairs(watch) do
                 local o = w.obj
                 if not (o and o:IsValid()) then o = nearest(w[4], w[2], w[3]); w.obj = o end
