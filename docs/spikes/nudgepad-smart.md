@@ -18,8 +18,10 @@
 
 - `launch()` (nudge pad only) now redoes the game's search on the host from the host's copy of the guest: velocity direction (up vector if standing), anomalies from `GetActorsWithTag`, 250-2500 uu, within 45 degrees, not the pad, not tagged `HazardProperty.Lob`,
   random pick, arc via the game's own solver (arc 0.5, 1 try per candidate until one succeeds). The vector goes in `g.anom3.bounce` as `ux uy uz 1 1` (fifth field = smart: the guest sets its velocity to the vector and enters falling mode, on the host's copy too).
-  Setting the velocity directly matters: with the game's `AddImpulse(v, true)` the guest took the vector for one frame, then the host's replay of the guest's moves pulled it back to ~(88,-287) (the old Z-only plain launch survives that, a horizontal vector did not). No candidate => the plain up impulse, as in the game.
-- Scenario: headless input does not walk a character (one Command Move call moves ~4 uu), so host and guest both force the guest's velocity to (306,257,0) (40 degrees off +X) for 0.5 s, a landmine is 1500 uu ahead along +X, and a nudge pad
+  Launch call matters (2026-11-20 follow-up, lane nudgepad2): `AddImpulse` and a direct `Velocity` set + falling mode both lost the horizontal part two frames after the fire, on the guest and the host's copy alike, (817,-67,817) -> (88,-289,739),
+  with the nudge pad present (removing the pad, or testing with the pad destroyed on fire, kept it). The game's own launch of the HOST's character on the same pad with the pad present kept (668,339,632) for 2 s, so the guest was launched differently from the game.
+  `Character:LaunchCharacter(vec, true, true)` (pending launch velocity applied at the start of the next movement tick, before collision) on the guest and on the host's copy keeps the vector with the pad present (anomwake2 26/26, offset 62-65 uu at 700 uu of +X).
+- Scenario (pad stays; the host forces its copy's velocity until a BounceCmp fire, the guest until it sees its own launch): headless input does not walk a character (one Command Move call moves ~4 uu), so host and guest both force the guest's velocity to (306,257,0) (40 degrees off +X) for 0.5 s, a landmine is 1500 uu ahead along +X, and a nudge pad
   appears under the guest. Smart: the guest flies at (823,-65,738) and is 62 uu off the line when it has travelled 700 uu in +X; `nosmartlaunch` (plain up impulse) keeps the 257 uu/s sideways velocity (offset 500+ or never at 700 uu).
   Plain X travel or horizontal speed alone cannot tell them apart (the pad mesh push and the 2 s flight add hundreds of uu; a landmine blast fakes 1100+ speed).
 - `LoopInGameThreadWithDelay` does not stop when the callback returns true in this runtime (a probe loop kept running); scenario loops must guard themselves.
@@ -32,3 +34,11 @@
 ## Unknowns
 
 - Whether a hand-walked guest's host-side velocity is non-zero when the pad fires (the scenario injects it). Hand test: two players far apart, guest walks onto a nudge pad toward an anomaly (landmine, floating rock) 1000-2500 uu away.
+
+## Follow-up 2026-11-20 (lane nudgepad2): the scenario check is flaky, cause not found
+
+- Lead's pair failures (`velocity 0 ... 959/1000/1007, 0 in the cone`) came from the earlier padTest pads; the smart test's own pad does fire (`velocity 400, 1 in the cone`, `smart launch 820,-61,820`, guest applies it).
+- What fails is what happens two frames later, on the guest and on the host's copy at the same moment: (820,-61,814) becomes (87,-285,783), so the guest never travels 700 uu in +X. Seen with: AddImpulse, direct Velocity set + falling, `LaunchCharacter(sv,true,true)`; pad present, pad collision off on host only, pad collision off on both sides from spawn (run 142116). Not the pad's collision, not the call used.
+- The host's own character on the same kind of pad (pad present, forced velocity toward the anomaly) keeps its launch (668,339,632 constant for 2 s). So the difference is the guest's networked movement, most likely the test's forced `Velocity` writes (not real input) which the saved moves / host replay do not agree with; a really walking guest has not been tried.
+- Passes seen: 140627 (26/26, LaunchCharacter) and 133028 (26/26, earlier code); failures: 140918, 141334, 141xxx, 142116. Treat the scenario check as unreliable until a walking guest (or a real input path) is used; the mod code path itself is unchanged in behaviour by the launch call.
+- Hand check needed: two players, the guest walks onto a nudge pad toward an anomaly.
