@@ -12,6 +12,7 @@ local log = common.log
 
 -- test mutation (docs/TESTING.md): the feature off, like PT_STATUS this is read only by test runs
 local OFF = os.getenv("PT_MUTATE") == "nohealth"
+local SLOW = os.getenv("PT_MUTATE") == "slowdeath" -- the old threshold (1.01): a guest regenerating from the minimum is not detected
 
 local M = { DEAD_MS = 3000, FALLBACK_MS = 8000, STALE = 8 }
 
@@ -47,6 +48,7 @@ if OFF then return M end
 local dying = false
 local loadedAt = 0 -- os.clock() of the last map load
 local seenAlive = false -- health above 1 seen in this level: a fresh level starts at the minimum until the game fills it, that is no death
+local lethal = false -- the minimum was reached while alive and health has not been healed since
 
 local function revive()
     if not dying then return end
@@ -170,10 +172,14 @@ local function tick()
         -- the grace runs from the end of the host's transition: the guest waits for the host's go up to a minute after its load,
         -- and the game drops health to the minimum at the release (false death on every zone arrival, playtest 2026-11-01)
         local tr = package.loaded["transition"]
-        if tr and tr.state().phase then loadedAt, seenAlive = os.clock(), false end
+        if tr and tr.state().phase then loadedAt, seenAlive, lethal = os.clock(), false, false end
         if cur > 1.01 then seenAlive = true end
         -- a level loads its health over the first seconds (seen: 100 then the minimum 0.5 s after arrival): no death then
-        if not dying and seenAlive and os.clock() - loadedAt > 8 and cur <= 1.01 then die(h, nil, "health at minimum") end
+        -- the game regenerates a guest hit to the minimum at once (1.0, 1.1 ... 1.5 for ~10 s), so "<= 1.01" at the grace end
+        -- missed the death (up to 80 s, playerhealth 2026-11-18, hosthurt). Latch the hit itself: exactly the minimum while alive.
+        -- A living guest at 2-3% never touched the minimum and is not dead; a heal above 5% clears the latch.
+        if seenAlive and cur <= 1.01 then lethal = true elseif cur > 5 then lethal = false end
+        if not dying and os.clock() - loadedAt > 8 and (SLOW and cur <= 1.01 and seenAlive or (not SLOW and lethal and cur <= 5)) then die(h, nil, "health at minimum") end
     end
     -- on change, else every 2 s so a late joiner and a missed message catch up
     local msg = string.format("%.1f,%.1f", cur, max)
@@ -185,7 +191,7 @@ end
 
 -- a map change frees the objects we hold
 RegisterLoadMapPreHook(function() manager, seenAlive = nil, false end)
-RegisterLoadMapPostHook(function() loadedAt = os.clock() end)
+RegisterLoadMapPostHook(function() loadedAt, lethal = os.clock(), false end)
 
 LoopInGameThreadWithDelay(500, function()
     local ok, err = pcall(tick)

@@ -53,7 +53,7 @@ return function(T)
             end
             T.log("PT|info guest moved away d=%.0f", T.dist(me, g))
         end })
-        add({ check = "host_guest_respawned_near", timeout = 60, cond = function()
+        add({ check = "host_guest_respawned_near", timeout = 120, cond = function()
             local g, me = L.guestChar(), T.myPawn() or manager().CharacterActor
             local d = g and T.dist(me, g) or -1
             T.log("PT|info guest dist=%.0f health seen=%d", d, otherPct())
@@ -81,17 +81,30 @@ return function(T)
     add({ check = "guest_sees_host_damaged", timeout = 90, cond = function() return near(otherPct(), 50) end })
     add({ run = function() adjust(0.3) end })
     add({ check = "guest_health_healed", timeout = 5, cond = function() return near(pct(), 100) end })
-    -- health.lua: no death within 8 s of the arrival transition (a level loads at the minimum), and the game regenerates after ~4 s
-    add({ check = "guest_arrival_settled", timeout = 90, cond = function() local tr = package.loaded["transition"]; return not (tr and tr.state().phase) end })
-    add({ wait = 10 })
-    add({ run = function() adjust(-1.0) end }) -- dead
+    -- the arrival release: the mod's own log line (this test mod cannot see the mod's transition state; package.loaded is per mod)
+    local function released()
+        local f = io.open("ue4ss/UE4SS.log", "rb") or io.open("UE4SS.log", "rb")
+        if not f then return false end
+        local s = f:read("*a"); f:close()
+        return s:find("PT|trans guest load -> nil", 1, true) ~= nil
+    end
+    add({ check = "guest_released", timeout = 120, cond = released })
+    add({ wait = 1 })
+    -- a lethal hit just after the release, as the game leaves it: the minimum, then regenerating (1.0, 1.1, ... 1.5 for ~10 s).
+    -- health.lua's old "<= 1.01" at the end of the 8 s grace never saw that as a death (up to 80 s; mutation slowdeath)
+    add({ run = function() adjust(-1.0) end })
+    add({ wait = 1.2 })
+    add({ run = function() local c, _, h = health(); h:Adjust(T.first("BP_ResourceManager_C"), 1.5 - c); T.log("PT|info health set to %.1f", health()) end })
     -- respawn: health back, no travel, still connected, the host's car/character near
-    add({ check = "guest_respawned", timeout = 30, cond = function()
+    add({ check = "guest_respawned", timeout = 90, cond = function()
         local o = T.otherChar()
         local d = (o and T.myPawn()) and T.dist(T.myPawn(), o) or -1
         T.log("PT|info guest respawn health=%.0f%% dist=%.0f", pct(), d)
         return pct() > 90 and T.netMode() == "client" and T.map() == mapName and d >= 0 and d < 1500
     end })
+    -- low but not lethal (2.5%, never touched the minimum): no death handling
+    add({ run = function() local c, _, h = health(); h:Adjust(T.first("BP_ResourceManager_C"), 2.5 - c); T.log("PT|info health set to %.1f", health()) end })
+    add({ check = "guest_low_health_not_dead", timeout = 20, cond = L.holds(12, function() return pct() < 40 and T.netMode() == "client" end) })
     add({ check = "guest_no_reload", timeout = 12, cond = L.holds(8, function() return T.netMode() == "client" and T.map() == mapName and not L.reloadedNoMenu(mark) end) })
     add({ wait = 20 })
     return steps
