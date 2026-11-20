@@ -670,7 +670,7 @@ local function onAdd(id, what, x, y, z, yaw, state)
     local e = ents[id]
     if e then return end
     local kind = id:sub(1, 1)
-    if not replica.adopt(replicas, id) then return end
+    if not replica.adopt(replicas, id) then log("PT|loot A refused %s %s (gone before it arrived)", id, tostring(what)); return end
     M.motionBusy = true -- a pose may already wait for this entity
     local a
     if kind == "L" then

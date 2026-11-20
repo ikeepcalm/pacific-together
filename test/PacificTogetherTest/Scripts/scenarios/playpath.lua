@@ -251,7 +251,33 @@ return function(T)
     local n0
     add({ run = function() n0 = carried() end })
     actSteps(add, 2, "interact", function() return { actor = path(copy.a), approach = true, close_menu = false } end, 40, nil)
-    add({ check = "guest_menu_open_after_interact", timeout = 10, cond = menuOpen })
+    -- the crate's own menu: an inventory widget whose transfer container is the crate's. (Not IsPlayerMenuOpen: in ~1 of 3 soak
+    -- runs the first standing spot highlighted a gas barrel beside the crate, the press never opened the crate, and a stale
+    -- widget still held the car trunk; the old check then failed and the grab below took from the trunk, soak 2026-11-20.)
+    -- The first interact then fails (a trailer door and a barrel stand beside that crate: the highlight trace picks them); the retry
+    -- presses the crate's highlight component itself, as the trunk step does (what the interact key calls on the current highlight).
+    local function crateMenu()
+        local c = copy.a.InventoryContainer
+        for _, x in ipairs(FindAllOf("UMG_PlayerMenu_Inventory_C") or {}) do
+            local t = x.TransferContainer
+            if t:IsValid() and t:GetAddress() == c:GetAddress() and menuOpen() then return true end
+        end
+        return false
+    end
+    local t0, tries, held = 0, 0, nil
+    add({ run = function() t0 = os.time() end })
+    add({ check = "guest_menu_open_after_interact", timeout = 60, cond = function()
+        if crateMenu() then return true end
+        if held then
+            -- a crate needs its hold time (about 1 s of game time) between the press and the release
+            if os.time() - held >= 3 then held = nil; copy.a.Highlight:InteractReleased(T.myPawn()); t0 = os.time() end
+        elseif os.time() - t0 >= 4 and tries < 3 then
+            tries, held = tries + 1, os.time()
+            log("PT|info act2 retry %d: no crate menu, pressing the crate's highlight directly", tries)
+            copy.a.Highlight:InteractPressed(T.myPawn())
+        end
+        return false
+    end })
     -- the loot menu's own moves: a stack out of the container into the hand (the grab), the hand into the backpack (the place)
     add({ run = function()
         local w

@@ -168,6 +168,14 @@ return function(T)
         for r in got["t.snap"]:gmatch("[^\n]+") do rows[#rows + 1] = r end
         local ok = #mine == #rows
         why = string.format("mine=%d host=%d", #mine, #rows)
+        if not ok then
+            for _, r in ipairs(rows) do if not at(mine, unpack(r)) then why = why .. " hostonly " .. r:sub(1, 90) end end
+            for _, o in ipairs(mine) do
+                local f = false
+                for _, r in ipairs(rows) do if at({ o }, unpack(r)) then f = true; break end end
+                if not f then why = why .. " guestonly " .. pack(o) end
+            end
+        end
         if ok then
             for _, r in ipairs(rows) do
                 local e = unpack(r)

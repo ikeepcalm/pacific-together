@@ -373,7 +373,7 @@ local dict, gone = {}, {} -- guest: id -> path (the host's "M" lines); keys the 
 
 local function dropAll()
     for _, a in pairs(mine) do if live(a) then a:K2_DestroyActor() end end
-    mine, todo, specs, dict, gone = {}, {}, {}, {}, {}
+    for _, a in pairs(mine) do if live(a) then pcall(function() a:K2_DestroyActor() end) end end -- a copy the game freed at the load reads as valid but has no methods (soak 2026-11-20)
 end
 
 local function fields(line)
