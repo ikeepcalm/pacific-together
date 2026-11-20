@@ -35,8 +35,8 @@ Client notifications, damage feedback, passenger controls and item physics: [PT4
 | Passenger re-entry pose | 2026-11-17: headless `zoneexit` keeps the guest on the passenger seat after re-entry (37/37) | Rendered pose check |
 | T06: full-run playtest | Packaged `PacificTogether.exe`, `tools/play-local.ps1` | Garage, junctions, gateway, death/failure, leave/rejoin; both logs and observed defects |
 | T10 / R10: DLC handshake and compatibility | `session.lua`, game files from an authorized copy | Report ownership; establish which base/DLC combinations actually load, without assuming support |
-| F1: current lag/loss regression | 2026-11-17 at 150 ms / 2%: session 46/46, runloop 55/55, lootsync 40/40, playpath 45/45, carsync 51/53 (fixture cosmetics, fixed since); NOTES "2026-11-17 unattended" | Repeat on the release candidate |
-| L9: two-hour soak | 2026-11-17: 39 runs, 2 crashes (same AV class, hardened in d29730e, unproven), 3 bot flakes (fixed); NOTES "2026-11-17 unattended" | A clean 2 h soak on the candidate |
+| F1: current lag/loss regression | 2026-11-20 on 0.9.7 candidate: core 5/5 clean (session 46/46, runloop 55/55, lootsync 40/40, playpath 45/45, carsync 53/53); anomaly scenarios: lag-sensitive follow/grabber checks open; NOTES "2026-11-20 unattended" | Repeat on the release candidate |
+| L9: two-hour soak | 2026-11-20 on 04f0a8c: 46 runs, 0 crashes, 3 failed runs (playpath bot menu x2, lootsync lootables x1); NOTES "2026-11-20 unattended" | A clean 2 h soak on the candidate |
 | Q9: firewalled crash proof | `tools/q9-firewall.ps1`, `crashfw`, [spike](spikes/M2-safety.md) | Owner's elevated test-copy run verifies the upload block |
 | T01: reproducible atlas build | `tools/kdis`, `tools/pak`, `local/atlas/tools` | A fresh clone builds its atlas from its own game copy; no game data committed |
 
