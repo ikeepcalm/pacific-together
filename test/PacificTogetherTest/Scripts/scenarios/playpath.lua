@@ -251,16 +251,33 @@ return function(T)
     local n0
     add({ run = function() n0 = carried() end })
     actSteps(add, 2, "interact", function() return { actor = path(copy.a), approach = true, close_menu = false } end, 40, nil)
-    -- the guest's container UI is open when the manager says so or an inventory widget holds a transfer container: in ~1 of 3
-    -- soak runs (spot 2 after a gas barrel took the first highlight) the widget is up within 1 s and IsPlayerMenuOpen stays false
-    -- for good while the following grab/place steps work (soak 2026-11-20, docs/spikes/soakflake.md)
-    local t0, tl = 0, 0
+    -- the crate's own menu: an inventory widget whose transfer container is the crate's. (Not IsPlayerMenuOpen: in ~1 of 3 soak
+    -- runs the first standing spot highlighted a gas barrel beside the crate, the press never opened the crate, and a stale
+    -- widget still held the car trunk; the old check then failed and the grab below took from the trunk, soak 2026-11-20.)
+    -- Then the interact is repeated from another side of the crate, up to 4 times.
+    local function crateMenu()
+        local c = copy.a.InventoryContainer
+        for _, x in ipairs(FindAllOf("UMG_PlayerMenu_Inventory_C") or {}) do
+            local t = x.TransferContainer
+            if t:IsValid() and t:GetAddress() == c:GetAddress() and menuOpen() then return true end
+        end
+        return false
+    end
+    local t0, tries, jid = 0, 0, nil
     add({ run = function() t0 = os.time() end })
-    add({ check = "guest_menu_open_after_interact", timeout = 30, cond = function()
-        local w = 0
-        for _, x in ipairs(FindAllOf("UMG_PlayerMenu_Inventory_C") or {}) do if x.TransferContainer:IsValid() then w = w + 1 end end
-        if menuOpen() then return true end
-        if w > 0 then log("PT|info act2 menu: widget up, IsPlayerMenuOpen=false (%d s)", os.time() - t0); return true end
+    add({ check = "guest_menu_open_after_interact", timeout = 60, cond = function()
+        if crateMenu() then return true end
+        if jid then
+            local done, text = T.act_done(jid)
+            if done then log("PT|info act2 retry %d: %s", tries, (text or ""):gsub("
+", " | "):sub(1, 500)); jid, t0 = nil, os.time() end
+        elseif os.time() - t0 >= 4 and tries < 4 then
+            tries = tries + 1
+            local ang = ({ math.pi, math.pi / 2, -math.pi / 2, 0 })[tries]
+            local me = T.myPawn():K2_GetActorLocation()
+            T.myPawn():K2_SetActorLocation({ X = copy.x + math.cos(ang) * 80, Y = copy.y + math.sin(ang) * 80, Z = me.Z }, false, {}, true)
+            jid = T.act_begin("interact", { actor = path(copy.a), approach = false, close_menu = false })
+        end
         return false
     end })
     -- the loot menu's own moves: a stack out of the container into the hand (the grab), the hand into the backpack (the place)
