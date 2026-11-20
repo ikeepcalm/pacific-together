@@ -125,7 +125,7 @@ return function(T)
                 n = n + 1
                 pcall(function() gc.CharacterMovement.Velocity = { X = 400, Y = 0, Z = 0 } end)
                 if n == 10 then local g = gc:K2_GetActorLocation(); pad2 = spawn(CLS.nudge, g.X, g.Y, g.Z - 90) end -- the pad appears under an already-moving guest
-                return n > 100
+                return n > 14 -- short: forcing the copy longer fights the guest's own movement, and a guest walking on would reach the landmine, whose blast fakes a launch
             end)
         end })
         add({ check = "guest_nudged_toward_anomaly", timeout = 40, cond = function()
@@ -140,7 +140,7 @@ return function(T)
     end
 
     local finished, maxZ, maxVx = false, -1e9, 0
-    LoopInGameThreadWithDelay(100, function() pcall(function()
+    LoopInGameThreadWithDelay(20, function() pcall(function()
         if T.netMode() ~= "client" then return end
         local me = T.myPawn()
         if me and me:IsValid() then
