@@ -254,7 +254,8 @@ return function(T)
     -- the crate's own menu: an inventory widget whose transfer container is the crate's. (Not IsPlayerMenuOpen: in ~1 of 3 soak
     -- runs the first standing spot highlighted a gas barrel beside the crate, the press never opened the crate, and a stale
     -- widget still held the car trunk; the old check then failed and the grab below took from the trunk, soak 2026-11-20.)
-    -- Then the interact is repeated from another side of the crate, up to 4 times.
+    -- The first interact then fails (a trailer door and a barrel stand beside that crate: the highlight trace picks them); the retry
+    -- presses the crate's highlight component itself, as the trunk step does (what the interact key calls on the current highlight).
     local function crateMenu()
         local c = copy.a.InventoryContainer
         for _, x in ipairs(FindAllOf("UMG_PlayerMenu_Inventory_C") or {}) do
@@ -263,19 +264,16 @@ return function(T)
         end
         return false
     end
-    local t0, tries, jid = 0, 0, nil
+    local t0, tries = 0, 0
     add({ run = function() t0 = os.time() end })
-    add({ check = "guest_menu_open_after_interact", timeout = 60, cond = function()
+    add({ check = "guest_menu_open_after_interact", timeout = 40, cond = function()
         if crateMenu() then return true end
-        if jid then
-            local done, text = T.act_done(jid)
-            if done then log("PT|info act2 retry %d: %s", tries, (text or ""):sub(1, 400)); jid, t0 = nil, os.time() end
-        elseif os.time() - t0 >= 4 and tries < 4 then
-            tries = tries + 1
-            local ang = ({ math.pi, math.pi / 2, -math.pi / 2, 0 })[tries]
-            local me = T.myPawn():K2_GetActorLocation()
-            T.myPawn():K2_SetActorLocation({ X = copy.x + math.cos(ang) * 80, Y = copy.y + math.sin(ang) * 80, Z = me.Z }, false, {}, true)
-            jid = T.act_begin("interact", { actor = path(copy.a), approach = false, close_menu = false })
+        if os.time() - t0 >= 4 and tries < 3 then
+            tries, t0 = tries + 1, os.time()
+            log("PT|info act2 retry %d: no crate menu, pressing the crate's highlight directly", tries)
+            local me = T.myPawn()
+            copy.a.Highlight:InteractPressed(me)
+            copy.a.Highlight:InteractReleased(me)
         end
         return false
     end })
