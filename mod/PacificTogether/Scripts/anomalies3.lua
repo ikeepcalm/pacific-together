@@ -341,10 +341,49 @@ end)
 local PAD = "/Game/Gameplay/Hazards/BouncePad/BP_Hazard_BouncePad.BP_Hazard_BouncePad_C:BndEvt__Box_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature"
 -- NudgePad (docs/spikes/nudgepad.md): its begin-overlap and repeating Bounce timer both call BounceCmp(PrimCmp), which likewise launches only the
 -- host's character. Same treatment, hooked on BounceCmp (the owner of the component is the pawn).
--- shortcut: the pad's smart launch toward a nearby anomaly is dropped, a guest gets the plain up impulse (1000) even when an anomaly is near.
+-- The pad's smart launch (docs/spikes/nudgepad-smart.md): for the host's character the game arcs it toward an ActorTags.Hazard.Anomaly actor 250-2500 uu
+-- away within 45 degrees of its last velocity. The game's own helper cannot be fed the tag container from Lua (the whole struct arrives zeroed), so the
+-- search is redone here with the game's own tag lookup and arc solver (GameplayStatics:SuggestProjectileVelocity_CustomArc).
+-- shortcut: no line-of-sight check, no target-velocity lead (the game adds 2x velocity of a physics-simulating target), no Lob-tag exclusion beyond the tag test.
 local NUDGE = "/Game/Gameplay/Hazards/NudgePad/BP_Hazard_NudgePad.BP_Hazard_NudgePad_C:BounceCmp"
 local padHooked, nudgeHooked, padCool = false, false, {}
 M.bounced = 0
+M.smart = 0
+local ANOMALY, LOB = "ActorTags.Hazard.Anomaly", "ActorTags.Hazard.HazardProperty.Lob"
+local tagLib = StaticFindObject("/Script/PenDriverPro.Default__BlueprintActorTagFunctionLibrary")
+local function hasTag(world, a, name)
+    local s = {}
+    tagLib:GetActorTags(world, a, s)
+    for _, t in pairs(s) do if t:get().TagName:ToString() == name then return true end end
+    return false
+end
+-- the arc launch velocity toward a random qualifying anomaly, or nil (the plain impulse then stands, as in the game)
+local function smartVector(pad, who, up)
+    if os.getenv("PT_MUTATE") == "nosmartlaunch" or not (tagLib and tagLib:IsValid()) then return nil end
+    local v, c = who.CharacterMovement.Velocity, who:K2_GetActorLocation()
+    local vl = math.sqrt(v.X * v.X + v.Y * v.Y + v.Z * v.Z)
+    local d = vl > 0.1 and { X = v.X / vl, Y = v.Y / vl, Z = v.Z / vl } or up
+    local set = {}
+    tagLib:GetActorsWithTag(who, { TagName = FName(ANOMALY) }, set)
+    local pool, padAddr = {}, pad:GetAddress()
+    for _, p in pairs(set) do
+        local a = p:get()
+        if a:IsValid() and a:GetAddress() ~= padAddr then
+            local l = a:K2_GetActorLocation()
+            local dx, dy, dz = l.X - c.X, l.Y - c.Y, l.Z - c.Z
+            local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if dist >= 250 and dist <= 2500 and (dx * d.X + dy * d.Y + dz * d.Z) / dist >= math.cos(math.rad(45)) and not hasTag(who, a, LOB) then
+                pool[#pool + 1] = l
+            end
+        end
+    end
+    while #pool > 0 do
+        local i = math.random(#pool)
+        local o = {}
+        if UEHelpers.GetGameplayStatics():SuggestProjectileVelocity_CustomArc(who, o, c, pool[i], 0, 0.5) then return o end
+        table.remove(pool, i)
+    end
+end
 local function launch(self, other, amountOf)
         if not (M.enabled and M.fix and safety.active() and not safety.guest()) then return end
         try("bounce", function()
@@ -390,7 +429,7 @@ net.on("g.anom3.bounce", function(_, data)
         if not (me and me:IsValid()) then return end
         local cm, v = me.CharacterMovement, me.CharacterMovement.Velocity
         a = tonumber(a)
-        cm.Velocity = { X = v.X, Y = v.Y, Z = 0 }
+        cm.Velocity = { X = sm == "1" and 0 or v.X, Y = sm == "1" and 0 or v.Y, Z = 0 }
         cm:AddImpulse({ X = tonumber(x) * a, Y = tonumber(y) * a, Z = tonumber(z) * a }, true)
         M.applied = M.applied + 1
         log("PT|anom3 bounce pad launched the guest (%s, mode %s)", data:gsub("\t", " "), tostring(cm.MovementMode))

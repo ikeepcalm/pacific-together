@@ -10,6 +10,7 @@ return function(T)
         bush = "/Game/Gameplay/Hazards/SpikeBush/BP_Hazard_SpikeBush.BP_Hazard_SpikeBush_C",
         bounce = "/Game/Gameplay/Hazards/BouncePad/BP_Hazard_BouncePad.BP_Hazard_BouncePad_C",
         nudge = "/Game/Gameplay/Hazards/NudgePad/BP_Hazard_NudgePad.BP_Hazard_NudgePad_C",
+        mine = "/Game/Gameplay/Hazards/Landmine/BP_Hazard_Landmine.BP_Hazard_Landmine_C",
     }
     local mapName = "Rural_Forest_Radio_Scylla_02"
     local function health()
@@ -28,12 +29,13 @@ return function(T)
     if T.ROLE == "host" then
         local steps = {}
         local function add(s) steps[#steps + 1] = s end
-        local gpc, guestHp, guestZ, guestMaxZ = nil, -1, 0, -1e9
+        local gpc, guestHp, guestZ, guestMaxZ, guestMaxVx = nil, -1, 0, -1e9, 0
         local hostHp0 = -1
         local function poll()
             while true do
                 local kind, data = PTNative_MsgPoll("t.")
                 if not kind then return end
+                if kind == "t.vx" then guestMaxVx = tonumber(data) or guestMaxVx end
                 if kind == "t.hp" then guestHp = tonumber(data) or guestHp end
                 if kind == "t.z" then local z, m = data:match("^(%-?[%d%.]+)\t(%-?[%d%.]+)$"); guestZ, guestMaxZ = tonumber(z) or guestZ, tonumber(m) or guestMaxZ end
             end
@@ -108,26 +110,52 @@ return function(T)
         end
         padTest("bouncepad", "bounce", 60)
         padTest("nudgepad", "nudge", 200) -- the pad mesh itself rises and lifts a guest ~100 uu without the hook (mutation run), the hook adds repeated launches (~340)
+        -- nudge pad smart launch (docs/spikes/nudgepad-smart.md): a guest walking +X onto a pad with an anomaly (a landmine) 1400 uu ahead is arced toward it
+        -- (horizontal speed 700+); the plain up impulse would leave it at walking speed. Mutation nosmartlaunch.
+        local pad2, mine
+        add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.vreset", "1") end })
+        add({ wait = 4 })
+        add({ run = function()
+            local at = L.guestChar():K2_GetActorLocation()
+            mine = spawn(CLS.mine, at.X + 1500, at.Y, at.Z)
+            pad2 = spawn(CLS.nudge, at.X + 250, at.Y, at.Z - 90)
+            T.log("PT|info smart test: pad %s landmine %s, guest at %.0f,%.0f,%.0f", T.name(pad2), T.name(mine), at.X, at.Y, at.Z)
+            PTNative_MsgToGuest(gpc:GetAddress(), "t.walk", "1")
+        end })
+        add({ check = "guest_nudged_toward_anomaly", timeout = 40, cond = function()
+            poll()
+            T.log("PT|info smart test guest max horizontal speed %.0f", guestMaxVx)
+            return guestMaxVx > 600
+        end })
+        add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.walk", "0"); pad2:K2_DestroyActor(); mine:K2_DestroyActor() end })
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.end", "1") end })
         add({ wait = 3 })
         return steps
     end
 
-    local finished, maxZ = false, -1e9
+    local finished, maxZ, maxVx, walking = false, -1e9, 0, false
     LoopInGameThreadWithDelay(100, function() pcall(function()
         if T.netMode() ~= "client" then return end
         local me = T.myPawn()
-        if me and me:IsValid() then maxZ = math.max(maxZ, me:K2_GetActorLocation().Z) end
+        if me and me:IsValid() then
+            maxZ = math.max(maxZ, me:K2_GetActorLocation().Z)
+            local v = me.CharacterMovement.Velocity
+            maxVx = math.max(maxVx, math.sqrt(v.X * v.X + v.Y * v.Y))
+            if walking then me:AddMovementInput({ X = 1, Y = 0, Z = 0 }, 1.0, false) end
+        end
     end) end)
     LoopInGameThreadWithDelay(1000, function() pcall(function()
         if T.netMode() ~= "client" then return end
         local me = T.myPawn()
         PTNative_MsgToHost(T.localPC():GetAddress(), "t.hp", string.format("%.0f", health()))
+        PTNative_MsgToHost(T.localPC():GetAddress(), "t.vx", string.format("%.0f", maxVx))
         if me and me:IsValid() then PTNative_MsgToHost(T.localPC():GetAddress(), "t.z", string.format("%.0f\t%.0f", me:K2_GetActorLocation().Z, maxZ)) end
         while true do
             local kind, data = PTNative_MsgPoll("t.")
             if not kind then break end
             if kind == "t.end" then finished = true end
+            if kind == "t.vreset" then maxVx = 0 end
+            if kind == "t.walk" then walking = data == "1" end
             if kind == "t.zreset" then maxZ = -1e9 end
             if kind == "t.tp" and me and me:IsValid() then
                 local x, y, z = data:match("^(%-?[%d%.]+)\t(%-?[%d%.]+)\t(%-?[%d%.]+)$")
