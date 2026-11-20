@@ -11,7 +11,7 @@ local safety = require("safety")
 local UEHelpers = require("UEHelpers")
 local log = common.log
 
-local M = { enabled = os.getenv("PT_MUTATE") ~= "noanomvis" }
+local M = { enabled = os.getenv("PT_MUTATE") ~= "noanomvis", rot = os.getenv("PT_MUTATE") ~= "nobollardyaw" } -- nobollardyaw: the guest ignores the root rotation
 local CLASSES = { "BP_Hazard_RockPounder_C", "BP_Hazard_ImpactSpear_C", "BP_Hazard_Bollard_C", "BP_Hazard_Spore_C", "BP_Hazard_BombRock_C", "BP_Boon_LootCreature_C" }
 local NEAR = 15000 -- uu from any player
 local function live(o) return o:IsValid() and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) and not o:GetFullName():find("Default__", 1, true) end
@@ -83,13 +83,14 @@ LoopInGameThreadWithDelay(100, function()
         end
         local pts, L = players(), {}
         for _, h in ipairs(hostList) do
-            local l = h.o:IsValid() and h.o:K2_GetActorLocation()
+            local l = live(h.o) and h.o:K2_GetActorLocation() -- live(): a BombRock the Blacksmith's slam spawns can explode and go within the 2 s list age
             if l and near(l, pts) then
                 local s = sent[h.key]
                 if not s then s = {}; sent[h.key] = s end
                 local full, f = (beat + h.key % 50) % 50 == 0, {} -- all parts every 5 s (late copies), staggered
                 for _, p in ipairs(h.parts) do
-                    local ok, r = pcall(row, p.c)
+                    local ok, r = false, nil
+                    if p.c:IsValid() and not p.c:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) then ok, r = pcall(row, p.c) end
                     if ok and (full or differs(s[p.name], r)) then
                         s[p.name] = r
                         local v = {}
@@ -97,10 +98,11 @@ LoopInGameThreadWithDelay(100, function()
                         f[#f + 1] = p.name .. "=" .. table.concat(v, ",")
                     end
                 end
-                local root = { l.X, l.Y, l.Z }
+                local ar = h.o:K2_GetActorRotation() -- a spawned Bollard picks a random yaw the guest's copy does not get (docs/spikes/anomfin.md)
+                local root = { l.X, l.Y, l.Z, ar.Pitch, ar.Yaw, ar.Roll }
                 if #f > 0 or differs(s.root, root) then
                     s.root = root
-                    L[#L + 1] = string.format("%.0f\t%.0f\t%.0f\t%.0f\t%.0f\t%s", homes[h.key][1], homes[h.key][2], l.X, l.Y, l.Z, table.concat(f, "\t"))
+                    L[#L + 1] = string.format("%.0f\t%.0f\t%.0f\t%.0f\t%.0f\t%.1f\t%.1f\t%.1f\t%s", homes[h.key][1], homes[h.key][2], l.X, l.Y, l.Z, ar.Pitch, ar.Yaw, ar.Roll, table.concat(f, "\t"))
                 end
             end
         end
@@ -169,7 +171,7 @@ net.on("g.anomvis", function(_, data)
                 local l, to = o:K2_GetActorLocation(), { X = tonumber(f[3]), Y = tonumber(f[4]), Z = tonumber(f[5]) }
                 if (l.X - to.X) ^ 2 + (l.Y - to.Y) ^ 2 + (l.Z - to.Z) ^ 2 > 1 then o:K2_SetActorLocation(to, false, {}, true) end
                 local r, tr = o:K2_GetActorRotation(), { Pitch = (tonumber(f[6]) or 0), Yaw = (tonumber(f[7]) or 0), Roll = (tonumber(f[8]) or 0) }
-                if math.abs(r.Pitch - tr.Pitch) + math.abs(r.Yaw - tr.Yaw) + math.abs(r.Roll - tr.Roll) > 0.5 then o:K2_SetActorRotation(tr, false) end
+                if M.rot and math.abs(r.Pitch - tr.Pitch) + math.abs(r.Yaw - tr.Yaw) + math.abs(r.Roll - tr.Roll) > 0.5 then o:K2_SetActorRotation(tr, false) end
                 for i = 9, #f do
                     local name, nums = f[i]:match("^(.-)=(.*)$")
                     local c = name and st.names[name]

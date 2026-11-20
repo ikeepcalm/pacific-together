@@ -12,8 +12,9 @@ local safety = require("safety")
 local log = common.log
 
 local M = { enabled = os.getenv("PT_MUTATE") ~= "nosmhost", fixed = 0, names = {} }
--- owner classes whose machines are fixed; the Abductor ticks by itself and anommove.lua drives its calls (a second tick would double them)
-local SKIP = { BP_Hazard_PhysicsGrabber_C = true }
+-- owner classes whose machines are left alone (none: the Abductor's machine is fixed too, it then hunts the car AND loose items / the player as in single
+-- player, docs/spikes/anomfin.md; anommove.lua's own car-hunt driver stands aside for a machine that runs)
+local SKIP = {}
 local seen = {} -- component address -> true
 
 local function fix(c)
