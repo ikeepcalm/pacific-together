@@ -1683,3 +1683,34 @@ offered as "use anything you like; a mention is appreciated"). The author asked 
   "follows" check each run: bubblegum/tumbler, pufferfish; once host_blacksmith_slams with the machine idle 60 s), anomalies2 33/34
   (guest_pulled_by_grabber: guest hurt, speed 0; also failed under lag on 113365d this morning), anomwake2 31/32 (smart launch).
   Baseline on 113365d before the merges: 9 anomaly scenarios, only grabber x2 and bollard failed (fixed or widened since).
+- Lead after the suite: nudgepad2 lane (scenario robustness) found the guest's smart launch is deflected two frames after it is applied,
+  on the guest and the host's copy at once: (820,-61,814) -> (87,-285,783), with AddImpulse, a direct Velocity set, LaunchCharacter, and
+  pad collision off on both sides. The host's own character on the same pad keeps (668,339,632) for 2 s, so it is the guest's networked
+  movement, not the pad. Cause open (guess: the test forces Velocity instead of real input and the host's move replay disagrees).
+  The merged smart launch stays (worst case ~ the plain bounce: vertical 783 kept); anomwake2 `guest_nudged_toward_anomaly` is info
+  only (191e640), W6 Shaker row "partly". nudgepad-smart.md has the runs. anomwake2 25/25 after (one 24/25 guest_launched_by_bouncepad).
+- Soak (L9) on 04f0a8c, pair1 alone, 14:28-16:30: 46 runs (runloop/playpath/lootsync/sessiontravel), **0 crashes**, 3 failed runs:
+  playpath x2 (p2_host_container_lost_item + guest_menu_open_after_interact, the known bot menu-detection flake, ~1 in 3 soak runs since
+  11-17) and lootsync x1 (host_guest_sees_lootables / guest_lootables_match_host, seen once on 11-17). Not a clean soak by the
+  definition; the guest loot-tick and foliage crashes of the 11-17 soaks did not occur. local/test-results/soak-20261120-142816.txt
+  (results 20261120-151604-pair1-playpath, -160948-pair1-lootsync, -163029-pair1-playpath).
+  Note: the soak's own line reads "N/M passed" for failed runs too; only the final count and summary.txt show the failure.
+
+### Open (next)
+guestexitmove (guest never settles after leaving the moving car, 1 of 3), playpath bot menu detection, lootsync lootables once per ~45
+runs, guestparts under load, anomvis "follows" checks under lag (a different hazard each run) and the Blacksmith idle once under lag,
+anomalies2 guest_pulled_by_grabber under lag (guest hurt, speed 0; pre-existing), nudge pad smart launch deflection for the guest,
+guest healed from the minimum to 2-5 % inside the arrival grace counted as dead. Nothing pushed; no release built (owner decides).
+
+### Owner hand checks (rendered, real input)
+1. **Full-run playtest (T06)** on 0.9.7: garage -> junctions -> gateway -> garage, death/failure, leave/rejoin; keep both UE4SS logs.
+2. **Firewalled crash-upload proof (D23/Q9)**: `tools/q9-firewall.ps1` + `crashfw` on a test copy; needs your UAC prompt.
+3. **Two-account Steam join** on the 0.9.7 build (both players need 0.9.7: protocol 10).
+4. **DLC**: Interloper in a real DLC zone (walks away and self-destroys on the host? stale copy on the guest?); which base/DLC combos load.
+5. Guest dies right after arriving in a zone (hazard at the spawn): black screen and respawn within ~8 s. A guest left at 2-3 % is not dead.
+6. Guest **walks** onto a nudge pad toward a landmine/floating rock 1000-2500 uu ahead: arced toward it like the host, or straight up?
+7. Blacksmith outside the start area: slam spears/bollards on both screens. Abductor finds a loose item; the guest sees it carried.
+   A spawned/event bollard looks rotated the same for the guest.
+8. Pickpocket reaches a guest at up to ~1500 uu (was 1200).
+9. Guest leaves the car while the host drives (~700 uu/s): lands beside the car and stays put (guestexitmove).
+10. Earlier list still open: Abductor/Can Opener/Tourist kick from NOTES "2026-11-18 unattended".
