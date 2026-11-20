@@ -17,9 +17,12 @@
 ## Derived
 
 - `launch()` (nudge pad only) now redoes the game's search on the host from the host's copy of the guest: velocity direction (up vector if standing), anomalies from `GetActorsWithTag`, 250-2500 uu, within 45 degrees, not the pad, not tagged `HazardProperty.Lob`,
-  random pick, arc via the game's own solver (arc 0.5, 1 try per candidate until one succeeds). The vector goes in `g.anom3.bounce` as `ux uy uz 1 1` (fifth field = smart: the guest zeroes its whole velocity, not only Z). No candidate => the plain up impulse, as in the game.
-- Scenario: the host sets its copy of the guest's velocity to (400,0,0) (headless input does not walk a character; one Command Move call moves ~4 uu), a landmine is 1500 uu ahead, a nudge pad appears under the guest: the guest reaches >550 horizontal speed (smart launch
-  808,0,805 seen, 1150 peak) and `nosmartlaunch` leaves it at the injected 400.
+  random pick, arc via the game's own solver (arc 0.5, 1 try per candidate until one succeeds). The vector goes in `g.anom3.bounce` as `ux uy uz 1 1` (fifth field = smart: the guest sets its velocity to the vector and enters falling mode, on the host's copy too).
+  Setting the velocity directly matters: with the game's `AddImpulse(v, true)` the guest took the vector for one frame, then the host's replay of the guest's moves pulled it back to ~(88,-287) (the old Z-only plain launch survives that, a horizontal vector did not). No candidate => the plain up impulse, as in the game.
+- Scenario: headless input does not walk a character (one Command Move call moves ~4 uu), so host and guest both force the guest's velocity to (306,257,0) (40 degrees off +X) for 0.5 s, a landmine is 1500 uu ahead along +X, and a nudge pad
+  appears under the guest. Smart: the guest flies at (823,-65,738) and is 62 uu off the line when it has travelled 700 uu in +X; `nosmartlaunch` (plain up impulse) keeps the 257 uu/s sideways velocity (offset 500+ or never at 700 uu).
+  Plain X travel or horizontal speed alone cannot tell them apart (the pad mesh push and the 2 s flight add hundreds of uu; a landmine blast fakes 1100+ speed).
+- `LoopInGameThreadWithDelay` does not stop when the callback returns true in this runtime (a probe loop kept running); scenario loops must guard themselves.
 
 ## Guesses / shortcuts
 
