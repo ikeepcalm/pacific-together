@@ -112,28 +112,28 @@ return function(T)
         padTest("nudgepad", "nudge", 200) -- the pad mesh itself rises and lifts a guest ~100 uu without the hook (mutation run), the hook adds repeated launches (~340)
         -- nudge pad smart launch (docs/spikes/nudgepad-smart.md): a guest moving +X onto a pad with an anomaly (a landmine) 1500 uu ahead is arced toward it
         -- (horizontal speed 700+); the plain up impulse leaves it at 0. Headless input does not walk a character, so the host's copy of the guest's velocity
-        -- (what the pad hook reads) is set to 600 uu/s +X for a few seconds instead. Mutation nosmartlaunch.
+        -- (what the pad hook reads) is set to 400 uu/s +X for a few seconds instead. Mutation nosmartlaunch.
         local pad2, mine
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.vreset", "1") end })
         add({ wait = 4 })
         add({ run = function()
             local at = L.guestChar():K2_GetActorLocation()
             mine = spawn(CLS.mine, at.X + 1500, at.Y, at.Z)
-            pad2 = spawn(CLS.nudge, at.X, at.Y, at.Z - 90)
-            T.log("PT|info smart test: pad %s landmine %s, guest at %.0f,%.0f,%.0f", T.name(pad2), T.name(mine), at.X, at.Y, at.Z)
+            T.log("PT|info smart test: landmine %s, guest at %.0f,%.0f,%.0f", T.name(mine), at.X, at.Y, at.Z)
             local n, gc = 0, L.guestChar()
             LoopInGameThreadWithDelay(50, function()
                 n = n + 1
-                pcall(function() local v = gc.CharacterMovement.Velocity; gc.CharacterMovement.Velocity = { X = 600, Y = 0, Z = v.Z } end)
+                pcall(function() gc.CharacterMovement.Velocity = { X = 400, Y = 0, Z = 0 } end)
+                if n == 10 then local g = gc:K2_GetActorLocation(); pad2 = spawn(CLS.nudge, g.X, g.Y, g.Z - 90) end -- the pad appears under an already-moving guest
                 return n > 100
             end)
         end })
         add({ check = "guest_nudged_toward_anomaly", timeout = 40, cond = function()
             poll()
             T.log("PT|info smart test guest max horizontal speed %.0f", guestMaxVx)
-            return guestMaxVx > 600
+            return guestMaxVx > 550
         end })
-        add({ run = function() pad2:K2_DestroyActor(); mine:K2_DestroyActor() end })
+        add({ run = function() if pad2 then pad2:K2_DestroyActor() end; mine:K2_DestroyActor() end })
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.end", "1") end })
         add({ wait = 3 })
         return steps
