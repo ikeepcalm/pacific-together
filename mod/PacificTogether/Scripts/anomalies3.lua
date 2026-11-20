@@ -210,7 +210,7 @@ end)
 -- item of the player's inventory (Spawn Item In World at the reach spot, GrabCarPart(item, true)). For a guest on foot within reach (the game's
 -- 1500 uu) the host asks the guest: it hurts itself 3 and gives up a random backpack item, the host spawns that item at the guest's reach spot
 -- (SpawnItemActor, the game's own drop call) and the stealer takes it (GrabCarPart) unless it is holding something already.
-local REACH, COOL = 1200, 25
+local REACH, COOL = 1500, 25 -- the game reaches for the host at 1500 uu (1200 left guests at 1200-1500 untouched)
 local stealCool = {} -- stealer name -> os.clock() when it may act again
 M.stolen = 0
 local function xform(l) return { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = { X = l.X, Y = l.Y, Z = l.Z }, Scale3D = { X = 1, Y = 1, Z = 1 } } end
