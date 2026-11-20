@@ -91,7 +91,28 @@ return function(T)
         add({ run = function()
             poll(); bagBefore = guestBag
             stealer = spawn(CLS.stealer, gl.X, gl.Y - 600, gl.Z + 200)
+            -- the stealer idles in state 0 with its floating core 1000-1700 uu from where it spawned (the mod's reach is 1200 from the CORE), so the steal only fired when it hung close enough: put the core 400 uu from the guest
+            pcall(function()
+                local core, g = stealer.CoreFloatingMesh, L.guestChar():K2_GetActorLocation()
+                core:K2_SetWorldLocation({ X = g.X, Y = g.Y - 400, Z = g.Z + 150 }, false, {}, true)
+            end)
             T.log("PT|info stealer %s spawned near the guest, bag=%d", T.name(stealer), bagBefore)
+            LoopInGameThreadWithDelay(3000, function() -- diagnosis (2026-11-20): where the level's Abductors are while the stealer works
+                if not stealer:IsValid() then return true end
+                pcall(function()
+                    local g, c = L.guestChar(), stealer.CoreFloatingMesh:K2_GetComponentLocation()
+                    local gl = g:K2_GetActorLocation()
+                    local parts = {}
+                    for _, o in ipairs(FindAllOf("BP_Hazard_PhysicsGrabber_C") or {}) do
+                        if T.inWorld(o) and not o:GetFullName():find("Default__", 1, true) then
+                            local l = o:K2_GetActorLocation()
+                            parts[#parts + 1] = string.format("st%s d_guest=%.0f d_stealer=%.0f", tostring(o.CurrentPatStealerState), T.dist(o, g), math.sqrt((l.X - c.X) ^ 2 + (l.Y - c.Y) ^ 2 + (l.Z - c.Z) ^ 2))
+                        end
+                    end
+                    T.log("PT|info diag stealer core->guest %.0f, grabbers: %s", math.sqrt((gl.X - c.X) ^ 2 + (gl.Y - c.Y) ^ 2 + (gl.Z - c.Z) ^ 2), table.concat(parts, " | "))
+                end)
+                return false
+            end)
         end })
         add({ check = "guest_item_stolen", timeout = 90, cond = function()
             poll()
