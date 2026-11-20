@@ -7,7 +7,7 @@
   interact tool report `approach: teleported 2 time(s)` and `fired: InteractReleased(BP_Spawn_GasBarrel_PlacedOnly...)` before the
   crate's Pressed/Released; crate target change only `RolledOnOpenItems` (no `DataBlock_WasOpened`). Passing: 1 teleport, no barrel.
   The first standing spot highlights a gas barrel beside the crate, the tool moves on, and the crate is pressed but never opens.
-- Rate on this lane: 5 of 14 playpath runs (soak: about 1 in 4 over all stored results, 41 of ~170).
+- Rate on this lane before the final fix: 8 of 22 playpath runs (soak: about 1 in 4 over all stored results, 41 of ~170).
 - In the failing runs `IsPlayerMenuOpen` is false for 90 s, but an inventory widget with a TransferContainer exists from second 1.
   That widget is stale: the next steps grab from the **car trunk** (`PT|loot send S I:Inventory_Trunk`, no second `send S L1`),
   and the host's crate keeps its 4 items (`p2_host_container_lost_item`). Retrying the interact from 4 other sides at 80 uu in one
@@ -23,12 +23,13 @@
   stale entries across the load. Rare (1 of 25 runs here).
 
 ## Derived
-- playpath: the bot's interact step is flaky, not the mod's container UI: a press that never opens the crate leaves a stale widget
-  that fooled `IsPlayerMenuOpen`/widget based detection. Whether the barrel highlight really blocks the crate in the game is
-  unproven (Guess).
-- Fix in the scenario: the menu check now requires a widget whose TransferContainer is the crate's own container and
-  `IsPlayerMenuOpen`; if it is not up 4 s after the interact the guest is placed 80 uu from the crate on another side (180, 90,
-  -90, 0 deg) and the interact repeated (approach=false), up to 4 times.
+- playpath is the bot, not the mod's container UI: at that spot the interact tool's trace picks a gas barrel / a trailer door beside
+  the crate; the crate gets its loot rolled but never opens. A stale inventory widget (car trunk) then made the old check
+  misleading and the grab took from the trunk. A direct press-release of the crate's highlight does NOT open it either (the crate
+  needs its hold of ~1 s of game time: tried 20261120-191114, 3 failed retries); press, wait 3 s, release does.
+- Fix in the scenario: the check requires the crate's own container in an inventory widget plus `IsPlayerMenuOpen`; 4 s without it,
+  the retry presses the crate's `Highlight` (InteractPressed), 3 s later releases it, up to 3 times. Result: playpath 8/8 passed on
+  the final scenario (20261120-1917xx .. 1933xx), the retry fired in 1 of 8 (the two-teleport signature appeared once, fixed by 1 retry).
 - visual.lua dropAll: the destroy is in a pcall now.
 
 ## Guesses
