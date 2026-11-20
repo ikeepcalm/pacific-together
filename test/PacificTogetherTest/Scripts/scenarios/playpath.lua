@@ -269,8 +269,7 @@ return function(T)
         if crateMenu() then return true end
         if jid then
             local done, text = T.act_done(jid)
-            if done then log("PT|info act2 retry %d: %s", tries, (text or ""):gsub("
-", " | "):sub(1, 500)); jid, t0 = nil, os.time() end
+            if done then log("PT|info act2 retry %d: %s", tries, (text or ""):sub(1, 400)); jid, t0 = nil, os.time() end
         elseif os.time() - t0 >= 4 and tries < 4 then
             tries = tries + 1
             local ang = ({ math.pi, math.pi / 2, -math.pi / 2, 0 })[tries]
