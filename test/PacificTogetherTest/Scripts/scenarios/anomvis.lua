@@ -118,6 +118,7 @@ return function(T)
             for _, r in ipairs(ROWS) do
                 local a = r[4] * 2 * math.pi / #ROWS
                 local o = spawn(r[2], pl.X + math.cos(a) * 1500, pl.Y + math.sin(a) * 1500, pl.Z)
+                if r[1] == "bollard" then o:K2_SetActorRotation({ Pitch = 0, Yaw = 130, Roll = 0 }, false) end -- a spawned one picks a random yaw; make it a large one
                 actors[r[1]], hist[r[1]], first[r[1]], range[r[1]], gseen[r[1]] = o, {}, {}, {}, {}
                 local l = o:K2_GetActorLocation()
                 roots[r[1]] = { l.X, l.Y }
@@ -180,6 +181,17 @@ return function(T)
             end
         end
 
+        add({ check = "guest_bollard_yaw_matches", timeout = 15, cond = function() -- the spawned Bollard's yaw (130) reaches the guest's copy (anomvis.lua root rotation)
+            poll()
+            local s = gseen.bollard and gseen.bollard["<root>"]
+            local a = actors.bollard
+            if not (s and s.last and a and not dead(a)) then return false end
+            local d = math.abs(a:K2_GetActorRotation().Yaw - s.last[5]) % 360
+            if d > 180 then d = 360 - d end
+            T.log("PT|info anomfin bollard yaw host %.0f guest %.0f", a:K2_GetActorRotation().Yaw, s.last[5])
+            return d < 3
+        end })
+
         -- ---------------------------------------------------------------- a spear hurts the guest while the host is far away
         local hp0, hostHp0
         local spear
@@ -240,7 +252,7 @@ return function(T)
             T.log("PT|info anomfin clear spot %s", spot and string.format("%.0f %.0f %.0f", spot[1], spot[2], spot[3]) or "none")
             if not spot then return end
             T.myPawn():K2_TeleportTo({ X = spot[1], Y = spot[2], Z = spot[3] + 300 }, { Pitch = 0, Yaw = 0, Roll = 0 })
-            PTNative_MsgToGuest(gpc:GetAddress(), "t.tp", string.format("%.0f	%.0f	%.0f", spot[1] + 400, spot[2], spot[3] + 300))
+            PTNative_MsgToGuest(gpc:GetAddress(), "t.tp", string.format("%.0f\t%.0f\t%.0f", spot[1] + 400, spot[2], spot[3] + 300))
         end })
         add({ wait = 4 })
         add({ run = function()

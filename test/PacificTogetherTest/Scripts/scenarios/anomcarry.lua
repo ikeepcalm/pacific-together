@@ -64,13 +64,29 @@ return function(T)
             gr:BndEvt__Cone_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature(gr.Cone, c, c:K2_GetRootComponent(), 0, false, {})
             T.log("PT|info cone overlap with the car sent, grabber state %s", tostring(gr.CurrentPatStealerState))
         end })
+        -- sampled every 200 ms from the grab on (the grabber flies off on its own patrol afterwards, out of range of the rows: not meaningful then)
+        local followed, okRun = false, 0
+        add({ run = function()
+            LoopInGameThreadWithDelay(200, function()
+                if followed or dead(gr) then return true end
+                poll()
+                local l, c = car():K2_GetActorLocation(), gr.CoreFloatingMesh:K2_GetComponentLocation()
+                if g.core and dist(l.X, l.Y, l.Z, c.X, c.Y, c.Z) < 14000 then
+                    local m = gr.SM_PG_Magnet:K2_GetComponentLocation()
+                    local dc = dist(c.X, c.Y, c.Z, g.core[1], g.core[2], g.core[3])
+                    local dm = dist(m.X, m.Y, m.Z, g.mag[1], g.mag[2], g.mag[3])
+                    okRun = (dc < 400 and dm < 400) and okRun + 1 or 0
+                    if okRun >= 3 then followed = true end
+                end
+                return false
+            end)
+        end })
         add({ check = "host_grabber_grabs_car", timeout = 120, cond = function()
             local l, st = car():K2_GetActorLocation(), gr.CurrentPatStealerState
             local c = gr.CoreFloatingMesh:K2_GetComponentLocation()
             T.log("PT|info grabber state=%s core=(%.0f,%.0f,%.0f) car moved %.0f", tostring(st), c.X, c.Y, c.Z, dist(l.X, l.Y, l.Z, c0[1], c0[2], c0[3]))
             return st == 3 and dist(l.X, l.Y, l.Z, c0[1], c0[2], c0[3]) > 300
         end })
-        local okRun = 0
         add({ check = "guest_car_follows_carry", timeout = 60, cond = function()
             poll()
             if not g.car then return false end
@@ -79,16 +95,7 @@ return function(T)
             T.log("PT|info car host=(%.0f,%.0f,%.0f) guest=(%.0f,%.0f,%.0f) apart=%.0f", l.X, l.Y, l.Z, g.car[1], g.car[2], g.car[3], d)
             return d < 250 and dist(l.X, l.Y, l.Z, c0[1], c0[2], c0[3]) > 300
         end })
-        add({ check = "guest_grabber_follows", timeout = 60, cond = function()
-            poll()
-            if dead(gr) or not g.core then okRun = 0; return false end
-            local c, m = gr.CoreFloatingMesh:K2_GetComponentLocation(), gr.SM_PG_Magnet:K2_GetComponentLocation()
-            local dc = dist(c.X, c.Y, c.Z, g.core[1], g.core[2], g.core[3])
-            local dm = dist(m.X, m.Y, m.Z, g.mag[1], g.mag[2], g.mag[3])
-            T.log("PT|info grabber state=%s core apart=%.0f magnet apart=%.0f", tostring(gr.CurrentPatStealerState), dc, dm)
-            okRun = (dc < 400 and dm < 400) and okRun + 1 or 0
-            return okRun >= 3
-        end })
+        add({ check = "guest_grabber_follows", timeout = 60, cond = function() T.log("PT|info grabber follow samples ok in a row %d", okRun); return followed end })
         local zmax, n = -1e9, 0
         add({ check = "carry_height_info", timeout = 30, cond = function() -- information only: how high the game's carry takes the car in its 10 s pull
             n = n + 1
@@ -97,6 +104,32 @@ return function(T)
             T.log("PT|info carry t=%d state=%s car z=%.0f (start %.0f, max %.0f) guest car z=%s", n, tostring(st), l.Z, c0[3], zmax, tostring(g.car and g.car[3]))
             poll()
             return n >= 14 or st == 0
+        end })
+        -- the Abductor hunts a loose item as in single player (state 5: MoveToGrabOBJ, GrabbingOBJ; smhost un-froze its machine, docs/spikes/anomfin.md)
+        local item, i0, itemSeen = nil, nil, {}
+        add({ check = "grabber_idle_again", timeout = 60, cond = function() return dead(gr) or gr.CurrentPatStealerState == 0 end })
+        add({ run = function()
+            local l = car():K2_GetActorLocation()
+            local g = gr:K2_GetActorLocation()
+            local arch = StaticFindObject("/Game/Gameplay/Inventory/Items/Resources/Basic/RawSteel/IA_Resource_Raw_Scrap_Steel.IA_Resource_Raw_Scrap_Steel")
+            item = T.first("InventorySystem"):SpawnItemActor(T.world(), xf(g.X + 300, g.Y, g.Z - 700), arch, 0, 0)
+            local p = item:K2_GetActorLocation(); i0 = { p.X, p.Y, p.Z }
+            gr.CanGrabOn = true
+            gr:BndEvt__Cone_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature(gr.Cone, item, item:K2_GetRootComponent(), 0, false, {})
+            LoopInGameThreadWithDelay(100, function() -- the hunt is short: sample the states between the checks
+                if dead(gr) then return true end
+                itemSeen[gr.CurrentPatStealerState] = true
+                return false
+            end)
+            T.log("PT|info item hunt: item at %.0f %.0f %.0f, grabber state %s", p.X, p.Y, p.Z, tostring(gr.CurrentPatStealerState))
+        end })
+        add({ check = "host_grabber_hunts_item", timeout = 60, cond = function()
+            itemSeen[gr.CurrentPatStealerState] = true
+            if dead(item) then return false end
+            local p = item:K2_GetActorLocation()
+            local moved = dist(p.X, p.Y, p.Z, i0[1], i0[2], i0[3])
+            T.log("PT|info item hunt: state %s item moved %.0f (state 5 seen %s)", tostring(gr.CurrentPatStealerState), moved, tostring(itemSeen[5]))
+            return itemSeen[5] and itemSeen[6] ~= nil or (itemSeen[5] and moved > 150)
         end })
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.end", "1") end })
         add({ wait = 3 })
@@ -108,7 +141,7 @@ return function(T)
         pcall(function()
             if T.netMode() ~= "client" then return end
             local c = car():K2_GetActorLocation()
-            local best, bd = nil, 600 ^ 2 -- the copy nearest to the host's grabber root
+            local best, bd = nil, 2500 ^ 2 -- the copy nearest to the host's grabber root (wide: under 150 ms lag the watch position is ~700 uu old while it travels)
             if watch then
                 for _, o in ipairs(FindAllOf("BP_Hazard_PhysicsGrabber_C") or {}) do
                     if T.inWorld(o) and not dead(o) and not o:GetFullName():find("Default__", 1, true) then

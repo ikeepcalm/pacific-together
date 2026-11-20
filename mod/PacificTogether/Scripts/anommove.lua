@@ -122,8 +122,15 @@ end)
 -- The Abductor's Logic Driver machine does not run in a listen session either (same config 0, probe 2026-11-18): the cone sets state 1
 -- (BP_Hazard_PhysicsGrabber CurrentPatStealerState) and nothing else happens, the grabber just drifts over the car. The machine's calls are the game's
 -- own, so the host makes them: state 1 StartMoveToGrabCar + TICK_MoveToGrabCar (flies to the car, sets 2), 2 StartStartAttack (hook on, sets 3),
--- 3 StartAttacking + AttackingStateTick (drags the car until EndPull's timer sets 0). Item hunts (state 5) are not driven (probe: MoveToOBJ_TICK did
--- not home in). shortcut: car hunts only; also drives a grabber whose machine works (it would tick twice), none was seen to run.
+-- 3 StartAttacking + AttackingStateTick (drags the car until EndPull's timer sets 0). Item hunts (state 5) are not driven here (probe: MoveToOBJ_TICK did
+-- not home in): they come from the game's own machine once smhost.lua un-froze it, and then this driver does nothing for that grabber.
+-- shortcut: car hunts only, and only for a grabber whose machine smhost could not fix (nosmhost).
+local SMC = StaticFindObject("/Script/SMSystem.SMStateMachineComponent")
+local function machineRuns(o) -- smhost.lua un-froze the grabber's own machine: it does every state itself (car, loose items, the player)
+    local c = o:GetComponentByClass(SMC)
+    local i = c:IsValid() and c.R_Instance
+    return i and i:IsValid() and i.bCanEvaluateTransitionsLocally
+end
 local DRIVE = { [1] = { "StartMoveToGrabCar", "TICK_MoveToGrabCar" }, [2] = { "StartStartAttack" }, [3] = { "StartAttacking", "AttackingStateTick" } }
 local drv = {} -- address -> last driven state
 LoopInGameThreadWithDelay(33, function()
@@ -131,7 +138,7 @@ LoopInGameThreadWithDelay(33, function()
     try("drivegrab", function()
         for _, h in ipairs(hostList) do
             local o = h.o
-            if h.k == "G" and o:IsValid() then
+            if h.k == "G" and o:IsValid() and not machineRuns(o) then
                 local key, st = o:GetAddress(), o.CurrentPatStealerState
                 local d = DRIVE[st]
                 if d then
