@@ -1614,3 +1614,35 @@ Host a run, guest joins; split up where noted. Each line: what to do, what both 
 10. **Tinker**: guest buys a hint with a quirk showing: host anchor energy drops once by the cost; hint visible on both.
 11. **Loot after arrival**: right after a zone arrival or garage return, the guest empties a container: the host sees it emptied.
 12. **Interloper (DLC)**: in a real DLC zone, does the guest see the Interloper where the host does (could not be spawned in tests).
+
+## 2026-11-20: review of NiceTryJony's co-op mod (issue #2), ideas only
+
+Sources (local, git-ignored): `local/research/nicetryjony/repo` (clone of github.com/NiceTryJony/PacificDrive_Co-Op-mode at
+31afef8, 2026-11-18, C++/ENet, **no LICENSE file**), `local/research/nicetryjony/attach/` (radio notes + Lua from the issue,
+offered as "use anything you like; a mention is appreciated"). The author asked for ideas-only or ask-first: reimplement, credit him.
+
+### Observations
+- Zone from the host's save (`CppMod/dllmain.cpp` ZoneSave/ZoneLoad): the host calls `UBaseSaveGameManager::SaveGame` once the
+  spawn pass is quiet (`SpawnHistory::IsSpawnSystemRunning`), sends the ~2.6 MB file; the guest copies it into a free real save slot
+  1..9 (`coop/slot.txt`), `DeleteGame` on that slot (the game caches read slots), merges its own inventory in (`SaveInventory`, ID
+  remap), then `UserLoadGame`. Each PC runs its own single-player world; the guest gets loot and stationary hazards natively.
+- His README: "Anomalies and random zone events matching for both" is still Planned; known issue "zone isn't 100% identical (a few
+  leeches, some plants)". Live loot still has its own sync (`Sync/LootSync.cpp`, `WorldItemSync.cpp`).
+- Radio: he disables the random start offset with a bytecode patch of `RandomSeekMusic`/`RandomizeStartTime`; blocks DJ lines with
+  `NextNaturalInterstitialCounter`/`NextManualInterstitialCounter` 99999 and `NextInterstitialTimer` 1e6 every tick; a double
+  `RadioPlaylist` swap within ~2.5 s crashed him (restored a copy of the already swapped list, freed made tracks).
+
+### Derived
+- Adopting the save load as-is is blocked: it writes and deletes a guest save slot (D2, S7) and `UserLoadGame` is a standalone map
+  load, which a listen-server client cannot do without leaving the session. We already replicate `BP_Base_Hazard`.
+- The open question for us is narrower: can a *connected* guest rebuild the non-replicated pieces (lootables, world items,
+  Leech/BombRock) from the host's save bytes in memory? Our current zone-entry cost is small (g.loot.b bursts ~59 KB/s; join hitches
+  are big garage containers and car/prog first sends), so the payoff would be fidelity/robustness, not bandwidth.
+- Radio: we are ahead on custom files (native `PTNative_MediaSeek` position sync, made-track playlist restored from
+  `DefaultRadioPlaylist`, so his double-swap crash does not apply). Gap: stock (Wwise) tracks cannot seek, so their random start
+  offset still drifts; nothing in `native/` or `mod/` touches `RandomSeekMusic`/`RandomizeStartTime`. We set only the two counters
+  to 999 on the guest, not `NextInterstitialTimer`.
+
+### Unknowns
+- Whether the game has a per-object restore (SpawnHistory or save-system actor restore) callable on a client world.
+- Whether lootable save GUID names exist on a freshly generated zone (before its first save) or only after a restore.
