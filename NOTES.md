@@ -1714,3 +1714,19 @@ guest healed from the minimum to 2-5 % inside the arrival grace counted as dead.
 8. Pickpocket reaches a guest at up to ~1500 uu (was 1200).
 9. Guest leaves the car while the host drives (~700 uu/s): lands beside the car and stays put (guestexitmove).
 10. Earlier list still open: Abductor/Can Opener/Tourist kick from NOTES "2026-11-18 unattended".
+
+### Verification after the review (16:35-16:55)
+- Gates were not all on one commit: suite + lag/loss on mod 65ad6a8, soak on 04f0a8c. `git diff --stat 65ad6a8 HEAD -- mod native`:
+  only anomalies3.lua (pickpocket reach 1200 -> 1500); validated anomwake 22/22, anomalies3 26/27 (guest_sees_bunny) then 27/27.
+- Death latch vs the arrival drop to the minimum: 229 result folders after the merge; `PT|health guest died` only in backpacksync and
+  craftcrash, which kill the guest on purpose. No false death on any zone arrival (incl. the 46 soak runs, sessiontravel, zoneexit,
+  transition). Hand check 5 also covers it: a normal arrival must not black-screen.
+- guestexitmove is pre-existing, not from today: alone on 04f0a8c 28/30, 30/30, 30/30; on 113365d (0.9.6, pair2 junctions repointed
+  to a 113365d worktree, then back to main) 30/30, 28/30, 30/30.
+- anomvis "follows" under lag is not caused by today's rotation sync: with `-Mutate nobollardyaw` under lag 31/32 (only the yaw check)
+  and 29/32 (bubblegum + bollard follows + yaw). Lag-sensitive follow checks, pre-existing class.
+- Soak lootsync failure: guest 39 lootables vs host 40 for the whole check (same one-container miss as 11-17). A real, rare loot desync.
+- anomvis host crash fix (dead BombRock/Mimic sampling): hardened, no failing test (unproven).
+- Nudge pad: the lead said it would switch the smart launch off if unresolved, then kept it on: the guest's launch still keeps its
+  vertical part in the traces, so the guess is that the worst case is about the plain bounce. Unproven; owner's call (hand check 6).
+- Lane test roots C:\PTLanes\anomfin, nudgepad, guestdeath have Mods junctions to deleted worktrees: repoint or re-setup before reuse.
