@@ -169,8 +169,7 @@ return function(T)
         local ok = #mine == #rows
         why = string.format("mine=%d host=%d", #mine, #rows)
         if not ok then
-            for _, r in ipairs(rows) do if not at(mine, unpack(r)) then why = why .. " hostonly " .. r:match("^[^
-]*"):sub(1, 90) end end
+            for _, r in ipairs(rows) do if not at(mine, unpack(r)) then why = why .. " hostonly " .. r:sub(1, 90) end end
             for _, o in ipairs(mine) do
                 local f = false
                 for _, r in ipairs(rows) do if at({ o }, unpack(r)) then f = true; break end end
