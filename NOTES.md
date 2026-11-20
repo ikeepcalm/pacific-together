@@ -1730,3 +1730,25 @@ guest healed from the minimum to 2-5 % inside the arrival grace counted as dead.
 - Nudge pad: the lead said it would switch the smart launch off if unresolved, then kept it on: the guest's launch still keeps its
   vertical part in the traces, so the guess is that the worst case is about the plain bounce. Unproven; owner's call (hand check 6).
 - Lane test roots C:\PTLanes\anomfin, nudgepad, guestdeath have Mods junctions to deleted worktrees: repoint or re-setup before reuse.
+
+### Evening (16:50-22:05): goal not met, follow-up lanes
+- nudge3 (9d1c485): the guest's smart launch was NOT deflected by the mod. The test guest stood beside a `BP_CarPart_Interactive` box
+  and slid along it (velocity projected onto its -73 deg face; Pawn sweep hits it, a Visibility trace does not). Scenario: open-ground
+  spot, Tesla by largest X, gating check restored. anomwake2 26/26 x6, mutation nosmartlaunch 25/26 x2. W6 Shaker row synced again.
+  The "partly"/info-only notes above are superseded.
+- soakflake (25ab231 + lead fix 1fc7442): playpath was the bot (stale inventory widget held the trunk; the crate needs its highlight
+  held ~1 s). playpath 8/8, lootsync 5/5, session 40/40. visual.lua dropAll: destroy now in a pcall; the lane's edit had replaced the
+  table reset instead of the destroy line, the lead restored it (1fc7442). Lootsync diagnostics added (hostonly/guestonly rows).
+- lootloss (d632855): the loot list loss is a Lua bug in loot.lua's inbox: `#` of a table with a consumed (nil) front is no border,
+  so under lag queued lines (often the tail with F) were thrown away; with F applied the guest purged and never asked again (36/40
+  under the tunnel, 39/40 once per ~45 soak runs). Explicit tail counter; progression.lua's work queue had the same pattern (fixed).
+  Tunnel lootsync 5/5, plain 3/3, session 40/40, mutation inboxholes fails 4/5. Lead: rxA diagnostic reset per map.
+- Gates on 1fc7442 (superseded by d632855): suite 86/90 first pass; reruns arcui 18/18 (first: guest exited in UE4SS init),
+  guestjunction 26/26 x2 (first 24/26); open: guestexitmove (pre-existing, also on 0.9.6), anomtable 1 guest crash in 3 runs (native
+  AV, unsymbolized, last Lua perf.lua:185 = the per-frame loop; same marker in 11-18 anomtable crashes; reruns 65/65, 64/65
+  meteor_copy). Core lag/loss on 1fc7442: 4/5 (lootsync 38/40 = the lootloss bug, fixed after).
+- Candidate d632855: suite started 21:55 and stopped at the owner's return after 9 scenarios: 8 pass, lootsync2 32/33
+  (host_part_state_after_guest_change: guest applied the gas cap fuel change, the host never saw it in 30 s; 33/33 in all 5 earlier
+  suites, so possibly the inbox change: rerun lootsync2 x3 first). NOT run on d632855: rest of the suite, lag/loss, the 2 h soak.
+- So gate 3 is still open: no single commit has the full suite + lag/loss + a clean soak. Next session: lootsync2 x3, then the
+  gates on one commit.
