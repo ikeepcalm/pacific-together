@@ -29,7 +29,7 @@ return function(T)
     if T.ROLE == "host" then
         local steps = {}
         local function add(s) steps[#steps + 1] = s end
-        local gpc, guestHp, guestZ, guestMaxZ, guestMaxVx = nil, -1, 0, -1e9, 0
+        local gpc, guestHp, guestZ, guestMaxZ, guestMaxVx = nil, -1, 0, -1e9, -1
         local hostHp0 = -1
         local function poll()
             while true do
@@ -111,8 +111,8 @@ return function(T)
         padTest("bouncepad", "bounce", 60)
         padTest("nudgepad", "nudge", 200) -- the pad mesh itself rises and lifts a guest ~100 uu without the hook (mutation run), the hook adds repeated launches (~340)
         -- nudge pad smart launch (docs/spikes/nudgepad-smart.md): a guest moving +X onto a pad with an anomaly (a landmine) 1500 uu ahead is arced toward it
-        -- (horizontal speed 700+); the plain up impulse leaves it at 0. Headless input does not walk a character, so the host's copy of the guest's velocity
-        -- (what the pad hook reads) is set to 400 uu/s +X for a few seconds instead. Mutation nosmartlaunch.
+        -- (speed 800 straight at it: small sideways offset); the plain up impulse lets the 257 uu/s sideways velocity carry on (offset ~600). Headless input does not walk a character, so the host's copy of the guest's velocity
+        -- (what the pad hook reads) is set to 400 uu/s, 40 degrees off +X for a few seconds instead. Mutation nosmartlaunch.
         local pad2, mine
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.vreset", "1") end })
         add({ wait = 4 })
@@ -120,18 +120,20 @@ return function(T)
             local at = L.guestChar():K2_GetActorLocation()
             mine = spawn(CLS.mine, at.X + 1500, at.Y, at.Z)
             T.log("PT|info smart test: landmine %s, guest at %.0f,%.0f,%.0f", T.name(mine), at.X, at.Y, at.Z)
+            PTNative_MsgToGuest(gpc:GetAddress(), "t.inject", "1") -- the guest forces its own velocity too, else the host's corrections pull it back
             local n, gc = 0, L.guestChar()
             LoopInGameThreadWithDelay(50, function()
                 n = n + 1
-                pcall(function() gc.CharacterMovement.Velocity = { X = 400, Y = 0, Z = 0 } end)
+                if n > 10 then return false end -- the loop cannot be stopped from inside; it goes quiet with the pad spawn: forcing the copy longer would overwrite the launch
+                pcall(function() gc.CharacterMovement.Velocity = { X = 306, Y = 257, Z = 0 } end)
                 if n == 10 then local g = gc:K2_GetActorLocation(); pad2 = spawn(CLS.nudge, g.X, g.Y, g.Z - 90) end -- the pad appears under an already-moving guest
-                return n > 14 -- short: forcing the copy longer fights the guest's own movement, and a guest walking on would reach the landmine, whose blast fakes a launch
+                return false
             end)
         end })
         add({ check = "guest_nudged_toward_anomaly", timeout = 40, cond = function()
             poll()
-            T.log("PT|info smart test guest max horizontal speed %.0f", guestMaxVx)
-            return guestMaxVx > 550
+            T.log("PT|info smart test guest sideways offset at 700 uu of +X travel %.0f (-1 = not there yet)", guestMaxVx)
+            return guestMaxVx >= 0 and guestMaxVx < 330
         end })
         add({ run = function() if pad2 then pad2:K2_DestroyActor() end; mine:K2_DestroyActor() end })
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.end", "1") end })
@@ -139,14 +141,21 @@ return function(T)
         return steps
     end
 
-    local finished, maxZ, maxVx = false, -1e9, 0
+    local finished, maxZ, maxVx, x0, y0, injectUntil = false, -1e9, -1, nil, nil, 0
     LoopInGameThreadWithDelay(20, function() pcall(function()
         if T.netMode() ~= "client" then return end
         local me = T.myPawn()
         if me and me:IsValid() then
             maxZ = math.max(maxZ, me:K2_GetActorLocation().Z)
             local v = me.CharacterMovement.Velocity
-            maxVx = math.max(maxVx, math.sqrt(v.X * v.X + v.Y * v.Y))
+            local l = me:K2_GetActorLocation()
+            x0, y0 = x0 or l.X, y0 or l.Y
+            if PTNative_MsgPoll("t.inject") then injectUntil = os.clock() + 0.45 end
+            if os.clock() < injectUntil then me.CharacterMovement.Velocity = { X = 306, Y = 257, Z = 0 } end
+            -- sideways offset at the moment the guest has travelled 700 uu in +X (-1 until then): the smart arc heads straight for the anomaly (small offset),
+            -- a plain up impulse leaves the sideways part of the velocity to carry on (the pad mesh's push and the ~2 s flight make X travel alone useless)
+            if maxVx < 0 and math.abs(l.X - x0) + math.abs(l.Y - y0) > 40 then T.log("PT|info trace dx=%.0f dy=%.0f dz=%.0f v=%.0f,%.0f,%.0f", l.X - x0, l.Y - y0, l.Z, me.CharacterMovement.Velocity.X, me.CharacterMovement.Velocity.Y, me.CharacterMovement.Velocity.Z) end
+            if maxVx < 0 and l.X - x0 > 700 then maxVx = math.abs(l.Y - y0) end
         end
     end) end)
     LoopInGameThreadWithDelay(1000, function() pcall(function()
@@ -159,7 +168,7 @@ return function(T)
             local kind, data = PTNative_MsgPoll("t.")
             if not kind then break end
             if kind == "t.end" then finished = true end
-            if kind == "t.vreset" then maxVx = 0 end
+            if kind == "t.vreset" then maxVx, x0, y0 = -1, nil, nil end
             if kind == "t.zreset" then maxZ = -1e9 end
             if kind == "t.tp" and me and me:IsValid() then
                 local x, y, z = data:match("^(%-?[%d%.]+)\t(%-?[%d%.]+)\t(%-?[%d%.]+)$")

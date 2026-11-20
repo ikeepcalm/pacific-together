@@ -403,8 +403,13 @@ local function launch(self, other, amountOf)
                     -- the host's copy of the guest's movement takes the same impulse, else its replay of the guest's moves corrects the guest back down
                     local hcm = who.CharacterMovement
                     local v = hcm.Velocity
-                    hcm.Velocity = { X = sv and 0 or v.X, Y = sv and 0 or v.Y, Z = 0 }
-                    hcm:AddImpulse({ X = u.X * amount, Y = u.Y * amount, Z = u.Z * amount }, true)
+                    if sv then -- a smart launch replaces the whole velocity at once (a pending impulse got overwritten by the host's replay of the guest's moves)
+                        hcm.Velocity = sv
+                        hcm:SetMovementMode(3, 0)
+                    else
+                        hcm.Velocity = { X = v.X, Y = v.Y, Z = 0 }
+                        hcm:AddImpulse({ X = u.X * amount, Y = u.Y * amount, Z = u.Z * amount }, true)
+                    end
                     if sv then M.smart = M.smart + 1 log("PT|anom3 nudge pad smart launch %.0f,%.0f,%.0f", sv.X, sv.Y, sv.Z) end
                     M.bounced = M.bounced + 1
                     log("PT|anom3 bounce pad %s launches the guest", key)
@@ -434,8 +439,13 @@ net.on("g.anom3.bounce", function(_, data)
         if not (me and me:IsValid()) then return end
         local cm, v = me.CharacterMovement, me.CharacterMovement.Velocity
         a = tonumber(a)
-        cm.Velocity = { X = sm == "1" and 0 or v.X, Y = sm == "1" and 0 or v.Y, Z = 0 }
-        cm:AddImpulse({ X = tonumber(x) * a, Y = tonumber(y) * a, Z = tonumber(z) * a }, true)
+        if sm == "1" then
+            cm.Velocity = { X = tonumber(x), Y = tonumber(y), Z = tonumber(z) }
+            cm:SetMovementMode(3, 0)
+        else
+            cm.Velocity = { X = v.X, Y = v.Y, Z = 0 }
+            cm:AddImpulse({ X = tonumber(x) * a, Y = tonumber(y) * a, Z = tonumber(z) * a }, true)
+        end
         M.applied = M.applied + 1
         log("PT|anom3 bounce pad launched the guest (%s, mode %s)", data:gsub("\t", " "), tostring(cm.MovementMode))
     end)
