@@ -372,8 +372,8 @@ local mine, todo, specs, guestMap = {}, {}, {}, nil -- guest: host actor key -> 
 local dict, gone = {}, {} -- guest: id -> path (the host's "M" lines); keys the host removed
 
 local function dropAll()
-    for _, a in pairs(mine) do if live(a) then a:K2_DestroyActor() end end
     for _, a in pairs(mine) do if live(a) then pcall(function() a:K2_DestroyActor() end) end end -- a copy the game freed at the load reads as valid but has no methods (soak 2026-11-20)
+    mine, todo, specs, dict, gone = {}, {}, {}, {}, {}
 end
 
 local function fields(line)
