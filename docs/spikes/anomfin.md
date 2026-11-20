@@ -52,14 +52,10 @@ Scenario `anomvis`: the spawned Bollard is set to yaw 130 and `guest_bollard_yaw
 (only `guest_hurt_by_spear` failed: the host stood 219 uu from the guest and was already hurt; a known flake, it also failed in the first run); `nobollardyaw` 23/26 `095451` fails
 `guest_bollard_yaw_matches` and `guest_bollard_follows`.
 
-## 4. Nudge pad: not done
+## 4. Nudge pad: smart launch done later
 
-`ImpulseHelper:CalcualteImpulseFromPoint(From, ToLocation, Strength, Variance, SmartLaunch, out Impulse, out IsSmart)` is callable from Lua on a spawned pad (structs as tables with the
-bytecode's GUID-suffixed field names, `GameplayTags = {{TagName = ...}}`; the vector comes back in the second out table). The pad's player branch is
-`ImpulseInDirection(up, 1000, ..., variance (strength 250, drop anchor 0.5), smart (tag ActorTags.Hazard.Anomaly, 45 degrees, range 250-2500, arc 0.5/0.5, direction override = the
-character's last velocity))`. With a Bollard, BombRock, Bubblegum Buddy and Blacksmith 1500 uu ahead it returned the plain up impulse (0,0,1000) every time, so I could not produce the smart result;
-whether the anomaly tag is only set on some hazards or by the micro-event spawner is unknown. The plain up impulse stays (shortcut already in nudgepad.md).
-Next step: find which actors carry `ActorTags.Hazard.Anomaly`, then call `CalcualteImpulseFromPoint` in `anomalies3.lua launch()` with the guest's velocity as the override and send the vector instead of `u * amount`.
+Not done in this lane; solved by the nudgepad lane 2026-11-20, see [nudgepad-smart.md](nudgepad-smart.md). The (0,0,1000) result here was the probe's fault: the struct's tag
+container never reached the function (every field of the smart-launch struct arrived as zero, so Chance was 0 and the plain impulse came back).
 
 ## 5. Interloper (DLC): hand check
 
