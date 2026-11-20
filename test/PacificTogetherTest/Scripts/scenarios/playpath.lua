@@ -251,19 +251,17 @@ return function(T)
     local n0
     add({ run = function() n0 = carried() end })
     actSteps(add, 2, "interact", function() return { actor = path(copy.a), approach = true, close_menu = false } end, 40, nil)
-    -- the interact sometimes opens no menu (the press lands on a neighbouring highlight, soak 2026-11-20): wait, then press again
-    -- (the press landed with a gas barrel beside the crate highlighted too: the retry stands on another side of the crate)
-    local t0, tries = 0, 0
+    -- the menu can open late on a loaded machine (the loot UI loads its assets in the background, up to ~40 s in the soak of
+    -- 2026-11-20): wait for it instead of pressing again (a second press can close it); log what is there while waiting
+    local t0, tl = 0, 0
     add({ run = function() t0 = os.time() end })
-    add({ check = "guest_menu_open_after_interact", timeout = 45, cond = function()
+    add({ check = "guest_menu_open_after_interact", timeout = 90, cond = function()
         if menuOpen() then return true end
-        if os.time() - t0 >= 8 and tries < 4 then
-            t0, tries = os.time(), tries + 1
-            local ang = ({ math.pi, math.pi / 2, -math.pi / 2, 0 })[tries]
-            local me = T.myPawn():K2_GetActorLocation()
-            log("PT|info act2 retry %d: no menu 8 s after the interact", tries)
-            T.myPawn():K2_SetActorLocation({ X = copy.x + math.cos(ang) * 80, Y = copy.y + math.sin(ang) * 80, Z = me.Z }, false, {}, true)
-            T.act_begin("interact", { actor = path(copy.a), approach = false, close_menu = false })
+        if os.time() - tl >= 5 then
+            tl = os.time()
+            local w = 0
+            for _, x in ipairs(FindAllOf("UMG_PlayerMenu_Inventory_C") or {}) do if x.TransferContainer:IsValid() then w = w + 1 end end
+            log("PT|info act2 waiting for the menu %d s: open=%s widgets_with_transfer=%d", os.time() - t0, tostring(menuOpen()), w)
         end
         return false
     end })
