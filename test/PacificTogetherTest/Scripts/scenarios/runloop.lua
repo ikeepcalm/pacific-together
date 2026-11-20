@@ -91,6 +91,7 @@ return function(T)
             end
             add({ check = st.id .. "_guest_report", timeout = to(120), cond = function() poll(); return got["t." .. st.id] ~= nil end })
             add({ check = st.id .. "_same_world", timeout = 10, cond = function()
+                poll() -- the guest re-reports every 3 s: compare its latest, not the first (a weather change in between failed the check)
                 local gmap, gbody, gcar, ginv, gtod, gov = parse(got["t." .. st.id])
                 T.log("PT|info %s guest map=%s body=%s car=%s inv=%s tod=%s ov=%s | host map=%s car=%s", st.id, gmap, gbody, gcar, ginv, gtod, gov, T.map(), tostring(C.car() ~= nil))
                 assert(gmap == T.map(), "guest on another map: " .. tostring(gmap))
