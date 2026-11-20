@@ -1294,7 +1294,7 @@ RegisterLoadMapPreHook(function() replicas = replica.new(nil) end)
 RegisterLoadMapPostHook(function()
     hostScanned, fullAt, allQueue, readyFor, lastRx, fullSentAt, listFor, listNext = false, nil, nil, {}, -math.huge, -math.huge, nil, nil
     ents, byName, claimed, reported, out, partial, partIds, skip = {}, {}, {}, {}, {}, {}, {}, {}
-    inbox, head, tail, cands, made = {}, 1, 0, {}, { claimed = 0, spawned = 0 }
+    inbox, head, tail, cands, made, rxA = {}, 1, 0, {}, { claimed = 0, spawned = 0 }, {}
     passIds, wreckIds = nil, nil
 end)
 
