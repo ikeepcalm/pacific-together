@@ -251,7 +251,18 @@ return function(T)
     local n0
     add({ run = function() n0 = carried() end })
     actSteps(add, 2, "interact", function() return { actor = path(copy.a), approach = true, close_menu = false } end, 40, nil)
-    add({ check = "guest_menu_open_after_interact", timeout = 10, cond = menuOpen })
+    -- the interact sometimes opens no menu (the press lands on a neighbouring highlight, soak 2026-11-20): wait, then press again
+    local t0, retry
+    add({ run = function() t0 = os.time(); retry = nil end })
+    add({ check = "guest_menu_open_after_interact", timeout = 40, cond = function()
+        if menuOpen() then return true end
+        if os.time() - t0 >= 8 and not retry then
+            retry = true
+            log("PT|info act2 retry: no menu 8 s after the interact")
+            T.act_begin("interact", { actor = path(copy.a), approach = true, close_menu = false })
+        end
+        return false
+    end })
     -- the loot menu's own moves: a stack out of the container into the hand (the grab), the hand into the backpack (the place)
     add({ run = function()
         local w
