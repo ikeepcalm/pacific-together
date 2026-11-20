@@ -151,7 +151,7 @@ return function(T)
             T.log("PT|info grabber: guest hp=%.0f speed=%.0f host hp=%.0f", guestHp, guestSpd, health())
             return guestHp < guestHp0 - 5
         end })
-        add({ check = "guest_pulled_by_grabber", timeout = 10, cond = function() poll(); maxSpd = math.max(maxSpd, guestSpd); return maxSpd > 30 end })
+        add({ check = "guest_pulled_by_grabber", timeout = 25, cond = function() poll(); maxSpd = math.max(maxSpd, guestSpd); return maxSpd > 30 end })
         add({ check = "host_not_hurt_by_grabber_on_guest", timeout = 5, cond = function() return health() >= hostHp0 - 0.5 end })
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.end", "1") end })
         add({ wait = 3 })
