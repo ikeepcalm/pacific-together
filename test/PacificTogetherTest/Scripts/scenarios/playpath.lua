@@ -264,16 +264,17 @@ return function(T)
         end
         return false
     end
-    local t0, tries = 0, 0
+    local t0, tries, held = 0, 0, nil
     add({ run = function() t0 = os.time() end })
-    add({ check = "guest_menu_open_after_interact", timeout = 40, cond = function()
+    add({ check = "guest_menu_open_after_interact", timeout = 60, cond = function()
         if crateMenu() then return true end
-        if os.time() - t0 >= 4 and tries < 3 then
-            tries, t0 = tries + 1, os.time()
+        if held then
+            -- a crate needs its hold time (about 1 s of game time) between the press and the release
+            if os.time() - held >= 3 then held = nil; copy.a.Highlight:InteractReleased(T.myPawn()); t0 = os.time() end
+        elseif os.time() - t0 >= 4 and tries < 3 then
+            tries, held = tries + 1, os.time()
             log("PT|info act2 retry %d: no crate menu, pressing the crate's highlight directly", tries)
-            local me = T.myPawn()
-            copy.a.Highlight:InteractPressed(me)
-            copy.a.Highlight:InteractReleased(me)
+            copy.a.Highlight:InteractPressed(T.myPawn())
         end
         return false
     end })
