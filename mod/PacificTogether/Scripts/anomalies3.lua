@@ -359,7 +359,8 @@ local function hasTag(world, a, name)
 end
 -- the arc launch velocity toward a random qualifying anomaly, or nil (the plain impulse then stands, as in the game)
 local function smartVector(pad, who, up)
-    if os.getenv("PT_MUTATE") == "nosmartlaunch" or not (tagLib and tagLib:IsValid()) then return nil end
+    if os.getenv("PT_MUTATE") == "nosmartlaunch" then return nil end
+    if not (tagLib and tagLib:IsValid()) then log("PT|anom3 nudge pad smart: no tag library") return nil end
     local v, c = who.CharacterMovement.Velocity, who:K2_GetActorLocation()
     local vl = math.sqrt(v.X * v.X + v.Y * v.Y + v.Z * v.Z)
     local d = vl > 0.1 and { X = v.X / vl, Y = v.Y / vl, Z = v.Z / vl } or up
@@ -377,6 +378,7 @@ local function smartVector(pad, who, up)
             end
         end
     end
+    log("PT|anom3 nudge pad smart search: velocity %.0f, %d anomalies, %d in the cone", vl, (function() local n = 0 for _ in pairs(set) do n = n + 1 end return n end)(), #pool)
     while #pool > 0 do
         local i = math.random(#pool)
         local o = {}
@@ -395,12 +397,15 @@ local function launch(self, other, amountOf)
                     if (padCool[key] or 0) > now then return end
                     padCool[key] = now + 1.5 -- the pad's own re-arm delay (ReArmTimerOnPlayerLaunch), not read
                     local u, amount = pad:GetActorUpVector(), amountOf or pad.LaunchPlayerImpulseAmount
-                    net.toGuest(pc, "g.anom3.bounce", string.format("%.3f\t%.3f\t%.3f\t%.0f", u.X, u.Y, u.Z, amount))
+                    local sv = amountOf and smartVector(pad, who, u) -- the bounce pad has no smart launch
+                    if sv then u, amount = sv, 1 end
+                    net.toGuest(pc, "g.anom3.bounce", string.format("%.3f\t%.3f\t%.3f\t%.0f\t%d", u.X, u.Y, u.Z, amount, sv and 1 or 0))
                     -- the host's copy of the guest's movement takes the same impulse, else its replay of the guest's moves corrects the guest back down
                     local hcm = who.CharacterMovement
                     local v = hcm.Velocity
-                    hcm.Velocity = { X = v.X, Y = v.Y, Z = 0 }
+                    hcm.Velocity = { X = sv and 0 or v.X, Y = sv and 0 or v.Y, Z = 0 }
                     hcm:AddImpulse({ X = u.X * amount, Y = u.Y * amount, Z = u.Z * amount }, true)
+                    if sv then M.smart = M.smart + 1 log("PT|anom3 nudge pad smart launch %.0f,%.0f,%.0f", sv.X, sv.Y, sv.Z) end
                     M.bounced = M.bounced + 1
                     log("PT|anom3 bounce pad %s launches the guest", key)
                 end
@@ -423,7 +428,7 @@ end)
 net.on("g.anom3.bounce", function(_, data)
     if not (M.enabled and safety.guest()) then return end
     try("apply bounce", function()
-        local x, y, z, a = data:match("^(%-?[%d%.]+)\t(%-?[%d%.]+)\t(%-?[%d%.]+)\t([%d%.]+)$")
+        local x, y, z, a, sm = data:match("^(%-?[%d%.]+)\t(%-?[%d%.]+)\t(%-?[%d%.]+)\t([%d%.]+)\t?(%d?)$")
         local pc = UEHelpers.GetPlayerController()
         local me = x and pc and pc:IsValid() and pc.Pawn or nil
         if not (me and me:IsValid()) then return end
