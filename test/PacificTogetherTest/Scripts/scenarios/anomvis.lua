@@ -195,18 +195,26 @@ return function(T)
         -- ---------------------------------------------------------------- a spear hurts the guest while the host is far away
         local hp0, hostHp0
         local spear
+        -- the other hazards (a Tumbler's blast, spears) must not decide this check: remove them, then take the health baseline BEFORE the fresh spear exists.
+        -- A spawned Titan's Bone hits by itself about a second after it appears (the machine runs since smhost), so Damage() afterwards may find nothing left to hit:
+        -- either hit counts as "the spear hurts the guest".
+        add({ run = function()
+            for _, o in pairs(actors) do if not dead(o) then o:K2_DestroyActor() end end
+            for _, o in ipairs(FindAllOf("BP_Hazard_ImpactSpear_C") or {}) do if not dead(o) and not o:GetFullName():find("Default__", 1, true) then o:K2_DestroyActor() end end
+        end })
+        add({ wait = 3 })
         add({ run = function()
             poll()
+            hp0, hostHp0 = gHp, health()
             local gl = L.guestChar():K2_GetActorLocation()
-            spear = spawn(ROWS[2][2], gl.X, gl.Y, gl.Z - 80) -- the first one has retracted and gone by now
-            T.log("PT|info anomvis fresh spear at the guest %.0f %.0f %.0f", gl.X, gl.Y, gl.Z)
+            spear = spawn(ROWS[2][2], gl.X, gl.Y, gl.Z - 80)
+            T.log("PT|info anomvis fresh spear at the guest %.0f %.0f %.0f, guest hp=%s host hp=%.0f, guest %.0f uu from the host", gl.X, gl.Y, gl.Z, tostring(hp0), hostHp0, T.dist(L.guestChar(), T.myPawn()))
         end })
         add({ wait = 1 })
         add({ run = function()
             poll()
-            hp0, hostHp0 = gHp, health()
-            T.log("PT|info anomvis spear alive=%s: guest %.0f uu from the host, guest hp=%s host hp=%.0f", tostring(not dead(spear)), T.dist(L.guestChar(), T.myPawn()), tostring(hp0), hostHp0)
-            spear:Damage()
+            T.log("PT|info anomvis spear alive=%s guest hp=%s", tostring(not dead(spear)), tostring(gHp))
+            if not dead(spear) then pcall(function() spear:Damage() end) end
         end })
         add({ check = "guest_hurt_by_spear", timeout = 30, cond = function()
             poll()
