@@ -251,18 +251,16 @@ return function(T)
     local n0
     add({ run = function() n0 = carried() end })
     actSteps(add, 2, "interact", function() return { actor = path(copy.a), approach = true, close_menu = false } end, 40, nil)
-    -- the menu can open late on a loaded machine (the loot UI loads its assets in the background, up to ~40 s in the soak of
-    -- 2026-11-20): wait for it instead of pressing again (a second press can close it); log what is there while waiting
+    -- the guest's container UI is open when the manager says so or an inventory widget holds a transfer container: in ~1 of 3
+    -- soak runs (spot 2 after a gas barrel took the first highlight) the widget is up within 1 s and IsPlayerMenuOpen stays false
+    -- for good while the following grab/place steps work (soak 2026-11-20, docs/spikes/soakflake.md)
     local t0, tl = 0, 0
     add({ run = function() t0 = os.time() end })
-    add({ check = "guest_menu_open_after_interact", timeout = 90, cond = function()
+    add({ check = "guest_menu_open_after_interact", timeout = 30, cond = function()
+        local w = 0
+        for _, x in ipairs(FindAllOf("UMG_PlayerMenu_Inventory_C") or {}) do if x.TransferContainer:IsValid() then w = w + 1 end end
         if menuOpen() then return true end
-        if os.time() - tl >= 5 then
-            tl = os.time()
-            local w = 0
-            for _, x in ipairs(FindAllOf("UMG_PlayerMenu_Inventory_C") or {}) do if x.TransferContainer:IsValid() then w = w + 1 end end
-            log("PT|info act2 waiting for the menu %d s: open=%s widgets_with_transfer=%d", os.time() - t0, tostring(menuOpen()), w)
-        end
+        if w > 0 then log("PT|info act2 menu: widget up, IsPlayerMenuOpen=false (%d s)", os.time() - t0); return true end
         return false
     end })
     -- the loot menu's own moves: a stack out of the container into the hand (the grab), the hand into the backpack (the place)
