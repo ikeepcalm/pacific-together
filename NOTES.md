@@ -1646,3 +1646,4 @@ offered as "use anything you like; a mention is appreciated"). The author asked 
 ### Unknowns
 - Whether the game has a per-object restore (SpawnHistory or save-system actor restore) callable on a client world.
 - Whether lootable save GUID names exist on a freshly generated zone (before its first save) or only after a restore.
+- 2026-11-20: the owner dropped these ideas (no code taken); work continues on our own 1.0 list.
