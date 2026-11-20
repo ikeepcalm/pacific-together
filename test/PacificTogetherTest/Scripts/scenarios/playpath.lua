@@ -252,14 +252,18 @@ return function(T)
     add({ run = function() n0 = carried() end })
     actSteps(add, 2, "interact", function() return { actor = path(copy.a), approach = true, close_menu = false } end, 40, nil)
     -- the interact sometimes opens no menu (the press lands on a neighbouring highlight, soak 2026-11-20): wait, then press again
-    local t0, retry
-    add({ run = function() t0 = os.time(); retry = nil end })
-    add({ check = "guest_menu_open_after_interact", timeout = 40, cond = function()
+    -- (the press landed with a gas barrel beside the crate highlighted too: the retry stands on another side of the crate)
+    local t0, tries = 0, 0
+    add({ run = function() t0 = os.time() end })
+    add({ check = "guest_menu_open_after_interact", timeout = 45, cond = function()
         if menuOpen() then return true end
-        if os.time() - t0 >= 8 and not retry then
-            retry = true
-            log("PT|info act2 retry: no menu 8 s after the interact")
-            T.act_begin("interact", { actor = path(copy.a), approach = true, close_menu = false })
+        if os.time() - t0 >= 8 and tries < 4 then
+            t0, tries = os.time(), tries + 1
+            local ang = ({ math.pi, math.pi / 2, -math.pi / 2, 0 })[tries]
+            local me = T.myPawn():K2_GetActorLocation()
+            log("PT|info act2 retry %d: no menu 8 s after the interact", tries)
+            T.myPawn():K2_SetActorLocation({ X = copy.x + math.cos(ang) * 80, Y = copy.y + math.sin(ang) * 80, Z = me.Z }, false, {}, true)
+            T.act_begin("interact", { actor = path(copy.a), approach = false, close_menu = false })
         end
         return false
     end })
