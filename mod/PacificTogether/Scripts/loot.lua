@@ -1160,7 +1160,7 @@ net.on("g.loot.b", function(pc, data)
     local lease = common.lease(pc)
     for l in data:gmatch("[^\n]+") do
         if l == "H" then readyFor[pc:GetAddress()] = true end
-        tail = tail + 1; inbox[tail] = { line = l, lease = lease }
+        tail = qlen() + 1; inbox[tail] = { line = l, lease = lease }
     end
 end)
 local BUDGET = 0.004
