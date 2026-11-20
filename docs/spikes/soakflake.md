@@ -3,30 +3,42 @@
 ## Observations
 - Soak 20261120-142816: playpath failed twice (`guest_menu_open_after_interact` client + `p2_host_container_lost_item` host),
   lootsync once (`guest_lootables_match_host`, guest 39 vs host 40 for 90 s).
-- playpath failing runs (20261120-151604, 163029): the interact tool report says `approach: teleported 2 time(s)` and `fired:
-  InteractReleased(BP_Spawn_GasBarrel...)` before the crate's Pressed/Released; `after: menu_open=false`, crate target change
-  only `RolledOnOpenItems` (no `DataBlock_WasOpened`). Passing runs: 1 teleport, Pressed/Released on the crate only, menu_open=true.
-  So the first standing spot did not highlight the crate (a gas barrel next to it did), the tool moved on, and the press that
-  did reach the crate did not open the menu within the 10 s check. The inventory menu did exist ~10 s later (the following
-  transfer step passed), i.e. the guest's container UI was not broken, only late or the press ineffective.
-- Across all stored results: guest_menu_open_after_interact FAIL 41 of ~170 runs (about 1 in 4), always the same signature.
-- New runs on this lane (soak-time load absent, one pair): lootsync 16/16 pass; playpath 9 runs, 8 clean, 1 failed on another flake
-  (below); the new interact retry never fired (`PT|info act2 retry` absent) and the original menu failure did not recur.
-- lootsync failing run 20261120-160948: host full list 378 entities, guest `purged ... 364 host actors (claimed 6, spawned 318)`
-  (other runs: 378/331 at the same point); no `could not make` line. The missing container's class/position was not logged.
-- Separate flake seen in playpath 20261120-170227 (client): `PT|error in visual.lua:930 ... visual.lua:376: attempt to call a
-  TrivialObject value (method 'K2_DestroyActor')` in `dropAll` (a copy the game already freed reads as live).
+- playpath failure signature (every failing run, 20261120-151604, 163029, 175213, 180211, 180805, 181158, 184xxx):
+  interact tool report `approach: teleported 2 time(s)` and `fired: InteractReleased(BP_Spawn_GasBarrel_PlacedOnly...)` before the
+  crate's Pressed/Released; crate target change only `RolledOnOpenItems` (no `DataBlock_WasOpened`). Passing: 1 teleport, no barrel.
+  The first standing spot highlights a gas barrel beside the crate, the tool moves on, and the crate is pressed but never opens.
+- Rate on this lane: 5 of 14 playpath runs (soak: about 1 in 4 over all stored results, 41 of ~170).
+- In the failing runs `IsPlayerMenuOpen` is false for 90 s, but an inventory widget with a TransferContainer exists from second 1.
+  That widget is stale: the next steps grab from the **car trunk** (`PT|loot send S I:Inventory_Trunk`, no second `send S L1`),
+  and the host's crate keeps its 4 items (`p2_host_container_lost_item`). Retrying the interact from 4 other sides at 80 uu in one
+  run did not open the crate either (the retry did not get logged results then).
+- lootsync failing run 20261120-160948: host always lists 40 lootables (29 of 29 runs); the guest log has `purged 54 own
+  actors, 364 host actors (claimed 6, spawned 318)` where the other runs show 378/331 at the F line. 14 entities of the host's
+  378 had no entry on the guest when F was handled, and no `loot could not make` line. The missing container's class and position
+  were not logged.
+- visual.lua error in playpath 20261120-170227 (client): `PT|error in visual.lua:930 ... visual.lua:376: attempt to call a
+  TrivialObject value (method 'K2_DestroyActor')`, in `dropAll` (runs when the guest loads a new map/zone or the host resets the
+  visual list): a copy the game already freed reads as live but has no methods. Player impact: the pcall of the tick caught it
+  (it is an error log, not a crash), but the rest of dropAll (clearing `mine`, `todo`, `specs`) did not run, so the guest could keep
+  stale entries across the load. Rare (1 of 25 runs here).
 
 ## Derived
-- playpath failure is the bot (interact tool/approach), not the mod: the menu code path works when the press reaches the crate.
-- Fix: playpath now waits up to 40 s for the menu and presses the interact again once after 8 s without a menu.
-- visual.lua dropAll: the destroy is in a pcall now (1 line).
+- playpath: the bot's interact step is flaky, not the mod's container UI: a press that never opens the crate leaves a stale widget
+  that fooled `IsPlayerMenuOpen`/widget based detection. Whether the barrel highlight really blocks the crate in the game is
+  unproven (Guess).
+- Fix in the scenario: the menu check now requires a widget whose TransferContainer is the crate's own container and
+  `IsPlayerMenuOpen`; if it is not up 4 s after the interact the guest is placed 80 uu from the crate on another side (180, 90,
+  -90, 0 deg) and the interact repeated (approach=false), up to 4 times.
+- visual.lua dropAll: the destroy is in a pcall now.
 
 ## Guesses
-- lootsync: the host's test `lootables()` counts a lootable that the host scan did not register (scan needs `ids.settled`
-  and `alive(InventoryContainer)`), or the guest lost one copy after the list; the guest log shows neither.
+- playpath: the barrel's highlight keeps the press (Released arrives for the barrel after the crate's) so the crate's press does not
+  complete; a second spot fixes it.
+- lootsync: 14 of 378 A lines yielded no entity at F (replica.adopt refused because a D arrived first, or a silent early return in
+  onAdd). One of them was a lootable.
 
 ## Unknowns
-- Which container was missing; the failure did not reproduce in 16 runs here (it was 1 of 46 on the soak, once on 2026-11-17).
-  lootsync.lua now logs `hostonly <row>` / `guestonly <row>` in the `PT|info lootable match` line, so the next occurrence names
-  the class and position. No mod change was made for it: a fix without the cause would be a guess.
+- Which container was missing in lootsync 160948; no reproduction in 21 lootsync runs here. lootsync.lua now logs `hostonly <row>` /
+  `guestonly <row>` in the `PT|info lootable match` line, so the next occurrence names class and position. No mod change for it
+  (a fix without the cause is a guess). Next step if it recurs: log, in loot.lua handle("F"), the ids of the host's list that
+  have no `ents` entry.
