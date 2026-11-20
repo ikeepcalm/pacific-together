@@ -50,7 +50,8 @@ return function(T)
             gpc = L.remotePCs()[1]
             local tesla
             for _, o in ipairs(FindAllOf("BP_Hazard_Tesla_C") or {}) do
-                if T.inWorld(o) and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) then tesla = tesla or o end
+                -- the map has several Teslas and FindAllOf order varies between runs: always the one with the largest X (the site with the car-part box beside it)
+                if T.inWorld(o) and not o:HasAnyInternalFlags(EInternalObjectFlags.PendingKill) and (not tesla or o:K2_GetActorLocation().X > tesla:K2_GetActorLocation().X) then tesla = o end
             end
             assert(tesla, "no map Tesla")
             local l = tesla:K2_GetActorLocation()
@@ -110,15 +111,36 @@ return function(T)
         end
         padTest("bouncepad", "bounce", 60)
         padTest("nudgepad", "nudge", 200) -- the pad mesh itself rises and lifts a guest ~100 uu without the hook (mutation run), the hook adds repeated launches (~340)
-        -- nudge pad smart launch (docs/spikes/nudgepad-smart.md): a guest moving +X onto a pad with an anomaly (a landmine) 1500 uu ahead is arced toward it
-        -- (speed 800 straight at it: small sideways offset); the plain up impulse lets the 257 uu/s sideways velocity carry on (offset ~600). Headless input does not walk a character, so the host's copy of the guest's velocity
+        -- nudge pad smart launch (docs/spikes/nudgepad-smart.md): a guest moving 40 degrees off +X onto a pad with an anomaly (a landmine ~1500 uu ahead, 15 degrees off +X) is arced toward it
+        -- (speed ~1100: sideways offset ~235 at 700 uu of +X); the plain up impulse lets the 257 uu/s sideways velocity carry on (offset ~590 or never 700 uu). Headless input does not walk a character, so the host's copy of the guest's velocity
         -- (what the pad hook reads) is set to 400 uu/s, 40 degrees off +X for a few seconds instead. Mutation nosmartlaunch.
         local pad2, mine
+        -- the Tesla spot has a parked car part's box a few uu from the guest: its collision slid the launched guest along a fixed line (the "two frames later" loss,
+        -- nudgepad-smart.md). The guest first moves to open ground: a spot with ground near the Tesla height and 1300 uu of free sweep along +X.
+        add({ run = function()
+            local KSL, gc = UEHelpers.GetKismetSystemLibrary(), L.guestChar()
+            local zero = { R = 0, G = 0, B = 0, A = 0 }
+            local picked
+            for _, o in ipairs({ { -2500, 0 }, { 0, -2500 }, { 0, 2500 }, { -2500, 2500 }, { -4000, 0 }, { 2500, 0 }, { -2500, -2500 }, { -6000, 0 } }) do
+                local x, y = gl.X + o[1], gl.Y + o[2]
+                local hit = {}
+                if KSL:LineTraceSingle(gc, { X = x, Y = y, Z = gl.Z + 1500 }, { X = x, Y = y, Z = gl.Z - 1500 }, 0, false, { gc }, 0, hit, true, zero, zero, 0) then
+                    local z = hit.ImpactPoint.Z + 110
+                    local sw = {}
+                    local blocked = KSL:SphereTraceSingleForObjects(gc, { X = x, Y = y, Z = z }, { X = x + 1300, Y = y + 350, Z = z }, 40, { 1, 7, 3, 12, 0, 6, 8, 13 }, false, { gc }, 0, sw, true, zero, zero, 0)
+                    T.log("PT|info smart test spot %d,%d ground z=%.0f (tesla %.0f) sweep blocked %s", o[1], o[2], z, gl.Z, tostring(blocked))
+                    if not blocked and math.abs(z - gl.Z) < 400 then picked = { X = x, Y = y, Z = z } break end
+                end
+            end
+            assert(picked, "no open spot for the smart test")
+            PTNative_MsgToGuest(gpc:GetAddress(), "t.tp", string.format("%.0f\t%.0f\t%.0f", picked.X, picked.Y, picked.Z))
+            pcall(function() gc:K2_TeleportTo(picked, { Pitch = 0, Yaw = 0, Roll = 0 }) end)
+        end })
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.vreset", "1") end })
-        add({ wait = 4 })
+        add({ wait = 6 })
         add({ run = function()
             local at = L.guestChar():K2_GetActorLocation()
-            mine = spawn(CLS.mine, at.X + 1500, at.Y, at.Z)
+            mine = spawn(CLS.mine, at.X + 1450, at.Y + 390, at.Z) -- 15 degrees off +X: inside the 45 degree cone of the 40 degree velocity even after the guest drifts 200 uu
             T.log("PT|info smart test: landmine %s, guest at %.0f,%.0f,%.0f", T.name(mine), at.X, at.Y, at.Z)
             PTNative_MsgToGuest(gpc:GetAddress(), "t.inject", "1") -- the guest forces its own velocity too, else the host's corrections pull it back
             local n, gc = 0, L.guestChar()
@@ -130,13 +152,11 @@ return function(T)
                 return false
             end)
         end })
-        -- info only (2026-11-20): the guest's smart launch loses its horizontal part two frames later under the forced test velocity
-        -- (2 of 6 passes, docs/spikes/nudgepad-smart.md); a real walking guest is a hand check. Gating check again once that is solved.
-        add({ wait = 15 })
-        add({ run = function()
+        add({ check = "guest_nudged_toward_anomaly", timeout = 25, cond = function()
             poll()
-            T.log("PT|info smart test (info only) guest sideways offset at 700 uu of +X travel %.0f (-1 = never got there; < 330 = toward the anomaly)", guestMaxVx)
+            return guestMaxVx >= 0 and guestMaxVx < 330 -- sideways offset at 700 uu of +X travel (smart arc ~235 here, plain impulse ~590 or never)
         end })
+        add({ wait = 2 })
         add({ run = function() if pad2 then pad2:K2_DestroyActor() end; mine:K2_DestroyActor() end })
         add({ run = function() PTNative_MsgToGuest(gpc:GetAddress(), "t.end", "1") end })
         add({ wait = 3 })
