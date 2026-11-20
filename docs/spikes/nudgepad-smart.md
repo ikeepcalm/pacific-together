@@ -42,3 +42,30 @@
 - The host's own character on the same kind of pad (pad present, forced velocity toward the anomaly) keeps its launch (668,339,632 constant for 2 s). So the difference is the guest's networked movement, most likely the test's forced `Velocity` writes (not real input) which the saved moves / host replay do not agree with; a really walking guest has not been tried.
 - Passes seen: 140627 (26/26, LaunchCharacter) and 133028 (26/26, earlier code); failures: 140918, 141334, 141xxx, 142116. Treat the scenario check as unreliable until a walking guest (or a real input path) is used; the mod code path itself is unchanged in behaviour by the launch call.
 - Hand check needed: two players, the guest walks onto a nudge pad toward an anomaly.
+
+## Follow-up 2026-11-20 (lane nudge3): the "two frames later" loss, cause found; the scenario gate is back
+
+Results: 20261120-165923..172045 (probes, anomwake2, folders `*-nudge3-anomwake2`), gating runs 20261120-172331, 172551, 172818 and 173633, 173847, 174107 (26/26 each), mutation `nosmartlaunch` 173102 and 174340 (25/26, only `guest_nudged_toward_anomaly` fails), session 20261120-173408 (40/40).
+
+### Observations
+
+- A per-tick trace on both sides (velocity, location, sphere sweeps around the capsule): the host's copy lost the horizontal part on its first movement tick after the launch and the guest followed at once. Z was untouched. The new XY velocity was always the launch velocity projected onto one fixed horizontal line (-73 degrees):
+  (819,-64) -> (88,-290) and (792,163) -> (22,-71) both equal `(v . t) t` with t = (0.292,-0.956). No plane constraint was set (`bConstrainToPlane` false).
+- At that spot (guest at about 69900,-35650,z 8213, Tesla +400 uu) object sweeps from the guest hit `BP_CarPart_Interactive_C ... .Box` 2-7 uu away with impact normal (-0.957,-0.289), a surface at -73 degrees, for headings 0-90 and 300-330. A Visibility-channel `LineTraceSingle` did not see it; the Pawn movement sweep does.
+- The scenario picks its Tesla with `FindAllOf`, whose order differs between runs. Sites seen: guest at ~69900,-35650,z 8213 (the box, every failing run) and ~31420,-16300,z 3700 (no box; the runs that passed). This also explains "2 of 6 passes".
+- Mutation `nosmartlaunch`: the check fails (the plain impulse keeps the sideways velocity); smart arc offset at 700 uu of +X is 235 uu on the open spot.
+
+### Derived
+
+- The guest was launched toward +X beside a car part's box and slid along its wall: ordinary game collision, not network correction. Neither `AddImpulse`, a direct `Velocity` set nor `LaunchCharacter` was at fault; the mod's launch code is unchanged.
+
+### Fix (scenario only)
+
+- The smart test first moves the guest to open ground (first of 8 offsets from the Tesla spot with ground within 400 uu of the Tesla height and 1300 uu of free object sweep along +X), the landmine sits 15 degrees off +X (stays in the 45 degree cone after the guest drifts), and the Tesla is chosen by largest X so the site is stable. `guest_nudged_toward_anomaly` gates again (offset < 330).
+
+### Guesses / unknowns
+
+- Guess: the older "pad removed or destroyed keeps the vector" runs happened at the open Tesla site; not checked, so it is not shown that the pad is irrelevant.
+- Guess: the host-character comparison (668,339,632 held) was taken somewhere without the box.
+- Not exercised: the new open-spot search at the box site (69900,-35650): after the largest-X Tesla choice that site did not come up in six runs (its Tesla was apparently not the largest X or not loaded). Without the open-spot step that site would still fail.
+- Hand check still open: a really walking guest on a nudge pad (normal collision applies).
