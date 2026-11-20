@@ -1647,3 +1647,39 @@ offered as "use anything you like; a mention is appreciated"). The author asked 
 - Whether the game has a per-object restore (SpawnHistory or save-system actor restore) callable on a client world.
 - Whether lootable save GUID names exist on a freshly generated zone (before its first save) or only after a restore.
 - 2026-11-20: the owner dropped these ideas (no code taken); work continues on our own 1.0 list.
+
+## 2026-11-20 unattended (owner away; from 113365d / 0.9.6, lanes on Sonnet, lead on pair1/pair2), candidate 0.9.7 protocol 10
+
+### Merged (scenario + failing mutation; details in each spike)
+- guestdeath (669f466): a guest hit to the minimum is latched as lethal (the game regenerates 1.0 -> 1.1 ... so `<= 1.01` after the 8 s
+  arrival grace missed it; up to 80 s). Death now within ~8 s of the arrival release; a living guest at 2-5 % that never touched the
+  minimum is not dead. playerhealth 28/28 x2, mutation slowdeath 26/28, new guest_low_health_not_dead. Baselines before the fix:
+  playerhealth 27/27, 27/27, 25/27 (11-18 failure reproduced). worldzone 26/26 x3, the 11-18 generator flake did not reproduce.
+  Gap: a guest healed by an item from the minimum to 2-5 % inside the grace is still treated as dead. docs/spikes/guestdeath.md.
+- anomfin (ac85ca9): Blacksmith was no co-op bug (a hazard's ground spline fails inside a safety zone; the zone fixture's start area is
+  one); anomvis slams outside it (host Drop/Hit, guest sees spears; mutation nosmhost). Abductor item hunts: smhost no longer skips
+  the grabber, its own machine hunts loose items (anomcarry host_grabber_hunts_item, nosmhost); anommove's car driver stands aside.
+  Bollard yaw: anomvis rows now carry the root rotation (guest_bollard_yaw_matches, nobollardyaw). Host AV crash in anomvis sampling a
+  dead BombRock/Mimic fixed. Grabber lag checks were too tight (check fixes only). docs/spikes/anomfin.md.
+- anomfin2 (1c45e15): anomvis guest_hurt_by_spear - a fresh Titan's Bone hits by itself ~1 s after spawn; baseline now before the spawn.
+- nudgepad (3cfa793): the pad's smart launch toward an anomaly for a far guest (host redoes the game's tag/cone search, the game's arc
+  solver; UE4SS zeroes the helper's tag struct from Lua). anomwake2 guest_nudged_toward_anomaly, mutation nosmartlaunch.
+  docs/spikes/nudgepad-smart.md.
+- anomfin3 (9ef4701): anomwake guest_item_stolen was stealer placement (core hangs 1000-1700 uu from its spawn); scenario places the
+  core. Lead: pickpocket reach for a guest 1200 -> 1500 uu (the game's value for the host), 4f61606; anomwake 22/22, anomalies3 27/27.
+- Lead: protocol 10 (g.anomvis rotation, g.anom3.bounce smart flag), version 0.9.7, anomvis added to the suite, runloop same_world
+  reads the guest's latest report (stale weather snapshot, f6ce01b; runloop 49/49 after).
+- Interloper: not spawnable in the fixture (DLC plugin class not loaded); hand check.
+
+### Gates on the candidate (mod 65ad6a8 = b7edde0 mod; later commits listed above)
+- Full suite (2 shards, pair1/pair2, 11:37-13:20): 82/90. Reruns: pausemenu 23/23 (first run: guest exited during UE4SS init, no
+  mod code ran), runloop 49/49 (check fixed), stations 50/50, anomwake 22/22 x3 (placement fix), anomthrow 18/18 x3 (lane pair).
+  Still failing: guestparts (a different check each run: no_ghosts, host_door_scrapped_by_guest; known flaky under load),
+  guestexitmove 1 of 3 passed (guest never stands still after leaving the moving car; the bot's door press finds no allowed door;
+  30/30 in every earlier suite; not investigated), anomwake2 (smart-launch check, see below).
+  local/test-results/suite-20261120-113733-1of2.txt, suite-20261120-113734-2of2.txt, rerun files suite-20261120-1249*..1357*.
+- Lag/loss 150 ms / 2 %, core: session 46/46, runloop 55/55, lootsync 40/40, playpath 45/45, carsync 53/53 (lead-lagcand-core.log).
+- Lag/loss, anomaly scenarios: anomcarry 28/28, anommove 28/28, smhost 30/30, playerhealth 34/34; anomvis 30/32 and 29/32 (a different
+  "follows" check each run: bubblegum/tumbler, pufferfish; once host_blacksmith_slams with the machine idle 60 s), anomalies2 33/34
+  (guest_pulled_by_grabber: guest hurt, speed 0; also failed under lag on 113365d this morning), anomwake2 31/32 (smart launch).
+  Baseline on 113365d before the merges: 9 anomaly scenarios, only grabber x2 and bollard failed (fixed or widened since).
